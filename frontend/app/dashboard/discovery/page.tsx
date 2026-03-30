@@ -269,12 +269,62 @@ function DiscoveryPageInner() {
 
   // ── LOADING ──
   if (loading) {
+    const STAGES = [
+      { label: 'Finding competitors in your space...', est: 15 },
+      { label: 'Analyzing sites with TinyFish...', est: 45 },
+      { label: 'Generating UI transformation...', est: 20 },
+      { label: 'Running full analysis pipeline...', est: 5 },
+    ]
+    const currentStage = STAGES.find(s => loadingStatus.toLowerCase().includes(s.label.split('...')[0].toLowerCase().slice(0, 10))) || STAGES[0]
+    const stageIdx = STAGES.indexOf(currentStage)
+    const completedEst = STAGES.slice(0, stageIdx).reduce((a, s) => a + s.est, 0)
+    const totalEst = STAGES.reduce((a, s) => a + s.est, 0)
+    const progressPct = Math.min(95, ((completedEst + currentStage.est * 0.5) / totalEst) * 100)
+
     return (
       <div className="flex items-center justify-center min-h-[70vh]">
-        <div className="text-center">
-          <div className="w-10 h-10 rounded-full mx-auto mb-5 animate-spin" style={{ border: '2px solid rgba(255,255,255,0.06)', borderTopColor: '#a855f7' }} />
-          <p className="text-white font-medium mb-1">{loadingStatus}</p>
-          <p className="text-[12px]" style={{ color: 'rgba(255,255,255,0.25)' }}>TinyFish visits each site in a real browser.</p>
+        <div className="w-full max-w-md px-6">
+          <div className="text-center mb-8">
+            <h2 className="text-xl font-bold text-white mb-2">Analyzing Your Space</h2>
+            <p className="text-[13px]" style={{ color: 'rgba(255,255,255,0.4)' }}>{loadingStatus}</p>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full h-1.5 rounded-full mb-4" style={{ background: 'rgba(255,255,255,0.06)' }}>
+            <div
+              className="h-full rounded-full transition-all duration-1000 ease-out"
+              style={{ width: `${progressPct}%`, background: 'linear-gradient(90deg, #7c3aed, #a855f7)', boxShadow: '0 0 12px rgba(168,85,247,0.3)' }}
+            />
+          </div>
+
+          {/* Stages */}
+          <div className="space-y-2.5">
+            {STAGES.map((stage, i) => {
+              const isDone = i < stageIdx
+              const isActive = i === stageIdx
+              return (
+                <div key={i} className="flex items-center gap-3">
+                  {isDone ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                  ) : isActive ? (
+                    <div className="w-3.5 h-3.5 rounded-full animate-spin" style={{ border: '2px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7' }} />
+                  ) : (
+                    <div className="w-3.5 h-3.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }} />
+                  )}
+                  <span className="text-[12px]" style={{ color: isActive ? 'rgba(255,255,255,0.7)' : isDone ? 'rgba(34,197,94,0.6)' : 'rgba(255,255,255,0.2)' }}>
+                    {stage.label}
+                  </span>
+                  <span className="text-[10px] font-mono ml-auto" style={{ color: 'rgba(255,255,255,0.15)' }}>
+                    ~{stage.est}s
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          <p className="text-[10px] text-center mt-6" style={{ color: 'rgba(255,255,255,0.2)' }}>
+            Estimated total: ~{totalEst}s — TinyFish visits each site in a real browser
+          </p>
         </div>
       </div>
     )
