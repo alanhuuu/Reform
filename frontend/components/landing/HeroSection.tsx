@@ -260,13 +260,13 @@ export default function HeroSection() {
               </div>
             </div>
 
-            <div className="flex gap-4 px-6 pt-7 pb-8">
+            <div className="flex flex-col md:flex-row gap-4 px-4 sm:px-6 pt-5 sm:pt-7 pb-6 sm:pb-8">
               <HeroBrowserFrame label="Before">
                 <FlowDemoCard steps={BEFORE_STEPS} variant="before" caption="5 clicks to deploy" />
               </HeroBrowserFrame>
 
               {/* Arrow divider */}
-              <div className="flex flex-col items-center justify-center gap-2 px-1 flex-shrink-0">
+              <div className="hidden md:flex flex-col items-center justify-center gap-2 px-1 flex-shrink-0">
                 <div
                   className="w-8 h-8 rounded-full flex items-center justify-center"
                   style={{

@@ -54,7 +54,7 @@ export default function InsightsPage() {
   }
 
   return (
-    <div className="px-8 py-8">
+    <div className="px-4 sm:px-8 py-6 sm:py-8">
       {/* Header */}
       <div className="mb-2">
         <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(204,195,216,0.5)' }}>Competitor Intelligence</p>

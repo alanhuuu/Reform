@@ -9,10 +9,10 @@ export default function Navbar() {
       className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl border-b"
       style={{ background: 'rgba(19,17,28,0.85)', borderColor: 'rgba(255,255,255,0.05)' }}
     >
-      <div className="max-w-7xl mx-auto px-8 h-16 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 h-14 sm:h-16 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-3 group flex-shrink-0">
-          <Image src="/reform_logo.png" alt="Reform" width={180} height={56} className="object-contain" />
+          <Image src="/reform_logo.png" alt="Reform" width={180} height={56} className="object-contain max-w-[120px] sm:max-w-[180px]" />
         </Link>
 
         {/* Right side */}

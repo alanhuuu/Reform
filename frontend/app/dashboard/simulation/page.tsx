@@ -35,7 +35,6 @@ const HEATMAP_TYPES = [
   { key: 'attention', label: 'Attention' },
   { key: 'click', label: 'Click' },
   { key: 'scroll', label: 'Content Density' },
-  { key: 'eye', label: 'Eye Tracking' },
 ]
 
 
@@ -335,7 +334,6 @@ const [loadingScreens, setLoadingScreens] = useState(true)
     }
 
     setLoadingAnalysis(true)
-    setAnalysis(null)
 
     // Check if transform screenshots exist — use them for the selected route
     const storedTransform = sessionStorage.getItem('refineui_transform')
@@ -404,7 +402,7 @@ const [loadingScreens, setLoadingScreens] = useState(true)
   const scoreDelta  = beforeScore !== null && afterScore !== null ? afterScore - beforeScore : null
 
   return (
-    <div className="px-8 py-4">
+    <div className="px-4 sm:px-8 py-4">
       {/* Header */}
       <div className="flex items-center gap-3 mb-2 mt-3">
         <span className="text-xs" style={{ color: 'rgba(204,195,216,0.5)' }}>AI Predicted Metrics</span>
@@ -492,7 +490,7 @@ const [loadingScreens, setLoadingScreens] = useState(true)
         <div className="space-y-4">
           {/* Side-by-side comparison windows */}
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* Before window */}
               {loadingAnalysis ? (
                 <AnalysisLoadingWindow label="Before" />
@@ -568,7 +566,7 @@ const [loadingScreens, setLoadingScreens] = useState(true)
 
           {/* Stats row — below windows, horizontal layout */}
           {analysis && (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
 
               {/* Friction Index */}
               <div className="rounded-xl p-4" style={{ background: '#1c1a25', border: '1px solid rgba(74,68,85,0.15)' }}>

@@ -142,7 +142,7 @@ function DiscoveryPageInner() {
   // ── COMPLETED ──
   if (completed && discovery) {
     return (
-      <div className="flex items-start justify-center px-6 py-12">
+      <div className="flex items-start justify-center px-4 sm:px-6 py-8 sm:py-12">
         {/* Success notification popup */}
         {showNotification && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }}>
@@ -223,7 +223,7 @@ function DiscoveryPageInner() {
           </div>
 
           {/* Stats row */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
             {[
               { label: 'Competitors Found', value: discovery.competitors.length.toString(), sub: 'in category' },
               { label: 'Sites Analyzed', value: discovery.selected_for_analysis.length.toString(), sub: 'with TinyFish' },

@@ -48,13 +48,13 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
       <GlobalProgressBar />
 
       {/* Navbar — matches landing page exactly */}
-      <header className="fixed top-0 left-0 right-0 z-50 px-6 py-3 flex justify-between items-center" style={{ background: 'rgba(19,17,28,0.8)', backdropFilter: 'blur(16px)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <div className="flex items-center gap-8">
-          <Link href="/" className="flex items-center gap-2.5">
-            <Image src="/reform_logo.png" alt="Reform" width={160} height={50} className="object-contain" />
+      <header className="fixed top-0 left-0 right-0 z-50 px-3 sm:px-6 py-3 flex justify-between items-center" style={{ background: 'rgba(19,17,28,0.8)', backdropFilter: 'blur(16px)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-3 sm:gap-8 min-w-0">
+          <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
+            <Image src="/reform_logo.png" alt="Reform" width={160} height={50} className="object-contain max-w-[100px] sm:max-w-[160px]" />
           </Link>
 
-          <nav className="flex items-center gap-1">
+          <nav className="hidden sm:flex items-center gap-1">
             {NAV_ITEMS.map((item, i) => {
               const isActive = pathname === item.href
               const isLocked = item.href === '/dashboard/discovery' && progressState.active
@@ -72,13 +72,27 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex items-center gap-3">
-          <button onClick={() => { sessionStorage.removeItem('refineui_analysis'); sessionStorage.removeItem('refineui_discovery'); sessionStorage.removeItem('refineui_answers'); sessionStorage.removeItem('refineui_analysis_cache'); sessionStorage.removeItem('refineui_transform'); sessionStorage.removeItem('refineui_repo'); window.location.href = '/dashboard/discovery' }} className="px-3 py-1.5 rounded-lg text-[11px] font-medium" style={{ color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}>
-            Start New Analysis
+          <button onClick={() => { sessionStorage.removeItem('refineui_analysis'); sessionStorage.removeItem('refineui_discovery'); sessionStorage.removeItem('refineui_answers'); sessionStorage.removeItem('refineui_analysis_cache'); sessionStorage.removeItem('refineui_transform'); sessionStorage.removeItem('refineui_repo'); window.location.href = '/dashboard/discovery' }} className="px-2 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-medium" style={{ color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            New Analysis
           </button>
         </div>
       </header>
 
-      <main className="pt-16 min-h-screen relative" style={{ zIndex: 1 }}>{children}</main>
+      {/* Mobile nav — visible on small screens only */}
+      <div className="fixed top-[49px] left-0 right-0 z-40 sm:hidden overflow-x-auto" style={{ background: 'rgba(19,17,28,0.95)', backdropFilter: 'blur(16px)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+        <div className="flex items-center gap-1 px-3 py-2">
+          {NAV_ITEMS.map((item, i) => {
+            const isActive = pathname === item.href
+            return (
+              <Link key={item.href} href={item.href} className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors whitespace-nowrap flex-shrink-0" style={isActive ? { background: 'rgba(255,255,255,0.06)', color: 'white' } : { color: 'rgba(255,255,255,0.35)' }}>
+                {item.label}
+              </Link>
+            )
+          })}
+        </div>
+      </div>
+
+      <main className="pt-[88px] sm:pt-16 min-h-screen relative" style={{ zIndex: 1 }}>{children}</main>
     </div>
   )
 }
