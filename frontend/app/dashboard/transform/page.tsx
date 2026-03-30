@@ -738,7 +738,7 @@ export default function TransformPage() {
   useEffect(() => {
     if (autoStartedRef.current || pipelineStep !== 'idle' || transformResult) return
     const repoUrl = sessionStorage.getItem('refineui_repo')
-    if (!repoUrl || !session?.accessToken) return
+    if (!repoUrl) return
     autoStartedRef.current = true
 
     // Extract owner/repo from URL like https://github.com/owner/repo
@@ -753,7 +753,7 @@ export default function TransformPage() {
       homepage: null, html_url: repoUrl,
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.accessToken, pipelineStep])
+  }, [pipelineStep])
 
   function handleCopyCode() {
     if (!transform?.code) return
