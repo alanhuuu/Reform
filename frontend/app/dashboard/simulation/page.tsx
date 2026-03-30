@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { apiUrl } from '@/lib/api'
 
 // ── Types ───────────────────────────────────────────────────────────
 interface Annotation {
@@ -300,7 +301,7 @@ const [loadingScreens, setLoadingScreens] = useState(true)
     const repoUrl = sessionStorage.getItem('refineui_repo')
     if (repoUrl) {
       setLoadingScreens(true)
-      fetch(`http://localhost:8000/repo-pages?repo_url=${encodeURIComponent(repoUrl)}`)
+      fetch(`${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}`)
         .then((res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
           return res.json()
@@ -352,10 +353,10 @@ const [loadingScreens, setLoadingScreens] = useState(true)
     const repoUrl = sessionStorage.getItem('refineui_repo') || ''
     const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
     const repoName = match ? match[1].split('/')[1] : ''
-    const deployedBase = repoName ? `https://${repoName}.vercel.app` : 'http://localhost:3000'
+    const deployedBase = repoName ? `https://${repoName}.vercel.app` : ''
     const targetUrl = `${deployedBase}${selectedScreen.route}`
 
-    fetch('http://localhost:8000/analyze-page', {
+    fetch(apiUrl('/analyze-page'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

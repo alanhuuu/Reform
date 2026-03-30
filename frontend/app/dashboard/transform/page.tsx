@@ -4,6 +4,12 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import Editor from '@monaco-editor/react'
+import { apiUrl } from '@/lib/api'
+import TransformSummaryHeader from '@/components/dashboard/TransformSummaryHeader'
+import TransformCarousel from '@/components/dashboard/TransformCarousel'
+import RepoWideImprovementsPanel from '@/components/dashboard/RepoWideImprovementsPanel'
+import { adaptLegacyResult } from '@/components/dashboard/TransformTypes'
+import type { MultiPageTransformResult } from '@/components/dashboard/TransformTypes'
 
 interface CommitEntry {
   hash: string
@@ -295,7 +301,7 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
           const formData = new FormData()
           formData.append('audio', blob, `recording.${mimeType.includes('webm') ? 'webm' : 'mp4'}`)
 
-          const res = await fetch('http://localhost:8000/transcribe', {
+          const res = await fetch(apiUrl('/transcribe'), {
             method: 'POST',
             body: formData,
           })
@@ -371,7 +377,7 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
       const storedAnalysis = sessionStorage.getItem('refineui_analysis')
       const analysisCtx = storedAnalysis ? JSON.parse(storedAnalysis) : null
 
-      const res = await fetch('http://localhost:8000/voice-chat', {
+      const res = await fetch(apiUrl('/voice-chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -419,7 +425,7 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
     setPhase('responding')
 
     try {
-      const res = await fetch('http://localhost:8000/tts', {
+      const res = await fetch(apiUrl('/tts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
@@ -688,6 +694,7 @@ export default function TransformPage() {
   const [repoSearch, setRepoSearch] = useState('')
   const [commitLoading, setCommitLoading] = useState(false)
   const [commitResult, setCommitResult] = useState<{ sha: string; url: string } | null>(null)
+  const [multiPageResult, setMultiPageResult] = useState<MultiPageTransformResult | null>(null)
 
   useEffect(() => {
     if (session?.accessToken && repos.length === 0 && pipelineStep === 'idle') {
@@ -715,6 +722,14 @@ export default function TransformPage() {
         setTransformResult(t.result); setCodeAnalysis(t.codeAnalysis)
         setSelectedTarget(t.target); setRepoName(t.repoName)
         setRepoBranch(t.branch || 'main'); setPipelineStep('complete')
+        // Derive multi-page result for new UI
+        if (t.result) {
+          if (t.multiPageResult) {
+            setMultiPageResult(t.multiPageResult)
+          } else {
+            setMultiPageResult(adaptLegacyResult(t.result, t.repoName || '', t.target || ''))
+          }
+        }
       } catch { /* */ }
     }
   }, [])
@@ -756,7 +771,7 @@ export default function TransformPage() {
     setPipelineStep('ingesting')
     let files: FileEntry[]
     try {
-      const res = await fetch('http://localhost:8000/ingest-repo', {
+      const res = await fetch(apiUrl('/ingest-repo'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ github_url: `https://github.com/${repo.full_name}`, branch: repo.default_branch || 'main', access_token: session?.accessToken || null }),
       })
@@ -767,7 +782,7 @@ export default function TransformPage() {
     setPipelineStep('analyzing')
     let target: string; let codeAnalysisResult: CodeAnalysis
     try {
-      const res = await fetch('http://localhost:8000/analyze-code', {
+      const res = await fetch(apiUrl('/analyze-code'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files }),
       })
@@ -778,13 +793,15 @@ export default function TransformPage() {
 
     setPipelineStep('transforming')
     try {
-      const res = await fetch('http://localhost:8000/transform-code', {
+      const res = await fetch(apiUrl('/transform-code'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files, target_file: target, design_intelligence: analysis || {}, user_intent: userIntent, repo_clone_url: `https://github.com/${repo.full_name}.git`, branch: repo.default_branch || 'main', access_token: session?.accessToken || '' }),
       })
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Transform failed') }
       const result: TransformResult = await res.json()
       setTransformResult(result); setPipelineStep('complete')
+      const adapted = adaptLegacyResult(result, repo.full_name, target)
+      setMultiPageResult(adapted)
       sessionStorage.setItem('refineui_transform', JSON.stringify({ result, codeAnalysis: codeAnalysisResult, target, repoName: repo.full_name, branch: repo.default_branch || 'main' }))
       const firstImpact = result.change_annotations[0]?.ux_impact?.split(',')[0]?.split('.')[0]?.trim()
       const commitLabel = firstImpact || result.transformed_files[0]?.diff_summary?.split('.')[0]?.trim()?.slice(0, 50) || 'Improve UI layout and polish'
@@ -805,7 +822,7 @@ export default function TransformPage() {
           ? impactParts[0].split(',')[0].split('.')[0].trim()
           : tf.diff_summary?.split('.')[0]?.trim() || 'Improve UI layout and polish'
         const commitMsg = `reform: ${commitTitle.slice(0, 60)}`
-        const res = await fetch('http://localhost:8000/commit-to-github', {
+        const res = await fetch(apiUrl('/commit-to-github'), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ repo_name: repoName, branch: repoBranch, file_path: selectedTarget, new_content: tf.updated_code, commit_message: commitMsg, access_token: session.accessToken }),
         })
@@ -854,7 +871,7 @@ export default function TransformPage() {
 
     try {
       const currentCode = sessionStorage.getItem('refineui_analysis') || ''
-      const res = await fetch('http://localhost:8000/suggest-edit', {
+      const res = await fetch(apiUrl('/suggest-edit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -940,18 +957,22 @@ export default function TransformPage() {
       <div className="w-full max-w-6xl space-y-10">
 
         {/* ── HEADER ── */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-3">UI Transformation</h1>
-          <div className="flex items-center justify-center gap-3">
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.15)' }}>
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a855f7', boxShadow: '0 0 6px rgba(168,85,247,0.4)' }} />
-              <span className="text-[11px] font-medium" style={{ color: 'rgba(168,85,247,0.8)' }}>
-                {pipelineStep === 'complete' ? (changeStatus === 'accepted' ? 'Applied' : changeStatus === 'rejected' ? 'Original Kept' : 'Ready for Review') : pipelineStep === 'idle' ? 'Select a Repository' : 'Processing...'}
-              </span>
+        {pipelineStep === 'complete' && multiPageResult ? (
+          <TransformSummaryHeader result={multiPageResult} commitResult={commitResult} />
+        ) : (
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-white mb-3">UI Transformation</h1>
+            <div className="flex items-center justify-center gap-3">
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.15)' }}>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a855f7', boxShadow: '0 0 6px rgba(168,85,247,0.4)' }} />
+                <span className="text-[11px] font-medium" style={{ color: 'rgba(168,85,247,0.8)' }}>
+                  {pipelineStep === 'idle' ? 'Select a Repository' : 'Processing...'}
+                </span>
+              </div>
+              <span className="text-[12px]" style={{ color: 'rgba(255,255,255,0.25)' }}>{repoName || `${analysis?.sources?.length || 0} sources analyzed`}</span>
             </div>
-            <span className="text-[12px]" style={{ color: 'rgba(255,255,255,0.25)' }}>{repoName || `${analysis?.sources?.length || 0} sources analyzed`}</span>
           </div>
-        </div>
+        )}
 
         {/* ── REPO PICKER ── */}
         {pipelineStep === 'idle' && (
@@ -999,132 +1020,15 @@ export default function TransformPage() {
           <PipelineProgress step={pipelineStep} repoName={repoName} targetFile={selectedTarget} />
         )}
 
-        {/* ── REAL BEFORE / AFTER PREVIEWS ── */}
-        {pipelineStep === 'complete' && transformResult && (
+        {/* ── MULTI-PAGE TRANSFORMATION SHOWCASE ── */}
+        {pipelineStep === 'complete' && multiPageResult && (
           <div>
-            {codeAnalysis && selectedTarget && (
-              <div className="rounded-xl px-5 py-3 mb-6 max-w-4xl mx-auto flex items-center gap-3" style={{ background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.1)' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.272 1.272L21 12l-5.816 1.916a2 2 0 00-1.272 1.272L12 21l-1.912-5.812a2 2 0 00-1.272-1.272L3 12l5.816-1.915a2 2 0 001.272-1.272L12 3z" /></svg>
-                <span className="text-[12px]" style={{ color: 'rgba(255,255,255,0.45)' }}>Reform selected <span className="font-mono text-white/70">{selectedTarget}</span> as the highest-impact surface to improve</span>
-              </div>
-            )}
-            {commitResult && (
-              <div className="rounded-xl px-5 py-3 mb-6 max-w-4xl mx-auto flex items-center justify-between" style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.15)' }}>
-                <div className="flex items-center gap-2">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                  <span className="text-[12px]" style={{ color: '#86efac' }}>Changes committed to GitHub</span>
-                  <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.25)' }}>{commitResult.sha.slice(0, 7)}</span>
-                </div>
-                <a href={commitResult.url} target="_blank" rel="noopener noreferrer" className="text-[11px] font-medium" style={{ color: 'rgba(168,85,247,0.7)' }}>View commit &rarr;</a>
-              </div>
-            )}
-            {/* Route being rendered */}
-            {transformResult.preview_route && !transformResult.preview_error && (
-              <div className="rounded-lg px-4 py-2 mb-4 max-w-4xl mx-auto flex items-center gap-2" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>Rendering actual route:</span>
-                <span className="text-[11px] font-mono" style={{ color: 'rgba(168,85,247,0.6)' }}>{transformResult.preview_route}</span>
-              </div>
-            )}
-
-            {/* Before / After preview cards — real pipeline data only */}
-            <div className="flex flex-col lg:flex-row gap-6">
-              <BrowserFrame label="Before">
-                {transformResult.before_screenshot ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={`data:image/png;base64,${transformResult.before_screenshot}`} alt="Before — real screenshot" className="w-full" style={{ minHeight: '280px', objectFit: 'cover', objectPosition: 'top' }} />
-                ) : (
-                  <div className="flex items-center justify-center" style={{ minHeight: '280px', background: '#0d0c16' }}>
-                    <div className="text-center px-6">
-                      <div className="w-10 h-10 rounded-full mx-auto mb-3 flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg>
-                      </div>
-                      <p className="text-[11px] font-medium mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>Preview loading</p>
-                      <p className="text-[10px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.15)' }}>{transformResult.preview_error || 'Building and rendering your app...'}</p>
-                    </div>
-                  </div>
-                )}
-              </BrowserFrame>
-              <div className="hidden lg:flex items-center justify-center">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', boxShadow: '0 0 30px rgba(124,58,237,0.3)' }}><span className="text-white text-lg">&rarr;</span></div>
-              </div>
-              <BrowserFrame label="After" accent>
-                {transformResult.after_screenshot ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={`data:image/png;base64,${transformResult.after_screenshot}`} alt="After — improved version" className="w-full" style={{ minHeight: '280px', objectFit: 'cover', objectPosition: 'top' }} />
-                ) : (
-                  <div className="flex items-center justify-center" style={{ minHeight: '280px', background: '#0d0c16' }}>
-                    <div className="text-center px-6">
-                      <div className="w-10 h-10 rounded-full mx-auto mb-3 flex items-center justify-center" style={{ background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.1)' }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.35)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg>
-                      </div>
-                      <p className="text-[11px] font-medium mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>Preview loading</p>
-                      <p className="text-[10px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.15)' }}>Applying changes and rendering...</p>
-                    </div>
-                  </div>
-                )}
-              </BrowserFrame>
-            </div>
-            {transformResult.change_annotations.length > 0 && (() => {
-              const typeOrder = ['flow', 'layout', 'spacing', 'component', 'visual']
-              const typeColors: Record<string, { bg: string; text: string; accent: string }> = {
-                flow: { bg: 'rgba(236,72,153,0.1)', text: 'rgba(236,72,153,0.7)', accent: 'rgba(236,72,153,0.15)' },
-                layout: { bg: 'rgba(59,130,246,0.1)', text: 'rgba(59,130,246,0.7)', accent: 'rgba(59,130,246,0.15)' },
-                spacing: { bg: 'rgba(34,197,94,0.1)', text: 'rgba(34,197,94,0.7)', accent: 'rgba(34,197,94,0.15)' },
-                component: { bg: 'rgba(245,158,11,0.1)', text: 'rgba(245,158,11,0.7)', accent: 'rgba(245,158,11,0.15)' },
-                visual: { bg: 'rgba(168,85,247,0.1)', text: 'rgba(168,85,247,0.7)', accent: 'rgba(168,85,247,0.15)' },
-              }
-              const grouped = typeOrder
-                .map(type => ({ type, items: transformResult.change_annotations.filter(a => a.change_type === type) }))
-                .filter(g => g.items.length > 0)
-              // Add any types not in typeOrder
-              const knownTypes = new Set(typeOrder)
-              const extras = transformResult.change_annotations.filter(a => !knownTypes.has(a.change_type))
-              if (extras.length > 0) grouped.push({ type: 'other', items: extras })
-
-              return (
-                <div className="mt-6 rounded-xl p-5 max-w-4xl mx-auto" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <h3 className="text-[11px] font-medium uppercase tracking-wider mb-5" style={{ color: 'rgba(255,255,255,0.3)' }}>What Changed</h3>
-                  <div className="space-y-5">
-                    {grouped.map(group => {
-                      const colors = typeColors[group.type] || typeColors.visual
-                      return (
-                        <div key={group.type}>
-                          <div className="flex items-center gap-2 mb-3">
-                            <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded" style={{ background: colors.bg, color: colors.text }}>{group.type}</span>
-                            <div className="flex-1 h-px" style={{ background: colors.accent }} />
-                            <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.15)' }}>{group.items.length} {group.items.length === 1 ? 'change' : 'changes'}</span>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                            {group.items.map((ann, i) => (
-                              <div key={i} className="rounded-lg p-3" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                                <p className="text-[11px] font-medium text-white/60 mb-1">{ann.region}</p>
-                                <p className="text-[11px] mb-1" style={{ color: 'rgba(255,255,255,0.4)' }}>{ann.description}</p>
-                                <p className="text-[10px]" style={{ color: colors.text }}>{ann.ux_impact}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })()}
-            {transformResult.change_summary.length > 0 && (
-              <div className="mt-4 rounded-xl p-5 max-w-4xl mx-auto" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <h3 className="text-[11px] font-medium uppercase tracking-wider mb-3" style={{ color: 'rgba(255,255,255,0.3)' }}>Improvement Summary</h3>
-                <ul className="space-y-1.5">{transformResult.change_summary.map((item, i) => (
-                  <li key={i} className="flex items-start gap-2 text-[12px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                    <svg className="mt-0.5 flex-shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(34,197,94,0.5)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                    {item}
-                  </li>
-                ))}</ul>
-              </div>
-            )}
+            <TransformCarousel pages={multiPageResult.pages} result={multiPageResult} />
+            <RepoWideImprovementsPanel result={multiPageResult} />
           </div>
         )}
         {/* ── TOOLBAR — only show when pipeline is complete ── */}
-        {pipelineStep === 'complete' && <div className="rounded-xl max-w-4xl mx-auto overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.2)' }}>
+        {pipelineStep === 'complete' && <div className="rounded-xl max-w-5xl mx-auto overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.2)' }}>
           {changeStatus === 'pending' ? (
             <div className="flex items-center justify-between px-5 py-4">
               <div className="flex items-center gap-2.5">

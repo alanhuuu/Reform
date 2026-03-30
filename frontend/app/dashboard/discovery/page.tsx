@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useProgress } from '@/components/dashboard/ProgressContext'
+import { apiUrl } from '@/lib/api'
 
 // Set to true to skip API calls and use mock data for local testing
 const MOCK_MODE = true
@@ -44,6 +45,10 @@ interface DiscoveryData {
 }
 
 export default function DiscoveryPage() {
+  return <Suspense><DiscoveryPageInner /></Suspense>
+}
+
+function DiscoveryPageInner() {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [currentStep, setCurrentStep] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -103,20 +108,20 @@ export default function DiscoveryPage() {
     try {
       setLoadingStatus('Finding competitors in your space...')
       updateProgress(10)
-      const discoverRes = await fetch('http://localhost:8000/discover-competitors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_description: description, style_goal: '' }) })
+      const discoverRes = await fetch(apiUrl('/discover-competitors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_description: description, style_goal: '' }) })
       if (!discoverRes.ok) throw new Error('Discovery failed')
       const discoveryData = await discoverRes.json()
 
       setLoadingStatus(`Analyzing ${discoveryData.selected_for_analysis.length} sites with TinyFish...`)
       updateProgress(35)
-      const analyzeRes = await fetch('http://localhost:8000/analyze-competitors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ urls: discoveryData.selected_for_analysis, style_goal: '' }) })
+      const analyzeRes = await fetch(apiUrl('/analyze-competitors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ urls: discoveryData.selected_for_analysis, style_goal: '' }) })
       if (!analyzeRes.ok) throw new Error('Analysis failed')
       const analysis = await analyzeRes.json()
 
       setLoadingStatus('Generating UI transformation...')
       updateProgress(75)
       try {
-        const transformRes = await fetch('http://localhost:8000/transform-ui', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(analysis) })
+        const transformRes = await fetch(apiUrl('/transform-ui'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(analysis) })
         if (transformRes.ok) {
           const transformData = await transformRes.json()
           sessionStorage.setItem('refineui_transform', JSON.stringify(transformData))

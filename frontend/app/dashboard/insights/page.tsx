@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useProgress } from '@/components/dashboard/ProgressContext'
+import { apiUrl } from '@/lib/api'
 
 interface SourceAnalysis {
   url: string
@@ -36,7 +37,7 @@ export default function InsightsPage() {
     setError('')
     startProgress(`Analyzing ${urlList.length} sites with TinyFish...`)
     try {
-      const res = await fetch('http://localhost:8000/analyze-competitors', {
+      const res = await fetch(apiUrl('/analyze-competitors'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ urls: urlList, style_goal: styleGoal }),

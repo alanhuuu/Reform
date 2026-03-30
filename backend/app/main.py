@@ -1,4 +1,5 @@
 import logging
+import os
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -15,6 +16,7 @@ from app.routes.voice import router as voice_router
 from app.routes.voice_chat import router as voice_chat_router
 from app.routes.transcribe import router as transcribe_router
 from app.routes.code_pipeline import router as code_pipeline_router
+from app.routes.pipeline_v2 import router as pipeline_v2_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,9 +29,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# CORS: allow origins from env or sensible defaults
+_default_origins = "http://localhost:3000,https://refineui-chi.vercel.app"
+_allowed_origins = os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://refineui-chi.vercel.app"],
+    allow_origins=[o.strip() for o in _allowed_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,6 +51,7 @@ app.include_router(voice_router)
 app.include_router(voice_chat_router)
 app.include_router(transcribe_router)
 app.include_router(code_pipeline_router)
+app.include_router(pipeline_v2_router)
 
 
 @app.get("/health")
