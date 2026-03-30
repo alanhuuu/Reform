@@ -695,6 +695,8 @@ export default function TransformPage() {
   const [commitLoading, setCommitLoading] = useState(false)
   const [commitResult, setCommitResult] = useState<{ sha: string; url: string } | null>(null)
   const [multiPageResult, setMultiPageResult] = useState<MultiPageTransformResult | null>(null)
+  const [reRendering, setReRendering] = useState(false)
+  const [reRenderStatus, setReRenderStatus] = useState('')
 
   useEffect(() => {
     if (session?.accessToken && repos.length === 0 && pipelineStep === 'idle') {
@@ -897,10 +899,17 @@ export default function TransformPage() {
       setShowSuggestModal(false)
       setSuggestion('')
       setScOpen(true)
+      setSuggestLoading(false)
 
       // Re-render screenshots with the new code
       if (data.revised_code && repoName && selectedTarget) {
+        setReRendering(true)
+        setReRenderStatus('Cloning repository...')
         try {
+          const timer1 = setTimeout(() => setReRenderStatus('Installing dependencies...'), 8000)
+          const timer2 = setTimeout(() => setReRenderStatus('Starting dev server...'), 20000)
+          const timer3 = setTimeout(() => setReRenderStatus('Capturing screenshots...'), 40000)
+
           const renderRes = await fetch(apiUrl('/re-render'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -912,6 +921,9 @@ export default function TransformPage() {
               access_token: session?.accessToken || '',
             }),
           })
+
+          clearTimeout(timer1); clearTimeout(timer2); clearTimeout(timer3)
+
           if (renderRes.ok) {
             const renderData = await renderRes.json()
             if (renderData.after_screenshot && multiPageResult) {
@@ -924,6 +936,8 @@ export default function TransformPage() {
             }
           }
         } catch { /* re-render is best-effort */ }
+        setReRendering(false)
+        setReRenderStatus('')
       }
     } catch {
       const newCommit: CommitEntry = {
@@ -1046,6 +1060,22 @@ export default function TransformPage() {
         {/* ── PIPELINE PROGRESS ── */}
         {(pipelineStep === 'ingesting' || pipelineStep === 'analyzing' || pipelineStep === 'transforming') && (
           <PipelineProgress step={pipelineStep} repoName={repoName} targetFile={selectedTarget} />
+        )}
+
+        {/* ── RE-RENDER PROGRESS BAR ── */}
+        {reRendering && (
+          <div className="max-w-xl mx-auto mb-6">
+            <div className="rounded-xl p-5" style={{ background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)' }}>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-4 h-4 rounded-full animate-spin" style={{ border: '2px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7' }} />
+                <span className="text-[13px] font-medium text-white">Reapplying your changes</span>
+              </div>
+              <div className="w-full h-1.5 rounded-full mb-2" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                <div className="h-full rounded-full animate-pulse" style={{ width: '60%', background: 'linear-gradient(90deg, #7c3aed, #a855f7)', boxShadow: '0 0 12px rgba(168,85,247,0.3)' }} />
+              </div>
+              <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>{reRenderStatus}</p>
+            </div>
+          </div>
         )}
 
         {/* ── MULTI-PAGE TRANSFORMATION SHOWCASE ── */}
