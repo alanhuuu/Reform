@@ -16,7 +16,7 @@ def analyze_competitors(
     site_analyses = []
 
     # Visit each site in parallel using TinyFish
-    with ThreadPoolExecutor(max_workers=min(len(urls), 4)) as executor:
+    with ThreadPoolExecutor(max_workers=min(len(urls), 5)) as executor:
         future_to_url = {
             executor.submit(extract_site_data, url): url for url in urls
         }
