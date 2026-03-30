@@ -6,7 +6,7 @@ import { useProgress } from '@/components/dashboard/ProgressContext'
 import { apiUrl } from '@/lib/api'
 
 // Set to true to skip API calls and use mock data for local testing
-const MOCK_MODE = true
+const MOCK_MODE = false
 
 const MOCK_DISCOVERY: DiscoveryData = {
   project_category: 'SaaS / Developer Tools',
