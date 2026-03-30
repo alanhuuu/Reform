@@ -173,16 +173,17 @@ export default function TransformCarousel({
           </div>
         )}
 
-        {/* Before/After screenshots */}
-        <div className="p-6">
-          <BeforeAfterShowcase
-            beforeScreenshot={current.before_screenshot}
-            afterScreenshot={current.after_screenshot}
-            pageName={current.page_name}
-            previewAvailable={isPagePreviewAvailable(current)}
-            previewUnavailableReason={getPreviewUnavailableReason(result, current)}
-          />
-        </div>
+        {/* Before/After screenshots — only show if we have actual screenshot data */}
+        {isPagePreviewAvailable(current) && (
+          <div className="p-6">
+            <BeforeAfterShowcase
+              beforeScreenshot={current.before_screenshot}
+              afterScreenshot={current.after_screenshot}
+              pageName={current.page_name}
+              previewAvailable={true}
+            />
+          </div>
+        )}
 
         {/* Structural changes */}
         <div className="px-6 pb-6">
