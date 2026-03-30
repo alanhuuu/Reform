@@ -897,6 +897,34 @@ export default function TransformPage() {
       setShowSuggestModal(false)
       setSuggestion('')
       setScOpen(true)
+
+      // Re-render screenshots with the new code
+      if (data.revised_code && repoName && selectedTarget) {
+        try {
+          const renderRes = await fetch(apiUrl('/re-render'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              repo_clone_url: `https://github.com/${repoName}.git`,
+              branch: repoBranch,
+              target_file: selectedTarget,
+              updated_code: data.revised_code,
+              access_token: session?.accessToken || '',
+            }),
+          })
+          if (renderRes.ok) {
+            const renderData = await renderRes.json()
+            if (renderData.after_screenshot && multiPageResult) {
+              const updatedPages = multiPageResult.pages.map(p =>
+                p.page_path === selectedTarget
+                  ? { ...p, after_screenshot: renderData.after_screenshot, before_screenshot: renderData.before_screenshot || p.before_screenshot }
+                  : p
+              )
+              setMultiPageResult({ ...multiPageResult, pages: updatedPages })
+            }
+          }
+        } catch { /* re-render is best-effort */ }
+      }
     } catch {
       const newCommit: CommitEntry = {
         hash: Math.random().toString(16).slice(2, 8),
