@@ -89,6 +89,29 @@ class Flows(BaseModel):
     layout_flow_mapping: dict[str, str]
 
 
+class CtaInsights(BaseModel):
+    dominant_location: str = "unknown"
+    dominant_prominence: str = "unknown"
+    common_labels: list[str] = []
+    best_practice_notes: str = ""
+
+
+class StrongestFlow(BaseModel):
+    flow_name: str
+    seen_in_sites: int = 1
+    avg_clarity: str = "unknown"
+    avg_friction: str = "unknown"
+
+
+class UxIntelligence(BaseModel):
+    common_user_goals: list[str] = []
+    effective_patterns: list[str] = []
+    common_problems: list[str] = []
+    cta_insights: CtaInsights = CtaInsights()
+    post_click_quality: str = "unknown"
+    strongest_flows: list[StrongestFlow] = []
+
+
 class Recommendation(BaseModel):
     priority: str  # "high", "medium", "low"
     target: str
@@ -102,5 +125,6 @@ class CompetitorAnalysisResponse(BaseModel):
     components: Components
     design_tokens: DesignTokens
     flows: Flows
+    ux_intelligence: UxIntelligence = UxIntelligence()
     recommendations: list[Recommendation]
     avoid: list[str]

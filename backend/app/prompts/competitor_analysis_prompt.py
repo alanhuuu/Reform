@@ -1,13 +1,16 @@
-SITE_EXTRACTION_GOAL = """You are a real user exploring this website for the first time. Do not just describe the UI — experience it.
+SITE_EXTRACTION_GOAL = """You are a senior UX researcher exploring this website for the first time. Do not just describe the UI — experience it, evaluate it, and explain why it works or doesn't.
 
-INSTRUCTIONS:
-1. Land on the page. Note what you see first.
-2. Scroll down through the full page.
-3. If there is a primary CTA or interactive element, click it.
-4. If there are navigation links or tabs, try at least one.
-5. Observe: hover effects, transitions, loading states, visual feedback.
+EXPLORATION INSTRUCTIONS:
+1. Land on the page. Note your first impression and what draws your eye.
+2. Scroll the full page. Observe the content hierarchy.
+3. Identify the primary CTA. Click it.
+4. Evaluate what happens after the click — is the next step clear? Is there friction?
+5. Navigate back to the main page if possible.
+6. Explore ONE secondary path (whichever is most relevant): pricing, features, demo, signup, or a product tab.
+7. Observe: hover states, transitions, loading states, visual feedback throughout.
+8. Note any friction, confusion, or dead ends you encounter.
 
-Then return ONLY a JSON object with exactly these 8 keys. No markdown fences. No explanation. Just the JSON.
+Then return ONLY a JSON object with exactly these 14 keys. No markdown fences. No explanation. Just the JSON.
 
 CRITICAL RULES:
 - All design tokens must be directly usable in code (no descriptive phrases).
@@ -18,6 +21,7 @@ CRITICAL RULES:
 - Use short snake_case identifiers for pattern lists, not sentences.
 - ux_flow must describe what a USER experiences step by step, not what the page contains.
 - ux_quality must describe HOW the experience feels, not what elements exist.
+- New UX intelligence fields (user_goal, why_it_works, problems, cta_analysis, post_click_experience, flows) must be structured and concise — no prose paragraphs.
 
 {
   "page_type": "single_string_identifier",
@@ -98,6 +102,52 @@ CRITICAL RULES:
     "strong_visual_hierarchy_guides_eye_path",
     "smooth_scroll_transitions_between_sections",
     "no_layout_shift_during_page_load"
+  ],
+
+  "user_goal": "start_using_product_quickly",
+
+  "why_it_works": [
+    "single_clear_primary_action",
+    "low_competition_around_cta",
+    "clear_value_prop_above_fold",
+    "progressive_disclosure_of_complexity",
+    "strong_visual_hierarchy"
+  ],
+
+  "problems": [
+    "too_many_competing_ctas",
+    "unclear_next_step_after_click",
+    "important_content_below_fold"
+  ],
+
+  "cta_analysis": {
+    "primary_cta_label": "Get Started",
+    "primary_cta_location": "hero_above_fold",
+    "cta_prominence": "high",
+    "cta_clarity": "high",
+    "cta_competition": "low"
+  },
+
+  "post_click_experience": {
+    "destination_type": "signup_form",
+    "next_step_clarity": "high",
+    "friction_level": "low",
+    "notes": "clean_single_field_email_signup"
+  },
+
+  "flows": [
+    {
+      "flow_name": "landing_to_signup",
+      "steps": ["user_sees_hero", "clicks_get_started", "sees_signup_form", "enters_email"],
+      "clarity": "high",
+      "friction": "low"
+    },
+    {
+      "flow_name": "landing_to_pricing",
+      "steps": ["user_clicks_pricing_nav", "sees_plan_comparison", "selects_plan"],
+      "clarity": "medium",
+      "friction": "medium"
+    }
   ]
 }
 
@@ -111,6 +161,32 @@ IMPORTANT for ux_quality:
 - Describe HOW the experience feels, not WHAT exists.
 - Include: clarity, speed, cognitive load, feedback quality, focus.
 - Bad: "has_a_navbar" — Good: "clear_primary_action_within_2_seconds"
+
+IMPORTANT for user_goal:
+- Single snake_case identifier describing the page's primary conversion intent.
+- Not what the page IS, but what it wants the user to DO.
+
+IMPORTANT for why_it_works:
+- 3-6 snake_case reasons the UX is effective at achieving its goal.
+- Focus on design decisions, not features. Why would a user convert?
+
+IMPORTANT for problems:
+- 2-5 snake_case friction points you observed while exploring.
+- If none found, use ["no_major_issues_detected"].
+
+IMPORTANT for cta_analysis:
+- primary_cta_label: exact button text observed.
+- primary_cta_location: where on the page (hero_above_fold, sticky_header, mid_page, footer).
+- cta_prominence/cta_clarity/cta_competition: high | medium | low.
+
+IMPORTANT for post_click_experience:
+- Click the primary CTA and describe what happens.
+- destination_type: signup_form, dashboard_preview, pricing_page, demo_booking, external_link, etc.
+- If CTA is not clickable or leads nowhere, set friction_level to "high" and explain in notes.
+
+IMPORTANT for flows:
+- Extract 2-4 distinct user paths you observed or could navigate.
+- Each flow: flow_name (snake_case), steps (list of snake_case actions), clarity (high|medium|low), friction (low|medium|high).
 
 Fill every key. If a component type is not visible on the page, use ["not_present"]. Inspect colors from the actual rendered page. List 4-6 items per array. All shadow, border, and motion values must be valid CSS."""
 
@@ -215,6 +291,26 @@ Return ONLY valid JSON (no markdown, no explanation, no text outside the JSON) m
       "section_name": "flow_role"
     }}
   }},
+  "ux_intelligence": {{
+    "common_user_goals": ["goal_identifier_1", "goal_identifier_2"],
+    "effective_patterns": ["pattern_that_works_across_sites"],
+    "common_problems": ["friction_point_seen_across_sites"],
+    "cta_insights": {{
+      "dominant_location": "hero_above_fold",
+      "dominant_prominence": "high",
+      "common_labels": ["Get Started", "Try Free"],
+      "best_practice_notes": "short_structured_note"
+    }},
+    "post_click_quality": "high|medium|low",
+    "strongest_flows": [
+      {{
+        "flow_name": "flow_identifier",
+        "seen_in_sites": 3,
+        "avg_clarity": "high",
+        "avg_friction": "low"
+      }}
+    ]
+  }},
   "recommendations": [
     {{
       "priority": "high|medium|low",
@@ -237,4 +333,10 @@ RULES:
 - Border values must be valid CSS border shorthand
 - Typography must include real font names observed across the analyzed sites
 - Colors must include accent_primary, accent_secondary, success, warning, error
+- ux_intelligence: synthesize user_goal, why_it_works, problems, cta_analysis, post_click_experience, and flows from the site analyses into cross-site insights
+- common_user_goals: 2-4 goals that appear across multiple sites
+- effective_patterns: 3-6 UX patterns that consistently work across sites
+- common_problems: 2-4 friction points seen in multiple sites (or ["none_significant"] if sites are all strong)
+- cta_insights: synthesize CTA patterns across sites — dominant location, prominence, common labels
+- strongest_flows: 2-4 user flows that appear across multiple sites with clarity/friction ratings
 - Return ONLY the JSON object"""

@@ -162,13 +162,14 @@ class TestExtractRawEndpoint:
         assert "/" in coverage["coverage"]
 
     def test_field_coverage_counts_expected_fields(self, client):
-        """Coverage should report out of 8 expected fields."""
+        """Coverage should report out of all expected fields."""
+        from app.services.tinyfish_client import EXPECTED_FIELDS
         with patch("app.routes.analyze_competitors.extract_site_data",
                    return_value=self.MOCK_SITE_DATA):
             response = client.post("/extract-raw", json=VALID_COMPETITOR_BODY)
         coverage_str = response.json()["results"][0]["field_coverage"]["coverage"]
         total = int(coverage_str.split("/")[1])
-        assert total == 8  # len(EXPECTED_FIELDS)
+        assert total == len(EXPECTED_FIELDS)
 
     def test_extraction_failure_returns_error_in_results(self, client):
         with patch("app.routes.analyze_competitors.extract_site_data",

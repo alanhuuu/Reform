@@ -14,6 +14,8 @@ TINYFISH_SSE_URL = "https://agent.tinyfish.ai/v1/automation/run-sse"
 EXPECTED_FIELDS = [
     "page_type", "layout", "visual_style", "components",
     "typography", "design_tokens", "ux_flow", "ux_quality",
+    "user_goal", "why_it_works", "problems",
+    "cta_analysis", "post_click_experience", "flows",
 ]
 
 # Required sub-fields for validation
@@ -46,6 +48,23 @@ MOTION_DEFAULTS = {
     "duration_normal": "200ms",
     "easing": "ease-out",
 }
+
+CTA_ANALYSIS_DEFAULTS = {
+    "primary_cta_label": "unknown",
+    "primary_cta_location": "unknown",
+    "cta_prominence": "unknown",
+    "cta_clarity": "unknown",
+    "cta_competition": "unknown",
+}
+
+POST_CLICK_DEFAULTS = {
+    "destination_type": "unknown",
+    "next_step_clarity": "unknown",
+    "friction_level": "unknown",
+    "notes": "not_explored",
+}
+
+VALID_LEVELS = {"high", "medium", "low", "unknown"}
 
 
 def _get_api_key() -> str:
@@ -135,6 +154,85 @@ def _ensure_design_tokens(data: dict, url: str) -> None:
         tokens["motion"] = {**MOTION_DEFAULTS}
 
 
+def _normalize_level(value: str) -> str:
+    """Normalize a high/medium/low enum value."""
+    if isinstance(value, str):
+        cleaned = value.strip().lower().replace(" ", "_")
+        if cleaned in VALID_LEVELS:
+            return cleaned
+    return "unknown"
+
+
+def _ensure_ux_intelligence(data: dict, url: str) -> None:
+    """Ensure all 6 UX intelligence fields exist with valid shapes."""
+
+    # user_goal: string
+    goal = data.get("user_goal")
+    if not isinstance(goal, str) or not goal.strip():
+        logger.warning("user_goal missing for %s, using default", url)
+        data["user_goal"] = "unknown_primary_goal"
+
+    # why_it_works: list of strings
+    wiw = data.get("why_it_works")
+    if not isinstance(wiw, list):
+        logger.warning("why_it_works missing for %s, using empty list", url)
+        data["why_it_works"] = []
+    else:
+        data["why_it_works"] = [s for s in wiw if isinstance(s, str) and s.strip()]
+
+    # problems: list of strings
+    probs = data.get("problems")
+    if not isinstance(probs, list):
+        logger.warning("problems missing for %s, using empty list", url)
+        data["problems"] = []
+    else:
+        data["problems"] = [s for s in probs if isinstance(s, str) and s.strip()]
+
+    # cta_analysis: structured dict
+    cta = data.get("cta_analysis")
+    if not isinstance(cta, dict):
+        logger.warning("cta_analysis missing for %s, injecting defaults", url)
+        data["cta_analysis"] = {**CTA_ANALYSIS_DEFAULTS}
+    else:
+        for key, default in CTA_ANALYSIS_DEFAULTS.items():
+            if key not in cta or not isinstance(cta[key], str):
+                cta[key] = default
+        # Normalize enum fields
+        for enum_key in ("cta_prominence", "cta_clarity", "cta_competition"):
+            cta[enum_key] = _normalize_level(cta[enum_key])
+
+    # post_click_experience: structured dict
+    pce = data.get("post_click_experience")
+    if not isinstance(pce, dict):
+        logger.warning("post_click_experience missing for %s, injecting defaults", url)
+        data["post_click_experience"] = {**POST_CLICK_DEFAULTS}
+    else:
+        for key, default in POST_CLICK_DEFAULTS.items():
+            if key not in pce or not isinstance(pce[key], str):
+                pce[key] = default
+        pce["next_step_clarity"] = _normalize_level(pce["next_step_clarity"])
+        pce["friction_level"] = _normalize_level(pce["friction_level"])
+
+    # flows: list of flow objects
+    flows = data.get("flows")
+    if not isinstance(flows, list):
+        logger.warning("flows missing for %s, using empty list", url)
+        data["flows"] = []
+    else:
+        cleaned_flows = []
+        for f in flows:
+            if not isinstance(f, dict):
+                continue
+            cleaned = {
+                "flow_name": f.get("flow_name", "unnamed_flow") if isinstance(f.get("flow_name"), str) else "unnamed_flow",
+                "steps": [s for s in f.get("steps", []) if isinstance(s, str)] if isinstance(f.get("steps"), list) else [],
+                "clarity": _normalize_level(f.get("clarity", "unknown")),
+                "friction": _normalize_level(f.get("friction", "unknown")),
+            }
+            cleaned_flows.append(cleaned)
+        data["flows"] = cleaned_flows
+
+
 def _normalize(raw: str, url: str) -> dict:
     """Parse TinyFish output into a consistent dict with validated sub-structures."""
     cleaned = raw.strip()
@@ -153,6 +251,7 @@ def _normalize(raw: str, url: str) -> dict:
             logger.info("TinyFish returned structured JSON for %s", url)
             _ensure_typography(parsed, url)
             _ensure_design_tokens(parsed, url)
+            _ensure_ux_intelligence(parsed, url)
             return parsed
     except json.JSONDecodeError:
         pass
@@ -169,6 +268,7 @@ def _normalize(raw: str, url: str) -> dict:
         "motion": {**MOTION_DEFAULTS},
         "density": "comfortable",
     }
+    _ensure_ux_intelligence(fallback, url)
     return fallback
 
 
