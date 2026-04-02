@@ -4,6 +4,7 @@ from pydantic import BaseModel, HttpUrl
 class CompetitorRequest(BaseModel):
     urls: list[HttpUrl]
     style_goal: str = ""
+    backup_urls: list[HttpUrl] = []
 
 
 # --- Response schema ---

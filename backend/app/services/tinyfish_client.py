@@ -304,7 +304,7 @@ def extract_site_data(url: str) -> dict:
     logger.info("TinyFish: navigating to %s", url)
     api_key = _get_api_key()
 
-    with httpx.Client(timeout=180.0) as client:
+    with httpx.Client(timeout=60.0) as client:
         with client.stream(
             "POST",
             TINYFISH_SSE_URL,

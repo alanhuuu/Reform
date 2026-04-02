@@ -115,9 +115,14 @@ function DiscoveryPageInner() {
       setLoadingStatus(`Analyzing ${discoveryData.selected_for_analysis.length} sites with TinyFish...`)
       updateProgress(30)
 
+      // Pass extra discovered URLs as backups in case primary ones are blocked
+      const backupUrls = (discoveryData.deduped_urls || []).filter(
+        (u: string) => !discoveryData.selected_for_analysis.includes(u)
+      )
+
       // SSE streaming: get live progress as each site completes
       const analyzeUrl = apiUrl('/analyze-competitors-stream')
-      const sseBody = JSON.stringify({ urls: discoveryData.selected_for_analysis, style_goal: '' })
+      const sseBody = JSON.stringify({ urls: discoveryData.selected_for_analysis, style_goal: '', backup_urls: backupUrls })
       let analysis = null
 
       try {
@@ -140,8 +145,12 @@ function DiscoveryPageInner() {
                 const evt = JSON.parse(line.slice(6))
                 if (evt.event === 'site_complete') {
                   const domain = evt.url.replace('https://', '').replace(/\/$/, '')
-                  setLoadingStatus(`Analyzed ${domain} (${evt.index}/${evt.total})`)
+                  const status = evt.status === 'failed' ? ' (blocked, skipping)' : ''
+                  setLoadingStatus(`Analyzed ${domain}${status} (${evt.index}/${evt.total})`)
                   updateProgress(30 + Math.round((evt.index / evt.total) * 50))
+                } else if (evt.event === 'retrying') {
+                  const domain = evt.url.replace('https://', '').replace(/\/$/, '')
+                  setLoadingStatus(`Trying backup: ${domain}...`)
                 } else if (evt.event === 'aggregating') {
                   setLoadingStatus('Synthesizing design intelligence...')
                   updateProgress(85)
@@ -153,7 +162,7 @@ function DiscoveryPageInner() {
           }
         }
       } catch {
-        // Fallback to non-streaming endpoint
+        // Fallback to non-streaming endpoint (same body with backup_urls)
         const analyzeRes = await fetch(apiUrl('/analyze-competitors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: sseBody })
         if (!analyzeRes.ok) throw new Error('Analysis failed')
         analysis = await analyzeRes.json()

@@ -27,9 +27,10 @@ async def analyze_competitors_endpoint(request: CompetitorRequest):
         )
 
     urls = [str(u) for u in request.urls]
-    logger.info("Analyzing %d competitor URLs: %s", len(urls), urls)
+    backups = [str(u) for u in request.backup_urls]
+    logger.info("Analyzing %d competitor URLs: %s (backups: %d)", len(urls), urls, len(backups))
 
-    result = analyze_competitors(urls, request.style_goal)
+    result = analyze_competitors(urls, request.style_goal, backup_urls=backups)
     return result
 
 
@@ -45,11 +46,13 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
         )
 
     urls = [str(u) for u in request.urls]
+    backups = [str(u) for u in request.backup_urls]
 
     def event_stream():
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         site_analyses = []
+        failed_urls = []
         total = len(urls)
 
         with ThreadPoolExecutor(max_workers=min(total, 5)) as executor:
@@ -64,11 +67,29 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
                 try:
                     result = future.result()
                     site_analyses.append(result)
+                    yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': completed_count, 'total': total, 'status': 'ok'})}\n\n"
                 except Exception as e:
-                    logger.warning("TinyFish failed for %s (%s), using mock", url, e)
-                    site_analyses.append(mock_site_analysis(url))
+                    logger.warning("TinyFish failed for %s (%s)", url, e)
+                    failed_urls.append(url)
+                    yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': completed_count, 'total': total, 'status': 'failed'})}\n\n"
 
-                yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': completed_count, 'total': total})}\n\n"
+        # Retry failures with backup URLs
+        remaining_backups = [u for u in backups if u not in set(urls) and u not in set(failed_urls)]
+        for backup_url in remaining_backups:
+            if not failed_urls:
+                break
+            try:
+                yield f"data: {json.dumps({'event': 'retrying', 'url': backup_url})}\n\n"
+                result = extract_site_data(backup_url)
+                site_analyses.append(result)
+                failed_urls.pop(0)
+                yield f"data: {json.dumps({'event': 'site_complete', 'url': backup_url, 'index': total, 'total': total, 'status': 'ok'})}\n\n"
+            except Exception:
+                pass
+
+        # Mock remaining failures
+        for url in failed_urls:
+            site_analyses.append(mock_site_analysis(url))
 
         yield f"data: {json.dumps({'event': 'aggregating'})}\n\n"
 
