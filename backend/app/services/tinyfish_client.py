@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 
 import httpx
 
@@ -9,6 +10,28 @@ from app.prompts.competitor_analysis_prompt import SITE_EXTRACTION_GOAL
 logger = logging.getLogger(__name__)
 
 TINYFISH_SSE_URL = "https://agent.tinyfish.ai/v1/automation/run-sse"
+
+# ─── URL-level cache (TTL 24h) ──────────────────────────────────────────────
+_cache: dict[str, tuple[float, dict]] = {}
+CACHE_TTL = 86400  # 24 hours in seconds
+
+
+def get_cached(url: str) -> dict | None:
+    """Return cached result if it exists and hasn't expired."""
+    entry = _cache.get(url)
+    if entry and (time.time() - entry[0]) < CACHE_TTL:
+        logger.info("Cache HIT for %s", url)
+        return entry[1]
+    return None
+
+
+def _set_cache(url: str, data: dict) -> None:
+    _cache[url] = (time.time(), data)
+
+
+def clear_cache() -> None:
+    """Clear the URL cache. Used in tests."""
+    _cache.clear()
 
 # Fields we expect from TinyFish extraction, matching what the aggregator needs
 EXPECTED_FIELDS = [
@@ -274,6 +297,10 @@ def _normalize(raw: str, url: str) -> dict:
 
 def extract_site_data(url: str) -> dict:
     """Use TinyFish to visit a URL and extract UI/UX design intelligence."""
+    cached = get_cached(url)
+    if cached:
+        return cached
+
     logger.info("TinyFish: navigating to %s", url)
     api_key = _get_api_key()
 
@@ -332,4 +359,6 @@ def extract_site_data(url: str) -> dict:
     if not isinstance(typo, dict) or "font_family" not in typo:
         logger.warning("VALIDATION: font_family missing in typography for %s", url)
 
-    return {"url": url, "raw_analysis": normalized}
+    result = {"url": url, "raw_analysis": normalized}
+    _set_cache(url, result)
+    return result

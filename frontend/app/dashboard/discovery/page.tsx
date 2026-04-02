@@ -113,22 +113,55 @@ function DiscoveryPageInner() {
       const discoveryData = await discoverRes.json()
 
       setLoadingStatus(`Analyzing ${discoveryData.selected_for_analysis.length} sites with TinyFish...`)
-      updateProgress(35)
-      const analyzeRes = await fetch(apiUrl('/analyze-competitors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ urls: discoveryData.selected_for_analysis, style_goal: '' }) })
-      if (!analyzeRes.ok) throw new Error('Analysis failed')
-      const analysis = await analyzeRes.json()
+      updateProgress(30)
 
-      setLoadingStatus('Generating UI transformation...')
-      updateProgress(75)
+      // SSE streaming: get live progress as each site completes
+      const analyzeUrl = apiUrl('/analyze-competitors-stream')
+      const sseBody = JSON.stringify({ urls: discoveryData.selected_for_analysis, style_goal: '' })
+      let analysis = null
+
       try {
-        const transformRes = await fetch(apiUrl('/transform-ui'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(analysis) })
-        if (transformRes.ok) {
-          const transformData = await transformRes.json()
-          sessionStorage.setItem('refineui_transform', JSON.stringify(transformData))
-        }
-      } catch { /* non-fatal — transform is bonus */ }
+        const sseRes = await fetch(analyzeUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: sseBody })
+        if (!sseRes.ok) throw new Error('Analysis failed')
+        const reader = sseRes.body?.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
 
-      updateProgress(90); setLoadingStatus('Pipeline complete!')
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              try {
+                const evt = JSON.parse(line.slice(6))
+                if (evt.event === 'site_complete') {
+                  const domain = evt.url.replace('https://', '').replace(/\/$/, '')
+                  setLoadingStatus(`Analyzed ${domain} (${evt.index}/${evt.total})`)
+                  updateProgress(30 + Math.round((evt.index / evt.total) * 50))
+                } else if (evt.event === 'aggregating') {
+                  setLoadingStatus('Synthesizing design intelligence...')
+                  updateProgress(85)
+                } else if (evt.event === 'complete') {
+                  analysis = evt.data
+                }
+              } catch { /* skip malformed events */ }
+            }
+          }
+        }
+      } catch {
+        // Fallback to non-streaming endpoint
+        const analyzeRes = await fetch(apiUrl('/analyze-competitors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: sseBody })
+        if (!analyzeRes.ok) throw new Error('Analysis failed')
+        analysis = await analyzeRes.json()
+      }
+
+      if (!analysis) throw new Error('Analysis returned no data')
+
+      updateProgress(95); setLoadingStatus('Analysis complete!')
       sessionStorage.setItem('refineui_discovery', JSON.stringify(discoveryData))
       sessionStorage.setItem('refineui_analysis', JSON.stringify(analysis))
       sessionStorage.setItem('refineui_answers', JSON.stringify(answers))
@@ -270,10 +303,9 @@ function DiscoveryPageInner() {
   // ── LOADING ──
   if (loading) {
     const STAGES = [
-      { label: 'Finding competitors in your space...', est: 15 },
-      { label: 'Analyzing sites with TinyFish...', est: 45 },
-      { label: 'Generating UI transformation...', est: 20 },
-      { label: 'Running full analysis pipeline...', est: 5 },
+      { label: 'Finding competitors in your space...', est: 10 },
+      { label: 'Analyzing sites with TinyFish...', est: 30 },
+      { label: 'Synthesizing design intelligence...', est: 5 },
     ]
     const currentStage = STAGES.find(s => loadingStatus.toLowerCase().includes(s.label.split('...')[0].toLowerCase().slice(0, 10))) || STAGES[0]
     const stageIdx = STAGES.indexOf(currentStage)
@@ -323,7 +355,7 @@ function DiscoveryPageInner() {
           </div>
 
           <p className="text-[10px] text-center mt-6" style={{ color: 'rgba(255,255,255,0.2)' }}>
-            Estimated total: ~{totalEst}s — TinyFish visits each site in a real browser
+            Estimated total: ~{totalEst}s — TinyFish browses each site in a real browser
           </p>
         </div>
       </div>

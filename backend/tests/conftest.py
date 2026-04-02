@@ -86,6 +86,15 @@ def make_design_intelligence(**overrides) -> DesignIntelligence:
     return DesignIntelligence(**data)
 
 
+@pytest.fixture(autouse=True)
+def _clear_tinyfish_cache():
+    """Clear TinyFish URL cache before each test."""
+    from app.services.tinyfish_client import clear_cache
+    clear_cache()
+    yield
+    clear_cache()
+
+
 @pytest.fixture()
 def client():
     return TestClient(app)
