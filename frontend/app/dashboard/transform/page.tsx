@@ -692,8 +692,8 @@ export default function TransformPage() {
   const [repos, setRepos] = useState<GithubRepo[]>([])
   const [loadingRepos, setLoadingRepos] = useState(false)
   const [repoSearch, setRepoSearch] = useState('')
-  const [commitLoading, setCommitLoading] = useState(false)
-  const [commitResult, setCommitResult] = useState<{ sha: string; url: string } | null>(null)
+  const [publishLoading, setPublishLoading] = useState(false)
+  const [publishResult, setPublishResult] = useState<{ branch_name: string; branch_url: string; files_changed: string[] } | null>(null)
   const [multiPageResult, setMultiPageResult] = useState<MultiPageTransformResult | null>(null)
   const [reRendering, setReRendering] = useState(false)
   const [reRenderStatus, setReRenderStatus] = useState('')
@@ -813,30 +813,36 @@ export default function TransformPage() {
   }
 
   async function handleAccept() {
-    let ghSha = ''
-    if (transformResult?.transformed_files[0] && session?.accessToken && repoName && selectedTarget) {
-      setCommitLoading(true); setPipelineError('')
+    // Collect all transformed pages with updated code
+    const pages = multiPageResult?.pages.filter(p => p.status === 'transformed' && p.updated_code) || []
+    const hasGitHub = session?.accessToken && repoName && pages.length > 0
+
+    if (hasGitHub) {
+      setPublishLoading(true); setPipelineError('')
       try {
-        const tf = transformResult.transformed_files[0]
-        // Build a clean, human-readable commit title from change annotations
-        const impactParts = transformResult.change_annotations.slice(0, 2).map(a => a.ux_impact).filter(Boolean)
-        const commitTitle = impactParts.length > 0
-          ? impactParts[0].split(',')[0].split('.')[0].trim()
-          : tf.diff_summary?.split('.')[0]?.trim() || 'Improve UI layout and polish'
-        const commitMsg = `reform: ${commitTitle.slice(0, 60)}`
-        const res = await fetch(apiUrl('/commit-to-github'), {
+        const [owner, repo] = repoName.split('/')
+        const res = await fetch(apiUrl('/github/publish-approved-branch'), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repo_name: repoName, branch: repoBranch, file_path: selectedTarget, new_content: tf.updated_code, commit_message: commitMsg, access_token: session.accessToken }),
+          body: JSON.stringify({
+            owner, repo,
+            base_branch: repoBranch || null,
+            approved_files: pages.map(p => ({ path: p.page_path, content: p.updated_code })),
+            transform_summary: {
+              pages_transformed: pages.map(p => p.page_path),
+              summary_text: multiPageResult?.global_summary?.[0] || null,
+            },
+            access_token: session.accessToken,
+          }),
         })
-        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Commit failed') }
+        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Publish failed') }
         const data = await res.json()
-        ghSha = data.commit_sha || ''
-        setCommitResult({ sha: ghSha, url: data.commit_url || '' })
-      } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Commit to GitHub failed'); setCommitLoading(false); return }
-      setCommitLoading(false)
+        setPublishResult({ branch_name: data.branch_name, branch_url: data.branch_url, files_changed: data.files_changed })
+      } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Failed to publish changes'); setPublishLoading(false); return }
+      setPublishLoading(false)
     }
+
     setChangeStatus('accepted')
-    const realHash = ghSha ? ghSha.slice(0, 7) : Math.random().toString(16).slice(2, 8)
+    const realHash = Math.random().toString(16).slice(2, 8)
     setCommits(prev => {
       const hasPending = prev.some(c => c.status === 'pending')
       if (hasPending) return prev.map(c => c.status === 'pending' ? { ...c, status: 'accepted' as const, color: '#22c55e', hash: realHash } : c)
@@ -1000,7 +1006,7 @@ export default function TransformPage() {
 
         {/* ── HEADER ── */}
         {pipelineStep === 'complete' && multiPageResult ? (
-          <TransformSummaryHeader result={multiPageResult} commitResult={commitResult} />
+          <TransformSummaryHeader result={multiPageResult} publishResult={publishResult} />
         ) : (
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-white mb-3">UI Transformation</h1>
@@ -1098,14 +1104,14 @@ export default function TransformPage() {
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={handleAccept}
-                  disabled={commitLoading}
+                  disabled={publishLoading}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-medium transition-all hover:bg-green-500/[0.06] active:scale-[0.97]"
-                  style={{ color: 'rgba(34,197,94,0.7)', border: '1px solid transparent', opacity: commitLoading ? 0.5 : 1 }}
+                  style={{ color: 'rgba(34,197,94,0.7)', border: '1px solid transparent', opacity: publishLoading ? 0.5 : 1 }}
                 >
-                  {commitLoading ? (
-                    <><div className="w-3 h-3 rounded-full animate-spin" style={{ border: '2px solid rgba(34,197,94,0.2)', borderTopColor: 'rgba(34,197,94,0.7)' }} />Committing...</>
+                  {publishLoading ? (
+                    <><div className="w-3 h-3 rounded-full animate-spin" style={{ border: '2px solid rgba(34,197,94,0.2)', borderTopColor: 'rgba(34,197,94,0.7)' }} />Publishing approved changes...</>
                   ) : (
-                    <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>Apply Changes</>
+                    <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>Publish to GitHub</>
                   )}
                 </button>
                 <button
