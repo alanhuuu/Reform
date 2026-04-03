@@ -145,7 +145,7 @@ function DiscoveryPageInner() {
                 const evt = JSON.parse(line.slice(6))
                 if (evt.event === 'site_complete') {
                   const domain = evt.url.replace('https://', '').replace(/\/$/, '')
-                  const status = evt.status === 'failed' ? ' (blocked, skipping)' : ''
+                  const status = evt.status === 'timeout' ? ' (timed out, skipping)' : evt.status === 'failed' ? ' (blocked, skipping)' : ''
                   setLoadingStatus(`Analyzed ${domain}${status} (${evt.index}/${evt.total})`)
                   updateProgress(30 + Math.round((evt.index / evt.total) * 50))
                 } else if (evt.event === 'retrying') {

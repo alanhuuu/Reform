@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from app.schemas.competitors import CompetitorAnalysisResponse, CompetitorRequest
 from app.services.competitor_analyzer import analyze_competitors
-from app.services.tinyfish_client import EXPECTED_FIELDS, extract_site_data, get_cached
+from app.services.tinyfish_client import EXPECTED_FIELDS, extract_site_data
 from app.services.mock_competitors import mock_site_analysis
 from app.services.pattern_aggregator import aggregate_patterns
 
@@ -49,11 +49,12 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
     backups = [str(u) for u in request.backup_urls]
 
     def event_stream():
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
         site_analyses = []
         failed_urls = []
         total = len(urls)
+        SITE_TIMEOUT = 60
 
         with ThreadPoolExecutor(max_workers=min(total, 5)) as executor:
             future_to_url = {
@@ -61,13 +62,17 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
             }
             completed_count = 0
 
-            for future in as_completed(future_to_url):
+            for future in as_completed(future_to_url, timeout=SITE_TIMEOUT * 2):
                 url = future_to_url[future]
                 completed_count += 1
                 try:
-                    result = future.result()
+                    result = future.result(timeout=SITE_TIMEOUT)
                     site_analyses.append(result)
                     yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': completed_count, 'total': total, 'status': 'ok'})}\n\n"
+                except TimeoutError:
+                    logger.warning("TinyFish TIMED OUT for %s after %ds", url, SITE_TIMEOUT)
+                    failed_urls.append(url)
+                    yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': completed_count, 'total': total, 'status': 'timeout'})}\n\n"
                 except Exception as e:
                     logger.warning("TinyFish failed for %s (%s)", url, e)
                     failed_urls.append(url)
