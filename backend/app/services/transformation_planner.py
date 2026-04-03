@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def plan_transformations(
     evaluations: list[PageEvaluation],
-    threshold: int = 85,
+    threshold: int = 95,
     max_pages: int = 5,
 ) -> tuple[list[PageEvaluation], list[PageEvaluation]]:
     """
