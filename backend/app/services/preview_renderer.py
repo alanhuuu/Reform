@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # How long to wait for npm install (seconds)
 INSTALL_TIMEOUT = 120
 # How long to wait for dev server to be ready (seconds)
-SERVER_READY_TIMEOUT = 60
+SERVER_READY_TIMEOUT = 90
 # How long to wait between health checks (seconds)
 HEALTH_CHECK_INTERVAL = 2
 

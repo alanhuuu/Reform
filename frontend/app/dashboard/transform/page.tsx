@@ -53,9 +53,9 @@ interface GithubRepo {
 type PipelineStep = 'idle' | 'ingesting' | 'analyzing' | 'transforming' | 'complete'
 
 const PIPELINE_STAGES = [
-  { key: 'ingesting', label: 'Fetching files', duration: 8 },
-  { key: 'analyzing', label: 'Analyzing code', duration: 12 },
-  { key: 'transforming', label: 'Transforming UI', duration: 45 },
+  { key: 'ingesting', label: 'Fetching files', duration: 15 },
+  { key: 'analyzing', label: 'Analyzing code', duration: 25 },
+  { key: 'transforming', label: 'Transforming UI', duration: 180 },
 ]
 
 function PipelineProgress({ step, repoName, targetFile }: { step: PipelineStep; repoName: string; targetFile: string }) {
@@ -111,7 +111,11 @@ function PipelineProgress({ step, repoName, targetFile }: { step: PipelineStep; 
       </div>
       <div className="text-center">
         <p className="text-[13px] text-white/60 mb-0.5">{subtitle}</p>
-        <p className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.15)' }}>{elapsed}s elapsed · ~{Math.max(0, totalEstimate - completedTime - elapsed)}s remaining</p>
+        <p className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.15)' }}>
+          {elapsed}s elapsed · {(totalEstimate - completedTime - elapsed) > 0
+            ? `~${Math.max(0, totalEstimate - completedTime - elapsed)}s remaining`
+            : 'Almost done, finishing up...'}
+        </p>
       </div>
     </div>
   )

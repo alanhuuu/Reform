@@ -30,6 +30,11 @@ async def transform_code(
     if not target:
         raise ValueError(f"Target file not found: {target_file}")
 
+    # Cap target file to avoid very slow Claude calls on huge files
+    if len(target["content"]) > 30000:
+        logger.warning("Target file %s is %d chars, truncating to 30000", target_file, len(target["content"]))
+        target = {**target, "content": target["content"][:30000] + "\n// ... truncated for transform (original file too large)"}
+
     supporting_parts = []
     total_chars = 0
     for sf in supporting:
