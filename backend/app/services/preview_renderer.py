@@ -147,17 +147,60 @@ def _install_deps(frontend_dir: str) -> None:
     logger.info("Dependencies installed in %.1fs", elapsed)
 
 
+def _detect_framework(frontend_dir: str) -> str:
+    """Detect the frontend framework from package.json."""
+    import json as _json
+    pkg_path = os.path.join(frontend_dir, "package.json")
+    try:
+        with open(pkg_path) as f:
+            data = _json.load(f)
+        all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+        if "next" in all_deps:
+            return "next"
+        if "vite" in all_deps:
+            return "vite"
+        # Check scripts for clues
+        scripts = data.get("scripts", {})
+        dev_script = scripts.get("dev", "")
+        if "vite" in dev_script:
+            return "vite"
+        if "next" in dev_script:
+            return "next"
+        if "react-scripts" in all_deps:
+            return "cra"
+        return "unknown"
+    except Exception:
+        return "unknown"
+
+
 def _start_dev_server(frontend_dir: str, port: int) -> subprocess.Popen:
-    """Start the Next.js dev server on a specific port."""
-    logger.info("Starting dev server on port %d in %s", port, frontend_dir)
+    """Start the appropriate dev server based on the detected framework."""
+    framework = _detect_framework(frontend_dir)
+    logger.info("Detected framework: %s — starting dev server on port %d in %s", framework, port, frontend_dir)
+
     env = {
         **os.environ,
         "PORT": str(port),
         "NODE_ENV": "development",
         "NEXT_TELEMETRY_DISABLED": "1",
+        "BROWSER": "none",
     }
+
+    if framework == "next":
+        cmd = ["npx", "next", "dev", "--port", str(port)]
+    elif framework == "vite":
+        cmd = ["npx", "vite", "--port", str(port), "--host"]
+    elif framework == "cra":
+        cmd = ["npx", "react-scripts", "start"]
+        env["PORT"] = str(port)
+    else:
+        # Fallback: try npm run dev with PORT set
+        cmd = ["npm", "run", "dev"]
+        env["PORT"] = str(port)
+        logger.warning("Unknown framework, falling back to 'npm run dev' with PORT=%d", port)
+
     proc = subprocess.Popen(
-        ["npx", "next", "dev", "--port", str(port)],
+        cmd,
         cwd=frontend_dir,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env,
