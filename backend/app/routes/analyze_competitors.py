@@ -7,7 +7,6 @@ from fastapi.responses import StreamingResponse
 from app.schemas.competitors import CompetitorAnalysisResponse, CompetitorRequest
 from app.services.competitor_analyzer import analyze_competitors
 from app.services.tinyfish_client import EXPECTED_FIELDS, extract_site_data
-from app.services.mock_competitors import mock_site_analysis
 from app.services.pattern_aggregator import aggregate_patterns
 
 logger = logging.getLogger(__name__)
@@ -102,9 +101,13 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
             except Exception:
                 pass
 
-        # Mock remaining failures
+        # Skip failed URLs — no mock data
         for url in failed_urls:
-            site_analyses.append(mock_site_analysis(url))
+            logger.warning("No data for %s — skipping", url)
+
+        if not site_analyses:
+            yield f"data: {json.dumps({'event': 'error', 'message': 'All competitor sites failed or timed out'})}\n\n"
+            return
 
         yield f"data: {json.dumps({'event': 'aggregating'})}\n\n"
 

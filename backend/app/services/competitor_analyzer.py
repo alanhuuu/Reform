@@ -2,14 +2,11 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
 from app.schemas.competitors import CompetitorAnalysisResponse
-from app.services.mock_competitors import MOCK_RESPONSE, mock_site_analysis
 from app.services.pattern_aggregator import aggregate_patterns
 from app.services.tinyfish_client import extract_site_data
 
 logger = logging.getLogger(__name__)
 
-# Hard timeout — if TinyFish hasn't returned in this time, give up
-SITE_TIMEOUT_SECONDS = 90
 # Total wall-clock timeout for the entire parallel batch
 BATCH_TIMEOUT_SECONDS = 120
 
@@ -19,8 +16,8 @@ def analyze_competitors(
 ) -> CompetitorAnalysisResponse:
     """Analyze multiple competitor URLs using TinyFish and aggregate results.
 
-    If a URL fails (timeout, captcha, etc.), tries the next backup URL before
-    falling back to mock data.
+    If a URL fails (timeout, captcha, etc.), tries the next backup URL.
+    Only real data is used — no mock fallbacks.
     """
     site_analyses = []
     succeeded_urls: set[str] = set()
@@ -45,19 +42,17 @@ def analyze_competitors(
                 except Exception as e:
                     logger.warning("TinyFish failed for %s (%s)", url, e)
         except TimeoutError:
-            # Batch timeout — some futures didn't finish in time
             unfinished = [u for u in urls if u not in succeeded_urls]
             logger.warning(
                 "Batch timeout after %ds. Unfinished: %s",
                 BATCH_TIMEOUT_SECONDS, unfinished,
             )
-            # Cancel any still-running futures
             for future in future_to_url:
                 future.cancel()
 
     failed_urls = [u for u in urls if u not in succeeded_urls]
 
-    # Retry failed URLs with backups (sequentially — these are fallbacks)
+    # Retry failed URLs with backups (sequentially)
     if failed_urls and backups:
         remaining_backups = [u for u in backups if u not in set(failed_urls) and u not in set(urls)]
         for backup_url in remaining_backups:
@@ -72,14 +67,12 @@ def analyze_competitors(
             except Exception as e:
                 logger.warning("Backup also failed for %s (%s)", backup_url, e)
 
-    # Any remaining failures get mock data
+    # Log any sites we couldn't analyze — no mock data, just skip them
     for url in failed_urls:
-        logger.warning("Using mock data for %s", url)
-        site_analyses.append(mock_site_analysis(url))
+        logger.warning("No data for %s — skipping (no mock fallback)", url)
 
     if not site_analyses:
-        logger.warning("No sites analyzed, returning full mock response")
-        return CompetitorAnalysisResponse(**MOCK_RESPONSE)
+        raise RuntimeError("All competitor sites failed or timed out. No data to aggregate.")
 
-    # Aggregate all site analyses into unified patterns
+    # Aggregate whatever real data we got
     return aggregate_patterns(site_analyses, style_goal)
