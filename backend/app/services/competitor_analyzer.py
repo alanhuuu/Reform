@@ -8,8 +8,10 @@ from app.services.tinyfish_client import extract_site_data
 
 logger = logging.getLogger(__name__)
 
-# Hard timeout per site — if TinyFish is stuck on captcha, kill it
-SITE_TIMEOUT_SECONDS = 60
+# Hard timeout — if TinyFish hasn't returned in this time, give up
+SITE_TIMEOUT_SECONDS = 90
+# Total wall-clock timeout for the entire parallel batch
+BATCH_TIMEOUT_SECONDS = 120
 
 
 def analyze_competitors(
@@ -21,7 +23,7 @@ def analyze_competitors(
     falling back to mock data.
     """
     site_analyses = []
-    failed_urls: list[str] = []
+    succeeded_urls: set[str] = set()
     backups = list(backup_urls or [])
 
     # Visit each site in parallel using TinyFish
@@ -30,18 +32,30 @@ def analyze_competitors(
             executor.submit(extract_site_data, url): url for url in urls
         }
 
-        for future in as_completed(future_to_url, timeout=SITE_TIMEOUT_SECONDS * 2):
-            url = future_to_url[future]
-            try:
-                result = future.result(timeout=SITE_TIMEOUT_SECONDS)
-                site_analyses.append(result)
-                logger.info("Successfully analyzed: %s", url)
-            except TimeoutError:
-                logger.warning("TinyFish TIMED OUT for %s after %ds", url, SITE_TIMEOUT_SECONDS)
-                failed_urls.append(url)
-            except Exception as e:
-                logger.warning("TinyFish failed for %s (%s)", url, e)
-                failed_urls.append(url)
+        try:
+            for future in as_completed(future_to_url, timeout=BATCH_TIMEOUT_SECONDS):
+                url = future_to_url[future]
+                try:
+                    result = future.result(timeout=10)
+                    site_analyses.append(result)
+                    succeeded_urls.add(url)
+                    logger.info("Successfully analyzed: %s", url)
+                except TimeoutError:
+                    logger.warning("TinyFish result timeout for %s", url)
+                except Exception as e:
+                    logger.warning("TinyFish failed for %s (%s)", url, e)
+        except TimeoutError:
+            # Batch timeout — some futures didn't finish in time
+            unfinished = [u for u in urls if u not in succeeded_urls]
+            logger.warning(
+                "Batch timeout after %ds. Unfinished: %s",
+                BATCH_TIMEOUT_SECONDS, unfinished,
+            )
+            # Cancel any still-running futures
+            for future in future_to_url:
+                future.cancel()
+
+    failed_urls = [u for u in urls if u not in succeeded_urls]
 
     # Retry failed URLs with backups (sequentially — these are fallbacks)
     if failed_urls and backups:
