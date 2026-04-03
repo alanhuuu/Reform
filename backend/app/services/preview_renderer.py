@@ -53,10 +53,28 @@ def _clone_repo(repo_url: str, branch: str, target_dir: str, access_token: str =
         raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
 
 
+def _is_frontend_package(pkg_path: str) -> bool:
+    """Check if a package.json contains Next.js or React as a dependency."""
+    import json as _json
+    try:
+        with open(pkg_path, "r") as f:
+            data = _json.load(f)
+        all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+        return "next" in all_deps or "react" in all_deps
+    except Exception:
+        return False
+
+
 def _find_frontend_root(repo_dir: str) -> str:
-    """Find the directory containing package.json with a Next.js or React setup."""
-    # Check common locations
-    candidates = [
+    """Find the directory containing package.json with a Next.js or React setup.
+
+    Strategy:
+    1. Check common hardcoded names first (fast path)
+    2. Scan all immediate subdirectories
+    3. Prefer dirs with 'next' in deps over plain 'react'
+    """
+    # Fast path: check common locations first
+    priority_dirs = [
         repo_dir,
         os.path.join(repo_dir, "frontend"),
         os.path.join(repo_dir, "client"),
@@ -64,11 +82,45 @@ def _find_frontend_root(repo_dir: str) -> str:
         os.path.join(repo_dir, "app"),
         os.path.join(repo_dir, "src"),
     ]
-    for d in candidates:
+    for d in priority_dirs:
         pkg = os.path.join(d, "package.json")
-        if os.path.isfile(pkg):
+        if os.path.isfile(pkg) and _is_frontend_package(pkg):
+            logger.info("Frontend root (priority): %s", d)
             return d
-    raise RuntimeError("Could not find package.json in repo")
+
+    # Scan all immediate subdirectories for any package.json with react/next
+    best = None
+    for entry in os.listdir(repo_dir):
+        subdir = os.path.join(repo_dir, entry)
+        if not os.path.isdir(subdir) or entry.startswith(".") or entry == "node_modules":
+            continue
+        pkg = os.path.join(subdir, "package.json")
+        if os.path.isfile(pkg) and _is_frontend_package(pkg):
+            logger.info("Frontend root (scan): %s", subdir)
+            # Prefer next over plain react
+            import json as _json
+            try:
+                with open(pkg) as f:
+                    data = _json.load(f)
+                all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+                if "next" in all_deps:
+                    return subdir
+                if best is None:
+                    best = subdir
+            except Exception:
+                if best is None:
+                    best = subdir
+
+    if best:
+        return best
+
+    # Last resort: repo root if it has any package.json
+    root_pkg = os.path.join(repo_dir, "package.json")
+    if os.path.isfile(root_pkg):
+        logger.warning("Frontend root fallback to repo root (no react/next detected)")
+        return repo_dir
+
+    raise RuntimeError("Could not find package.json with React or Next.js in repo")
 
 
 def _install_deps(frontend_dir: str) -> None:
@@ -77,14 +129,22 @@ def _install_deps(frontend_dir: str) -> None:
     # Prefer npm ci for speed, fall back to npm install
     lock_file = os.path.join(frontend_dir, "package-lock.json")
     cmd = ["npm", "ci", "--prefer-offline"] if os.path.isfile(lock_file) else ["npm", "install"]
+    start = time.time()
     result = subprocess.run(
         cmd, cwd=frontend_dir,
         capture_output=True, text=True, timeout=INSTALL_TIMEOUT,
         env={**os.environ, "NODE_ENV": "development"},
     )
+    elapsed = time.time() - start
     if result.returncode != 0:
-        logger.error("npm install stderr: %s", result.stderr[-500:])
+        logger.error("npm install failed after %.1fs: %s", elapsed, result.stderr[-500:])
         raise RuntimeError(f"npm install failed: {result.stderr.strip()[-200:]}")
+    # Sanity check: if install took < 5s, deps probably weren't actually installed
+    if elapsed < 5:
+        node_modules = os.path.join(frontend_dir, "node_modules")
+        if not os.path.isdir(node_modules) or len(os.listdir(node_modules)) < 10:
+            logger.warning("npm install finished in %.1fs but node_modules looks empty — deps may not have installed", elapsed)
+    logger.info("Dependencies installed in %.1fs", elapsed)
 
 
 def _start_dev_server(frontend_dir: str, port: int) -> subprocess.Popen:
