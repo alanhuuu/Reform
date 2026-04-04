@@ -128,35 +128,35 @@ def validate_transformation(original_code: str, transformed_code: str) -> dict:
             ),
         }
 
-    if tag_changes < 3 and meaningful_changes < 5:
+    if tag_changes < 8 and meaningful_changes < 15:
         return {
             "is_structural": False,
-            "confidence": 0.75,
+            "confidence": 0.8,
             "reasoning": (
-                f"Minimal structural changes: {tag_changes} tag changes, "
+                f"Insufficient structural changes: {tag_changes} tag changes, "
                 f"{meaningful_changes} meaningful line changes. "
-                f"Likely cosmetic with minor structural tweaks."
+                f"The before and after would look too similar."
             ),
         }
 
-    if tag_changes >= 5 or meaningful_changes >= 10:
+    if tag_changes >= 15 or meaningful_changes >= 25:
         return {
             "is_structural": True,
             "confidence": 0.9,
             "reasoning": (
-                f"Significant structural changes: {tag_changes} tag changes, "
+                f"Dramatic structural changes: {tag_changes} tag changes, "
                 f"{meaningful_changes} meaningful line changes, "
                 f"{new_tags} new tags, {removed_tags} removed tags."
             ),
         }
 
-    # Moderate changes — likely structural but borderline
+    # Moderate changes — accept but note it's borderline
     return {
         "is_structural": True,
         "confidence": 0.6,
         "reasoning": (
             f"Moderate structural changes: {tag_changes} tag changes, "
             f"{meaningful_changes} meaningful line changes. "
-            f"Borderline but accepting as structural."
+            f"Accepting but could be more dramatic."
         ),
     }
