@@ -155,6 +155,30 @@ async def _commit_file(
         raise RuntimeError(f"Failed to commit '{path}': {detail}")
 
 
+async def _trigger_deploy_webhook(
+    client: httpx.AsyncClient, headers: dict,
+    owner: str, repo: str,
+) -> None:
+    """Fire a repository_dispatch event to trigger Vercel/Netlify auto-deploy.
+
+    GitHub Contents API commits don't trigger push webhooks, so hosting
+    platforms won't auto-deploy. This dispatch event fills that gap.
+    """
+    try:
+        res = await client.post(
+            f"{GITHUB_API}/repos/{owner}/{repo}/dispatches",
+            headers=headers,
+            json={"event_type": "reform-deploy", "client_payload": {"source": "reform"}},
+        )
+        if res.status_code in (200, 204):
+            logger.info("Triggered deploy webhook for %s/%s", owner, repo)
+        else:
+            logger.warning("Deploy webhook returned %d for %s/%s (non-fatal)", res.status_code, owner, repo)
+    except Exception as e:
+        # Non-fatal — the commit succeeded, deploy trigger is best-effort
+        logger.warning("Failed to trigger deploy webhook: %s (non-fatal)", e)
+
+
 # ─── Orchestrator ───────────────────────────────────────────────────────────
 
 
@@ -200,6 +224,9 @@ async def publish_approved_branch(
             await _commit_file(client, headers, owner, repo, branch_name, path, content, msg)
             files_changed.append(path)
             logger.info("Committed file %d/%d: %s", i + 1, len(approved_files), path)
+
+        # 5. Trigger repository_dispatch so Vercel/Netlify auto-deploy
+        await _trigger_deploy_webhook(client, headers, owner, repo)
 
     branch_url = f"https://github.com/{owner}/{repo}/tree/{branch_name}"
 

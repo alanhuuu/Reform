@@ -140,6 +140,18 @@ async def commit_to_github_endpoint(req: CommitRequest):
             commit_sha = commit_data.get("sha", "unknown")
             commit_url = commit_data.get("html_url", f"https://github.com/{req.repo_name}/commit/{commit_sha}")
 
+            # Trigger deploy webhook (Contents API commits don't fire push webhooks)
+            try:
+                owner, repo = req.repo_name.split("/", 1)
+                await client.post(
+                    f"https://api.github.com/repos/{req.repo_name}/dispatches",
+                    headers=headers,
+                    json={"event_type": "reform-deploy", "client_payload": {"source": "reform"}},
+                )
+                logger.info("Triggered deploy webhook for %s", req.repo_name)
+            except Exception as e:
+                logger.warning("Deploy webhook failed (non-fatal): %s", e)
+
             return CommitResponse(
                 success=True, commit_sha=commit_sha,
                 commit_url=commit_url, branch=target_branch,
