@@ -158,6 +158,42 @@ The user is paying for a transformation they can SEE. Subtle changes are worthle
 - Add rounded corners consistently (rounded-lg or rounded-xl)
 - Apply subtle shadows on elevated elements (cards, modals, dropdowns)
 
+## HANDLING DIFFERENT FRONTEND TYPES
+
+Adapt your transformation strategy to the type of UI:
+
+### Image-heavy / media UIs (games, creative tools, media players)
+- The background image/video is NOT yours to change — focus on the OVERLAY components
+- Make overlay cards/panels LARGER, more prominent, with stronger backgrounds (higher opacity)
+- Increase the contrast between overlay elements and the background
+- Restructure the layout of overlays — reposition them, group them into panels
+- Add glassmorphism with stronger blur/opacity so UI elements stand out
+- Make buttons and controls significantly bigger and more visible
+- If controls are scattered, consolidate them into a unified control panel
+
+### Dashboards / admin panels
+- Reorganize into clear grid sections with cards
+- Add a proper sidebar if one doesn't exist
+- Create stat cards with large numbers and labels
+- Add visual hierarchy between primary metrics and secondary data
+
+### Landing pages / marketing sites
+- Restructure into clear full-width sections
+- Make the hero dramatically bigger with prominent CTA
+- Add proper spacing between sections (64px+)
+- Upgrade feature sections from lists to card grids
+
+### Forms / data entry
+- Add proper labels, spacing, and grouping
+- Split long forms into logical sections with headers
+- Make submit buttons prominent and properly placed
+- Add visual feedback states
+
+### Single-page apps (SPAs)
+- Add proper navigation structure
+- Create clear content areas with boundaries
+- Add breadcrumbs or progress indicators where appropriate
+
 ## WHAT "DRAMATICALLY DIFFERENT" MEANS
 
 GOOD transformation (visible at a glance):
@@ -166,6 +202,8 @@ GOOD transformation (visible at a glance):
 - Basic form → multi-step wizard with progress
 - Plain text list → rich cards with icons and metadata
 - Cramped layout → spacious layout with clear sections
+- Small scattered overlays → consolidated prominent panels
+- Tiny controls on image → large glassmorphic control panel
 
 BAD transformation (too subtle):
 - Only changed colors/fonts

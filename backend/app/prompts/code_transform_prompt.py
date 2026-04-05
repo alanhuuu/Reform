@@ -125,6 +125,16 @@ Subtle changes are worthless — the user is paying for a visible transformation
 - Use background variations for depth
 - Consistent rounded corners and shadows
 
+## HANDLING DIFFERENT FRONTEND TYPES
+
+Adapt your strategy to what you're transforming:
+
+- **Image-heavy UIs** (media players, games, creative tools): Focus on OVERLAY components. Make panels larger, higher opacity, stronger glassmorphism. Consolidate scattered controls into unified panels. The image stays — the UI on top of it gets dramatically better.
+- **Dashboards**: Reorganize into grid cards, add sidebar, create stat cards with large numbers.
+- **Landing pages**: Full-width sections, dramatic hero, prominent CTA, 64px+ section spacing.
+- **Forms**: Add grouping, labels, spacing. Split into logical sections.
+- **SPAs**: Add navigation structure, clear content areas, breadcrumbs.
+
 ## WHAT "DRAMATICALLY DIFFERENT" MEANS
 
 GOOD (visible at a glance):
@@ -132,6 +142,7 @@ GOOD (visible at a glance):
 - Flat page → sectioned dashboard
 - Cramped → spacious with clear sections
 - Basic form → styled form with proper spacing
+- Scattered overlays on image → consolidated glassmorphic panel
 
 BAD (too subtle):
 - Only changed colors
