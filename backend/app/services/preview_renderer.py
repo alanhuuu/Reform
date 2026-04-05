@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import time
 
-from app.services.screenshot import take_screenshot_b64
+from app.services.screenshot import take_screenshot_b64, take_screenshot_b64_with_error_check
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +342,15 @@ async def render_previews(
         # ── Step 7: Screenshot AFTER (the modified code) ──
         logger.info("Screenshotting AFTER: %s", preview_url)
         try:
-            after_b64 = await take_screenshot_b64(preview_url)
+            after_b64, has_error = await take_screenshot_b64_with_error_check(preview_url)
+            if has_error:
+                logger.warning("AFTER screenshot shows a build/syntax error — falling back to BEFORE")
+                return {
+                    "before_screenshot": before_b64,
+                    "after_screenshot": before_b64,
+                    "preview_route": route,
+                    "preview_error": "Transformed code had a syntax error. Showing original preview instead.",
+                }
         except Exception as e:
             logger.warning("AFTER screenshot failed: %s", e)
             after_b64 = before_b64

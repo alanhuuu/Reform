@@ -19,7 +19,7 @@ from app.services.preview_renderer import (
     _kill_server,
     _guess_route,
 )
-from app.services.screenshot import take_screenshot_b64
+from app.services.screenshot import take_screenshot_b64, take_screenshot_b64_with_error_check
 
 logger = logging.getLogger(__name__)
 
@@ -127,10 +127,13 @@ async def render_multi_page_previews(
                 # Wait for HMR
                 await asyncio.sleep(4)
 
-                # Screenshot AFTER
+                # Screenshot AFTER (with error detection)
                 logger.info("Screenshotting AFTER: %s", preview_url)
                 try:
-                    after_b64 = await take_screenshot_b64(preview_url)
+                    after_b64, has_error = await take_screenshot_b64_with_error_check(preview_url)
+                    if has_error:
+                        logger.warning("AFTER screenshot shows build error for %s — using BEFORE", page_path)
+                        after_b64 = before_b64
                 except Exception as e:
                     logger.warning("AFTER screenshot failed for %s: %s", page_path, e)
                     after_b64 = before_b64
