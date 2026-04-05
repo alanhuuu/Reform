@@ -13,7 +13,13 @@ async def take_screenshot_b64(url: str) -> str:
         page = await browser.new_page(viewport={"width": 1440, "height": 900})
         try:
             await page.goto(url, wait_until="networkidle", timeout=30000)
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(2000)
+
+            # Check if the page is blank (white/empty body)
+            body_html = await page.inner_html("body")
+            if len(body_html.strip()) < 50:
+                logger.warning("Page body is nearly empty (%d chars) — app may need env vars to render", len(body_html.strip()))
+
             screenshot = await page.screenshot(type="png", full_page=False)
             return base64.b64encode(screenshot).decode("utf-8")
         finally:

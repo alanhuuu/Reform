@@ -14,6 +14,7 @@ from app.services.preview_renderer import (
     _clone_repo,
     _find_frontend_root,
     _install_deps,
+    _detect_framework,
     _start_dev_server,
     _wait_for_server,
     _kill_server,
@@ -98,7 +99,8 @@ async def render_multi_page_previews(
         # ── Step 4: Screenshot each transformed page ──
         for i, transform in enumerate(transforms):
             page_path = transform["path"]
-            route = transform.get("route") or _guess_route(page_path)
+            framework = _detect_framework(frontend_dir)
+            route = transform.get("route") or _guess_route(page_path, framework)
             updated_code = transform["updated_code"]
             preview_url = f"http://localhost:{port}{route}"
 

@@ -282,7 +282,7 @@ async def render_previews(
     tmp_dir = tempfile.mkdtemp(prefix="reform_preview_")
     proc = None
     port = _find_free_port()
-    route = _guess_route(target_file)
+    route = "/"  # Will be updated after framework detection
 
     try:
         # ── Step 1: Clone ──
@@ -291,6 +291,10 @@ async def render_previews(
         # ── Step 2: Find frontend root & install deps ──
         frontend_dir = _find_frontend_root(tmp_dir)
         _install_deps(frontend_dir)
+
+        # ── Step 2.5: Detect framework and guess route ──
+        framework = _detect_framework(frontend_dir)
+        route = _guess_route(target_file, framework)
 
         # ── Step 3: Start dev server ──
         proc = _start_dev_server(frontend_dir, port)
@@ -394,9 +398,19 @@ async def render_previews(
             pass
 
 
-def _guess_route(target_path: str) -> str:
-    """Convert file path to Next.js route."""
+def _guess_route(target_path: str, framework: str = "unknown") -> str:
+    """Convert file path to a route based on the framework.
+
+    Next.js: file-based routing (app/page.tsx → /, pages/about.tsx → /about)
+    CRA/Vite/other: always / (client-side routing, SPA)
+    """
     import re
+
+    # CRA and Vite are SPAs — always serve from root
+    if framework in ("cra", "vite", "unknown"):
+        return "/"
+
+    # Next.js App Router: app/dashboard/page.tsx → /dashboard
     match = re.search(r'app/(.*?)page\.[jt]sx?$', target_path)
     if match:
         inner = match.group(1).rstrip("/")
@@ -404,8 +418,11 @@ def _guess_route(target_path: str) -> str:
             return "/"
         parts = [p for p in inner.split("/") if not p.startswith("(")]
         return "/" + "/".join(parts) if parts else "/"
+
+    # Next.js Pages Router: pages/about.tsx → /about
     match = re.search(r'pages/(.*?)\.[jt]sx?$', target_path)
     if match:
         inner = match.group(1)
         return "/" if inner == "index" else "/" + inner
+
     return "/"
