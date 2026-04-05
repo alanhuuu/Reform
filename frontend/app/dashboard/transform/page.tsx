@@ -53,9 +53,7 @@ interface GithubRepo {
 type PipelineStep = 'idle' | 'ingesting' | 'analyzing' | 'transforming' | 'complete'
 
 const PIPELINE_STAGES = [
-  { key: 'ingesting', label: 'Fetching files', duration: 15 },
-  { key: 'analyzing', label: 'Analyzing code', duration: 25 },
-  { key: 'transforming', label: 'Transforming UI', duration: 180 },
+  { key: 'ingesting', label: 'Analyzing & transforming pages', duration: 240 },
 ]
 
 function PipelineProgress({ step, repoName, targetFile }: { step: PipelineStep; repoName: string; targetFile: string }) {
@@ -76,9 +74,9 @@ function PipelineProgress({ step, repoName, targetFile }: { step: PipelineStep; 
   const stageProgress = currentStage ? Math.min(elapsed / currentStage.duration, 0.95) : 0
   const overallProgress = ((completedTime + (currentStage ? stageProgress * currentStage.duration : 0)) / totalEstimate) * 100
 
-  const subtitle = step === 'ingesting' ? `Pulling frontend files from ${repoName}`
-    : step === 'analyzing' ? 'Identifying the highest-impact UI surface'
-    : `Refactoring ${targetFile.split('/').pop()} and rendering previews`
+  const subtitle = step === 'ingesting' ? `Discovering, evaluating, and transforming all pages in ${repoName}`
+    : step === 'analyzing' ? 'Scoring UI quality and planning improvements'
+    : 'Rendering before & after previews'
 
   return (
     <div className="max-w-xl mx-auto pt-6 pb-10 w-full">
@@ -775,44 +773,40 @@ export default function TransformPage() {
     setPipelineError(''); setRepoName(repo.full_name); setRepoBranch(repo.default_branch || 'main')
 
     setPipelineStep('ingesting')
-    let files: FileEntry[]
     try {
-      const res = await fetch(apiUrl('/ingest-repo'), {
+      // Use the v2 multi-page pipeline — one call does everything
+      const res = await fetch(apiUrl('/transform-repo-v2'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ github_url: `https://github.com/${repo.full_name}`, branch: repo.default_branch || 'main', access_token: session?.accessToken || null }),
-      })
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || `Ingestion failed: ${res.status}`) }
-      const data = await res.json(); files = data.files; setIngestedFiles(files)
-    } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Ingestion failed'); setPipelineStep('idle'); return }
-
-    setPipelineStep('analyzing')
-    let target: string; let codeAnalysisResult: CodeAnalysis
-    try {
-      const res = await fetch(apiUrl('/analyze-code'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files }),
-      })
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Analysis failed') }
-      codeAnalysisResult = await res.json(); setCodeAnalysis(codeAnalysisResult)
-      target = codeAnalysisResult.recommended_target; setSelectedTarget(target)
-    } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Analysis failed'); setPipelineStep('idle'); return }
-
-    setPipelineStep('transforming')
-    try {
-      const res = await fetch(apiUrl('/transform-code'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files, target_file: target, design_intelligence: analysis || {}, user_intent: userIntent, repo_clone_url: `https://github.com/${repo.full_name}.git`, branch: repo.default_branch || 'main', access_token: session?.accessToken || '' }),
+        body: JSON.stringify({
+          github_url: `https://github.com/${repo.full_name}`,
+          branch: repo.default_branch || 'main',
+          access_token: session?.accessToken || null,
+          design_intelligence: analysis || null,
+          user_intent: userIntent,
+          max_pages: 5,
+        }),
       })
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Transform failed') }
-      const result: TransformResult = await res.json()
-      setTransformResult(result); setPipelineStep('complete')
-      const adapted = adaptLegacyResult(result, repo.full_name, target)
-      setMultiPageResult(adapted)
-      sessionStorage.setItem('refineui_transform', JSON.stringify({ result, codeAnalysis: codeAnalysisResult, target, repoName: repo.full_name, branch: repo.default_branch || 'main' }))
-      const firstImpact = result.change_annotations[0]?.ux_impact?.split(',')[0]?.split('.')[0]?.trim()
-      const commitLabel = firstImpact || result.transformed_files[0]?.diff_summary?.split('.')[0]?.trim()?.slice(0, 50) || 'Improve UI layout and polish'
-      const newCommit: CommitEntry = { hash: Math.random().toString(16).slice(2, 8), msg: commitLabel, color: '#f59e0b', status: 'pending', code: result.transformed_files[0]?.updated_code, suggestion: userIntent || 'Applied design intelligence' }
-      setCommits(prev => [newCommit, ...prev]); setScOpen(true)
+      const result = await res.json()
+
+      setMultiPageResult(result)
+      setPipelineStep('complete')
+
+      // Save for session persistence
+      sessionStorage.setItem('refineui_transform', JSON.stringify({
+        multiPageResult: result,
+        repoName: repo.full_name,
+        branch: repo.default_branch || 'main',
+      }))
+
+      // Create commit entry from first transformed page
+      const firstTransformed = result.pages?.find((p: { status: string }) => p.status === 'transformed')
+      if (firstTransformed) {
+        setSelectedTarget(firstTransformed.page_path)
+        const commitLabel = firstTransformed.diff_summary?.split('.')[0]?.trim()?.slice(0, 60) || 'UI improvements'
+        const newCommit: CommitEntry = { hash: Math.random().toString(16).slice(2, 8), msg: commitLabel, color: '#f59e0b', status: 'pending', code: firstTransformed.updated_code, suggestion: userIntent || 'Applied design intelligence' }
+        setCommits(prev => [newCommit, ...prev]); setScOpen(true)
+      }
     } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Transform failed'); setPipelineStep('idle') }
   }
 
