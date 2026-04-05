@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 
 import anthropic
 from fastapi import APIRouter, HTTPException
@@ -18,6 +19,57 @@ class SuggestEditRequest(BaseModel):
 class SuggestEditResponse(BaseModel):
     revised_code: str
     summary: str
+
+
+def _extract_code(raw: str) -> str:
+    """Extract actual code from Claude's response, stripping any prose preamble."""
+    text = raw.strip()
+
+    # Strip markdown fences if present
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:])
+        if text.endswith("```"):
+            text = text[: text.rfind("```")].strip()
+
+    # If the response starts with code, return it directly
+    code_start_patterns = [
+        r"^import\s",
+        r"^export\s",
+        r"^'use client'",
+        r'^"use client"',
+        r"^const\s",
+        r"^function\s",
+        r"^class\s",
+        r"^/\*",
+        r"^//",
+    ]
+    for pattern in code_start_patterns:
+        if re.match(pattern, text):
+            return text
+
+    # Claude added prose before the code — find where the code actually starts
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        for pattern in code_start_patterns:
+            if re.match(pattern, stripped):
+                extracted = "\n".join(lines[i:])
+                logger.warning(
+                    "Stripped %d lines of prose preamble from Claude response",
+                    i,
+                )
+                return extracted
+
+    # Last resort: if there's a code fence somewhere in the middle
+    fence_match = re.search(r"```(?:tsx?|jsx?|javascript|typescript)?\n(.*?)```", text, re.DOTALL)
+    if fence_match:
+        logger.warning("Extracted code from embedded markdown fence")
+        return fence_match.group(1).strip()
+
+    # Nothing worked — return as-is but log a warning
+    logger.error("Could not extract clean code from Claude response (first 100 chars: %s)", text[:100])
+    return text
 
 
 @router.post("/suggest-edit", response_model=SuggestEditResponse)
@@ -47,25 +99,30 @@ async def suggest_edit_endpoint(req: SuggestEditRequest):
 1. Apply the user's requested edit to the current code.
 2. Keep all existing functionality intact unless the edit explicitly changes it.
 3. Maintain the same dark theme, Tailwind classes, and code style.
-4. Return ONLY the revised code — no markdown fences, no explanation.
-
-Start directly with the import line or component definitions."""
+4. Return ONLY the revised code — no explanation, no commentary.
+5. Start IMMEDIATELY with the first line of code (import statement or 'use client' directive).
+6. Do NOT include markdown fences.
+7. Do NOT write any text before or after the code."""
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=8192,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": "import"},
+            ],
         )
-        raw = message.content[0].text.strip()
+        # Prepend "import" back since we used it as a prefill
+        raw = "import" + message.content[0].text
 
-        # Strip markdown fences if present
-        if raw.startswith("```"):
-            lines = raw.split("\n")
-            raw = "\n".join(lines[1:])
-            if raw.endswith("```"):
-                raw = raw[: raw.rfind("```")].strip()
+        revised_code = _extract_code(raw)
+
+        # Sanity check: does it look like valid code?
+        if not any(kw in revised_code[:200] for kw in ["import", "export", "function", "const", "'use client'"]):
+            logger.error("Revised code doesn't look like valid JSX (first 200 chars: %s)", revised_code[:200])
+            raise ValueError("Claude returned prose instead of code")
 
         # Generate a short summary of the change
         summary_msg = client.messages.create(
@@ -80,7 +137,7 @@ Start directly with the import line or component definitions."""
         )
         summary = summary_msg.content[0].text.strip()
 
-        return SuggestEditResponse(revised_code=raw, summary=summary)
+        return SuggestEditResponse(revised_code=revised_code, summary=summary)
 
     except Exception as e:
         logger.error("Suggest edit failed: %s", e, exc_info=True)

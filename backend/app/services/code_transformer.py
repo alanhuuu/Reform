@@ -57,15 +57,18 @@ async def transform_code(
 
     message = client.messages.create(
         model="claude-sonnet-4-6", max_tokens=16384,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": "{"},
+        ],
     )
 
-    raw = message.content[0].text.strip()
-    if raw.startswith("```"):
-        lines = raw.split("\n")
-        raw = "\n".join(lines[1:])
-        if raw.endswith("```"):
-            raw = raw[: raw.rfind("```")].strip()
+    # Prepend "{" back since we used it as a prefill to force JSON
+    raw = "{" + message.content[0].text.strip()
+
+    # Strip markdown fences if present
+    if "```" in raw:
+        raw = raw.replace("```json", "").replace("```", "").strip()
 
     try:
         result = json.loads(raw)
@@ -76,6 +79,11 @@ async def transform_code(
     updated_code = result.get("updated_code", "")
     if not updated_code:
         raise ValueError("Transformation returned empty code")
+
+    # Sanity check: does it look like valid code?
+    if not any(kw in updated_code[:300] for kw in ["import", "export", "function", "const", "'use client'", "<!DOCTYPE"]):
+        logger.error("updated_code doesn't look like valid code (first 200 chars: %s)", updated_code[:200])
+        raise ValueError("Transformation returned invalid code (prose instead of JSX)")
 
     # ── Real preview: clone repo, run dev server, screenshot BEFORE & AFTER ──
     preview = await render_previews(
