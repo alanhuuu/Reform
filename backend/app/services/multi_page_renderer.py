@@ -14,6 +14,7 @@ from app.services.preview_renderer import (
     _clone_repo,
     _find_frontend_root,
     _install_deps,
+    _generate_dummy_env,
     _detect_framework,
     _start_dev_server,
     _wait_for_server,
@@ -67,6 +68,9 @@ async def render_multi_page_previews(
         # ── Step 2: Find frontend root & install deps once ──
         frontend_dir = _find_frontend_root(tmp_dir)
         _install_deps(frontend_dir)
+
+        # ── Step 2.5: Generate dummy env vars ──
+        _generate_dummy_env(frontend_dir)
 
         # ── Step 3: Start dev server once ──
         proc = _start_dev_server(frontend_dir, port)
