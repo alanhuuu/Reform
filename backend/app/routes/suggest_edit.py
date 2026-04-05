@@ -109,13 +109,9 @@ async def suggest_edit_endpoint(req: SuggestEditRequest):
         message = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=8192,
-            messages=[
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": "import"},
-            ],
+            messages=[{"role": "user", "content": prompt}],
         )
-        # Prepend "import" back since we used it as a prefill
-        raw = "import" + message.content[0].text
+        raw = message.content[0].text.strip()
 
         revised_code = _extract_code(raw)
 

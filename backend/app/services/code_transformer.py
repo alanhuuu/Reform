@@ -57,14 +57,10 @@ async def transform_code(
 
     message = client.messages.create(
         model="claude-sonnet-4-6", max_tokens=16384,
-        messages=[
-            {"role": "user", "content": prompt},
-            {"role": "assistant", "content": "{"},
-        ],
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    # Prepend "{" back since we used it as a prefill to force JSON
-    raw = "{" + message.content[0].text.strip()
+    raw = message.content[0].text.strip()
 
     # Strip markdown fences if present
     if "```" in raw:
