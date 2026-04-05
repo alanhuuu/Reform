@@ -69,13 +69,22 @@ async def render_multi_page_previews(
 
         # ── Step 3: Start dev server once ──
         proc = _start_dev_server(frontend_dir, port)
-        if not _wait_for_server(port):
+        server_ready = _wait_for_server(port)
+        if not server_ready:
             stderr = ""
+            stdout = ""
             if proc.stderr:
                 try:
-                    stderr = proc.stderr.read(2000).decode("utf-8", errors="replace")
+                    stderr = proc.stderr.read(4000).decode("utf-8", errors="replace")
                 except Exception:
                     pass
+            if proc.stdout:
+                try:
+                    stdout = proc.stdout.read(2000).decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+            logger.error("Dev server failed. stderr: %s", stderr[:1000])
+            logger.error("Dev server failed. stdout: %s", stdout[:500])
             for t in transforms:
                 results[t["path"]] = {
                     "before_screenshot": "",
@@ -83,6 +92,8 @@ async def render_multi_page_previews(
                     "preview_error": f"Dev server failed to start. {stderr[:200]}",
                 }
             return results
+
+        logger.info("Dev server ready on port %d — proceeding with screenshots", port)
 
         # ── Step 4: Screenshot each transformed page ──
         for i, transform in enumerate(transforms):

@@ -341,6 +341,13 @@ async def run_pipeline_v2(
             logger.error("Screenshot rendering failed: %s", e, exc_info=True)
             pipeline_errors.append(f"Screenshot rendering failed: {e}")
 
+    # Log screenshot results for debugging
+    for path, sdata in screenshot_results.items():
+        has_before = bool(sdata.get("before_screenshot"))
+        has_after = bool(sdata.get("after_screenshot"))
+        perr = sdata.get("preview_error", "")
+        logger.info("Screenshots for %s: before=%s after=%s error=%s", path, has_before, has_after, perr or "none")
+
     # ── Step 7: Aggregate results ───────────────────────────────────
     page_results = []
 
