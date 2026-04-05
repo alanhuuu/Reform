@@ -126,25 +126,38 @@ def _find_frontend_root(repo_dir: str) -> str:
 def _install_deps(frontend_dir: str) -> None:
     """Run npm install in the frontend directory."""
     logger.info("Installing dependencies in %s", frontend_dir)
-    # Prefer npm ci for speed, fall back to npm install
+    env = {**os.environ, "NODE_ENV": "development"}
+
+    # Try npm ci first (faster), fall back to npm install if it fails
     lock_file = os.path.join(frontend_dir, "package-lock.json")
-    cmd = ["npm", "ci", "--prefer-offline"] if os.path.isfile(lock_file) else ["npm", "install"]
+    if os.path.isfile(lock_file):
+        start = time.time()
+        result = subprocess.run(
+            ["npm", "ci", "--prefer-offline"], cwd=frontend_dir,
+            capture_output=True, text=True, timeout=INSTALL_TIMEOUT, env=env,
+        )
+        if result.returncode == 0:
+            logger.info("Dependencies installed via npm ci in %.1fs", time.time() - start)
+            return
+        logger.warning("npm ci failed, falling back to npm install: %s", result.stderr[-200:])
+
+    # Fallback: npm install (works with any lock file version)
     start = time.time()
     result = subprocess.run(
-        cmd, cwd=frontend_dir,
-        capture_output=True, text=True, timeout=INSTALL_TIMEOUT,
-        env={**os.environ, "NODE_ENV": "development"},
+        ["npm", "install"], cwd=frontend_dir,
+        capture_output=True, text=True, timeout=INSTALL_TIMEOUT, env=env,
     )
     elapsed = time.time() - start
     if result.returncode != 0:
         logger.error("npm install failed after %.1fs: %s", elapsed, result.stderr[-500:])
         raise RuntimeError(f"npm install failed: {result.stderr.strip()[-200:]}")
-    # Sanity check: if install took < 5s, deps probably weren't actually installed
+
+    # Sanity check
     if elapsed < 5:
         node_modules = os.path.join(frontend_dir, "node_modules")
         if not os.path.isdir(node_modules) or len(os.listdir(node_modules)) < 10:
-            logger.warning("npm install finished in %.1fs but node_modules looks empty — deps may not have installed", elapsed)
-    logger.info("Dependencies installed in %.1fs", elapsed)
+            logger.warning("npm install finished in %.1fs but node_modules looks empty", elapsed)
+    logger.info("Dependencies installed via npm install in %.1fs", elapsed)
 
 
 def _detect_framework(frontend_dir: str) -> str:
