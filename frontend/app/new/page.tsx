@@ -6,11 +6,6 @@ import Link from 'next/link'
 import Image from 'next/image'
 import InteractiveBackground from '@/components/landing/InteractiveBackground'
 
-const SUGGESTIONS = [
-  'Refine a Next.js dashboard to Railway style',
-  'Apply minimal preset to my admin panel',
-]
-
 const STEPS = [
   { num: '01', text: 'Connect or paste a repo URL' },
   { num: '02', text: 'Analyze competitors and design cues' },
@@ -342,21 +337,6 @@ export default function NewPage() {
                     className="w-full bg-transparent px-4 py-3.5 text-sm outline-none"
                     style={{ color: 'rgba(255,255,255,0.85)' }}
                   />
-                  {!query && (
-                    <div className="px-2 pb-2">
-                      {SUGGESTIONS.map((suggestion) => (
-                        <div
-                          key={suggestion}
-                          className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-white/[0.03]"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#aab4ff" strokeWidth="1.5">
-                            <path d="M12 3l1.912 5.813a2 2 0 001.272 1.272L21 12l-5.816 1.916a2 2 0 00-1.272 1.272L12 21l-1.912-5.812a2 2 0 00-1.272-1.272L3 12l5.816-1.915a2 2 0 001.272-1.272L12 3z"/>
-                          </svg>
-                          <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)' }}>{suggestion}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
                 {/* Action rows */}
