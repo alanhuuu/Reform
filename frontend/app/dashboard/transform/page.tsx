@@ -792,12 +792,41 @@ export default function TransformPage() {
       setMultiPageResult(result)
       setPipelineStep('complete')
 
-      // Save for session persistence
+      // Save for session persistence (legacy)
       sessionStorage.setItem('refineui_transform', JSON.stringify({
         multiPageResult: result,
         repoName: repo.full_name,
         branch: repo.default_branch || 'main',
       }))
+
+      // Save to database + S3 for permanent persistence
+      if (session?.githubId) {
+        try {
+          await fetch(apiUrl('/projects/save-run'), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              github_user_id: session.githubId,
+              github_username: session.githubUsername || '',
+              repo_name: repo.full_name,
+              repo_url: `https://github.com/${repo.full_name}`,
+              branch: repo.default_branch || 'main',
+              framework: result.framework || 'unknown',
+              user_intent: userIntent,
+              design_intelligence: analysis || null,
+              file_tree: [],
+              files: [],
+              total_pages_found: result.total_pages_found || 0,
+              total_transformed: result.total_transformed || 0,
+              total_skipped: result.total_skipped || 0,
+              global_summary: result.global_summary || [],
+              pipeline_errors: result.pipeline_errors || [],
+              pages: result.pages || [],
+            }),
+          })
+        } catch (e) {
+          console.warn('Failed to save run to DB (non-fatal):', e)
+        }
+      }
 
       // Create commit entry from first transformed page
       const firstTransformed = result.pages?.find((p: { status: string }) => p.status === 'transformed')
