@@ -323,22 +323,6 @@ export default function NewPage() {
             ) : (
               /* ── Main view ── */
               <div className="pb-20">
-                {/* Prompt input */}
-                <div
-                  className="rounded-xl overflow-hidden mb-3"
-                  style={{ border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)' }}
-                >
-                  <input
-                    autoFocus
-                    type="text"
-                    placeholder="What would you like to refine?"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    className="w-full bg-transparent px-4 py-3.5 text-sm outline-none"
-                    style={{ color: 'rgba(255,255,255,0.85)' }}
-                  />
-                </div>
-
                 {/* Action rows */}
                 <div className="space-y-2">
                   <button
