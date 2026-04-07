@@ -140,6 +140,55 @@ def _spa_page_label(path: str) -> tuple[str, str] | None:
     return (label, route)
 
 
+# ── Router detection ────────────────────────────────────────────────
+
+_ROUTER_IMPORT_PATTERNS = (
+    "react-router-dom",
+    "react-router",
+    "@tanstack/react-router",
+    "wouter",
+    "@reach/router",
+)
+_ROUTER_JSX_PATTERNS = (
+    "<Route",
+    "<Routes",
+    "createBrowserRouter",
+    "createHashRouter",
+    "createMemoryRouter",
+    "RouterProvider",
+)
+
+
+def _has_client_router(files: list[dict]) -> bool:
+    """Return True if any file imports a client router or instantiates routes.
+    Used to distinguish real multi-page SPAs from single-page sites whose
+    src/screens or src/pages directories just hold stacked sections."""
+    for f in files:
+        content = f.get("content") or ""
+        if not content:
+            continue
+        # Cheap substring checks — false positives here are acceptable, since
+        # erring toward "has router" just keeps current behavior.
+        for pat in _ROUTER_IMPORT_PATTERNS:
+            if pat in content:
+                return True
+        for pat in _ROUTER_JSX_PATTERNS:
+            if pat in content:
+                return True
+    return False
+
+
+def _find_spa_entry(files: list[dict]) -> dict | None:
+    """Locate the SPA root component (App.jsx/tsx) so we can treat a
+    routerless site as a single-page site rooted there."""
+    priority = ("App.tsx", "App.jsx", "App.ts", "App.js")
+    for name in priority:
+        for f in files:
+            if f["path"].endswith("/" + name) or f["path"] == name:
+                return f
+    return None
+
+
 # ── Import resolution ───────────────────────────────────────────────
 
 def _resolve_imports(page_path: str, page_content: str, files: list[dict]) -> list[dict]:
@@ -246,6 +295,24 @@ def discover_pages(
             route=route,
             framework=page_framework,
         ))
+
+    # Single-page SPA collapse: if we matched SPA "pages" but the repo has no
+    # client router, those matches are almost always sections stacked inside
+    # one App.* file, not distinct routes. Treat the whole thing as one page.
+    if framework == "spa" and not _has_client_router(files):
+        entry = _find_spa_entry(files)
+        if entry and entry["path"] in content_lookup:
+            logger.info(
+                "SPA has no router — collapsing %d matched screens into a "
+                "single Home page at %s",
+                len(pages), entry["path"],
+            )
+            pages = [DiscoveredPage(
+                name="Home",
+                path=entry["path"],
+                route="/",
+                framework="spa",
+            )]
 
     # Resolve dependencies for each page
     dependency_map: dict[str, list[dict]] = {}
