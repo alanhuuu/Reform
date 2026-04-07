@@ -6,52 +6,44 @@ import Image from 'next/image'
 export default function Navbar() {
   return (
     <nav
-      className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl border-b"
-      style={{ background: 'rgba(19,17,28,0.85)', borderColor: 'rgba(255,255,255,0.05)' }}
+      className="fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-2xl"
+      style={{ background: 'rgba(5,7,12,0.78)', borderColor: 'var(--color-border)' }}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 h-14 sm:h-16 flex items-center justify-between">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-3 group flex-shrink-0">
-          <Image src="/reform_logo.png" alt="Reform" width={180} height={56} className="object-contain max-w-[120px] sm:max-w-[180px]" />
-        </Link>
-
-        {/* Right side */}
-        <div className="flex items-center gap-4">
-          <Link
-            href="/api/auth/signin"
-            className="text-sm px-4 py-1.5 rounded-lg flex items-center gap-2 transition-all duration-200"
+      <div className="max-w-7xl mx-auto px-5 sm:px-8 h-16 sm:h-[72px] flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2.5 min-w-0">
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
             style={{
-              color: 'rgba(255,255,255,0.5)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: 'rgba(255,255,255,0.03)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'rgba(255,255,255,0.9)'
-              e.currentTarget.style.borderColor = 'rgba(124,58,237,0.3)'
-              e.currentTarget.style.background = 'rgba(124,58,237,0.08)'
-              e.currentTarget.style.boxShadow = '0 0 12px rgba(124,58,237,0.15)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'rgba(255,255,255,0.5)'
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
-              e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
-              e.currentTarget.style.boxShadow = 'none'
+              background: 'linear-gradient(180deg, rgba(124,140,255,0.16) 0%, rgba(124,140,255,0.06) 100%)',
+              border: '1px solid rgba(170,180,255,0.12)',
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
+            <Image src="/reform_logo.png" alt="Reform" width={20} height={20} className="object-contain" />
+          </div>
+          <div className="leading-none">
+            <div className="text-[15px] font-semibold text-white" style={{ letterSpacing: '-0.02em' }}>Reform</div>
+            <div className="text-[10px] mono" style={{ color: 'var(--color-text-muted)' }}>frontend intelligence</div>
+          </div>
+        </Link>
+
+        <div className="flex items-center gap-2">
+          <Link
+            href="/subscription"
+            className="btn-ghost text-[13px] px-4 py-2 rounded-xl flex items-center gap-2"
+          >
+            <span className="hidden sm:inline">Pricing</span>
+            <svg className="sm:hidden" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 1.75l3 6.08 6.71.98-4.86 4.74 1.15 6.7L12 17.05l-6 3.18 1.15-6.7-4.86-4.74 6.71-.98 3-6.08z" />
             </svg>
-            Connect with GitHub
           </Link>
           <Link
             href="/new"
-            className="text-sm px-5 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:opacity-90"
-            style={{
-              background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
-              boxShadow: '0 0 20px rgba(124,58,237,0.25)',
-            }}
+            className="btn-primary text-[13px] px-5 py-2 rounded-xl font-semibold inline-flex items-center gap-1.5"
           >
-            Get Started →
+            Get Started
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+              <path d="M3 7h8M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </Link>
         </div>
       </div>

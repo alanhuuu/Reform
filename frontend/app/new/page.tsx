@@ -4,10 +4,23 @@ import { useState, useEffect } from 'react'
 import { useSession, signIn, signOut } from 'next-auth/react'
 import Link from 'next/link'
 import Image from 'next/image'
+import InteractiveBackground from '@/components/landing/InteractiveBackground'
 
 const SUGGESTIONS = [
   'Refine a Next.js dashboard to Railway style',
   'Apply minimal preset to my admin panel',
+]
+
+const STEPS = [
+  { num: '01', text: 'Connect or paste a repo URL' },
+  { num: '02', text: 'Analyze competitors and design cues' },
+  { num: '03', text: 'Generate a refined frontend direction' },
+]
+
+const PROCESS_NOTES = [
+  'Reform scans the repo structure before making visual recommendations.',
+  'Competitor analysis is used to shape the aesthetic direction, not your product logic.',
+  'The workflow stays frontend-only, so routes, handlers, and backend flow remain untouched.',
 ]
 
 interface GithubRepo {
@@ -38,7 +51,6 @@ export default function NewPage() {
   const [newRepoName, setNewRepoName] = useState('')
   const [showCreateForm, setShowCreateForm] = useState(false)
 
-  // Fetch user's repos when they open the GitHub view
   useEffect(() => {
     if (view === 'github' && session?.accessToken && repos.length === 0) {
       setLoadingRepos(true)
@@ -54,7 +66,6 @@ export default function NewPage() {
     }
   }, [view, session, repos.length])
 
-  // Create a new repo in the user's GitHub account
   async function handleCreateRepo() {
     if (!session?.accessToken || !newRepoName.trim()) return
     setCreatingRepo(true)
@@ -84,388 +95,407 @@ export default function NewPage() {
   )
 
   return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{
-        background: '#0d0c16',
-        backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px)',
-        backgroundSize: '24px 24px',
-        fontFamily: 'Inter, system-ui, sans-serif',
-      }}
-    >
-      {/* Top bar */}
-      <div
-        className="flex items-center justify-between px-5 py-3 border-b"
-        style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-      >
-        <div className="flex items-center gap-3">
-          <Link href="/">
-            <Image src="/reform_logo.png" alt="Reform" width={160} height={50} className="object-contain cursor-pointer" />
-          </Link>
-          <div className="flex items-center gap-2" style={{ color: 'rgba(255,255,255,0.4)', fontSize: '13px' }}>
-            <span>/</span>
-            <span className="text-white font-medium">New project</span>
-          </div>
-        </div>
-
-        {/* Auth button */}
-        {status === 'loading' ? null : session ? (
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              {session.user?.image && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={session.user.image} alt="" className="w-6 h-6 rounded-full" />
-              )}
-              <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
-                {session.user?.name ?? session.user?.email}
-              </span>
-            </div>
-            <button
-              onClick={() => signOut()}
-              className="text-xs px-3 py-1.5 rounded-lg transition-colors"
-              style={{ color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.08)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.6)')}
-              onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.3)')}
-            >
-              Sign out
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => signIn('github')}
-            className="flex items-center gap-2 text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:opacity-80"
-            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)' }}
-          >
-            <GitHubIcon size={14} />
-            Sign in with GitHub
-          </button>
-        )}
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 flex items-center justify-center p-6">
-
-        {/* ── GitHub repo view ── */}
-        {view === 'github' ? (
-          <div className="w-full max-w-lg">
-            <div className="text-center mb-8">
+    <div className="app-shell min-h-screen">
+      <InteractiveBackground />
+      <div className="relative z-[1] min-h-screen flex flex-col">
+        {/* Header */}
+        <header
+          className="border-b backdrop-blur-2xl"
+          style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(5,7,12,0.76)' }}
+        >
+          <div className="max-w-5xl mx-auto px-5 sm:px-6 py-4 flex items-center justify-between gap-4">
+            <Link href="/" className="flex items-center gap-3">
               <div
-                className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                className="w-9 h-9 rounded-xl flex items-center justify-center"
+                style={{
+                  background: 'linear-gradient(180deg, rgba(124,140,255,0.2) 0%, rgba(124,140,255,0.08) 100%)',
+                  border: '1px solid rgba(170,180,255,0.16)',
+                }}
               >
-                <GitHubIcon size={26} color="rgba(255,255,255,0.7)" />
+                <Image src="/reform_logo.png" alt="Reform" width={20} height={20} className="object-contain" />
               </div>
-              <h2 className="text-white font-semibold text-xl mb-1">
-                {session ? 'Your Repositories' : 'GitHub Repository'}
-              </h2>
-              <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: '13px' }}>
-                {session ? 'Select a repo to refine' : 'Paste any public GitHub URL'}
+              <span className="text-[15px] font-semibold text-white" style={{ letterSpacing: '-0.03em' }}>Reform</span>
+            </Link>
+
+            {status === 'loading' ? null : session ? (
+              <div className="flex items-center gap-3">
+                <div className="hidden sm:flex items-center gap-2.5 px-3 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  {session.user?.image && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={session.user.image} alt="" className="w-6 h-6 rounded-full" />
+                  )}
+                  <span className="text-[12px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                    {session.user?.name ?? session.user?.email}
+                  </span>
+                </div>
+                <button onClick={() => signOut()} className="btn-ghost text-xs px-3.5 py-2 rounded-xl">
+                  Sign out
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => signIn('github')}
+                className="btn-ghost inline-flex items-center gap-2 text-sm px-4 py-2 rounded-xl font-medium"
+              >
+                <GitHubIcon size={14} />
+                Sign in with GitHub
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* Main content — single centered column */}
+        <div className="flex-1">
+          <div className="max-w-2xl mx-auto px-5 sm:px-6">
+
+            {/* Hero */}
+            <div className="pt-20 sm:pt-28 lg:pt-36 pb-16 sm:pb-20">
+              <div className="mono text-[11px] mb-5" style={{ color: 'rgba(255,255,255,0.3)' }}>New project</div>
+              <h1
+                className="text-[clamp(32px,5vw,48px)] font-bold text-white leading-[1.15]"
+                style={{ letterSpacing: '-0.04em' }}
+              >
+                Start from the repo.
+                <br />
+                <span style={{ color: 'rgba(255,255,255,0.4)' }}>Keep the product intact.</span>
+              </h1>
+              <p
+                className="mt-5 max-w-md text-[15px]"
+                style={{ color: 'rgba(255,255,255,0.45)', lineHeight: 1.7 }}
+              >
+                Connect a GitHub repository or create a new one. Reform uses it as the starting point for a frontend-only polish pass.
               </p>
             </div>
 
-            <div
-              className="rounded-xl overflow-hidden"
-              style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}
-            >
-              <input
-                autoFocus
-                type="text"
-                placeholder={session ? 'Search your repos...' : 'github.com/owner/repository'}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="w-full bg-transparent px-4 py-3 text-sm outline-none"
-                style={{ color: 'rgba(255,255,255,0.8)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}
-              />
-
-              <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
-                {/* Not logged in: show sign-in prompt */}
-                {!session && (
-                  <div className="px-4 py-4">
-                    <button
-                      onClick={() => signIn('github')}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-                      style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)' }}
-                    >
-                      <GitHubIcon size={14} />
-                      Sign in to see your repos
-                    </button>
-                    <div className="relative my-3">
-                      <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)' }} />
-                      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 px-2 text-[10px]" style={{ color: 'rgba(255,255,255,0.2)', background: '#13111c' }}>or paste a public URL</span>
-                    </div>
-                    <Link
-                      href={`/dashboard?repo=${encodeURIComponent(query || 'https://github.com/vercel/next.js')}`}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
-                      style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: 'white' }}
-                    >
-                      Refine →
-                    </Link>
+            {/* Primary action area */}
+            {view === 'github' ? (
+              /* ── GitHub repo selection view ── */
+              <div className="pb-20">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-lg font-semibold text-white" style={{ letterSpacing: '-0.02em' }}>
+                    Choose a repository
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span className="mono text-[11px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                      {session ? 'Connected' : 'Public repos'}
+                    </span>
                   </div>
-                )}
+                </div>
 
-                {/* Logged in: show repos */}
-                {session && loadingRepos && (
-                  <div className="flex items-center justify-center py-8" style={{ color: 'rgba(255,255,255,0.3)', fontSize: '13px' }}>
-                    Loading your repos...
-                  </div>
-                )}
+                <div
+                  className="flex items-center gap-3 rounded-xl px-4 py-3 mb-4"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
+                >
+                  <GitHubIcon size={15} color="rgba(255,255,255,0.35)" />
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder={session ? 'Search your repositories...' : 'github.com/owner/repository'}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    className="w-full bg-transparent text-sm outline-none"
+                    style={{ color: 'rgba(255,255,255,0.82)' }}
+                  />
+                </div>
 
-                {session && !loadingRepos && filteredRepos.map((repo) => (
-                  <Link
-                    key={repo.id}
-                    href={`/dashboard?repo=${encodeURIComponent(`https://github.com/${repo.full_name}`)}`}
-                    className="flex items-center justify-between px-4 py-3 cursor-pointer transition-colors"
-                    style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <GitHubIcon size={14} color="rgba(255,255,255,0.35)" />
-                      <div className="min-w-0">
-                        <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.7)' }} className="truncate block">
-                          {repo.full_name}
-                        </span>
-                        {repo.language && (
-                          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)' }}>{repo.language}</span>
+                <div
+                  className="rounded-xl overflow-hidden"
+                  style={{ border: '1px solid rgba(255,255,255,0.07)' }}
+                >
+                  <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                    {!session && (
+                      <div className="p-5 space-y-4">
+                        <button
+                          onClick={() => signIn('github')}
+                          className="btn-ghost w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium"
+                        >
+                          <GitHubIcon size={14} />
+                          Sign in to browse your repos
+                        </button>
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.06)' }} />
+                          <span className="mono text-[10px]" style={{ color: 'rgba(255,255,255,0.24)' }}>or</span>
+                          <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.06)' }} />
+                        </div>
+                        <Link
+                          href={`/dashboard?repo=${encodeURIComponent(query || 'https://github.com/vercel/next.js')}`}
+                          className="btn-primary w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold"
+                        >
+                          Analyze this repo
+                          <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                            <path d="M3 7h8M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </Link>
+                      </div>
+                    )}
+
+                    {session && loadingRepos && (
+                      <div className="flex items-center justify-center py-12 text-sm" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                        Loading your repositories...
+                      </div>
+                    )}
+
+                    {session && !loadingRepos && filteredRepos.map((repo) => (
+                      <Link
+                        key={repo.id}
+                        href={`/dashboard?repo=${encodeURIComponent(`https://github.com/${repo.full_name}`)}`}
+                        className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-white/[0.03]"
+                        style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <GitHubIcon size={15} color="rgba(255,255,255,0.35)" />
+                          <div className="min-w-0">
+                            <span className="text-sm text-white truncate block">{repo.full_name}</span>
+                            <div className="flex items-center gap-2 mt-0.5 text-[11px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                              {repo.language && <span>{repo.language}</span>}
+                              {repo.private && <span>Private</span>}
+                            </div>
+                          </div>
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="flex-shrink-0">
+                          <path d="M5 3.5L8.5 7 5 10.5" stroke="rgba(255,255,255,0.2)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </Link>
+                    ))}
+
+                    {session && !loadingRepos && (
+                      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                        {!showCreateForm ? (
+                          <button
+                            onClick={() => setShowCreateForm(true)}
+                            className="w-full flex items-center gap-3 px-4 py-3.5 transition-colors text-left hover:bg-white/[0.03]"
+                          >
+                            <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: '15px' }}>+</span>
+                            <div>
+                              <div className="text-sm text-white">Create new repo</div>
+                              <div className="text-[11px]" style={{ color: 'rgba(255,255,255,0.25)' }}>New Reform-ready repository</div>
+                            </div>
+                          </button>
+                        ) : createdRepo ? (
+                          <div className="px-4 py-4 text-center">
+                            <div className="inline-flex items-center gap-2 mb-2 px-3 py-1.5 rounded-full" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.16)' }}>
+                              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                <circle cx="8" cy="8" r="7" stroke="#34d399" strokeWidth="1.5"/>
+                                <path d="M5 8l2.5 2.5L11 5.5" stroke="#34d399" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                              <span className="text-[12px]" style={{ color: '#7dd3a8' }}>Created</span>
+                            </div>
+                            <a href={createdRepo} target="_blank" rel="noopener noreferrer" className="block text-sm underline" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                              {createdRepo}
+                            </a>
+                          </div>
+                        ) : (
+                          <div className="px-4 py-3.5 flex items-center gap-3">
+                            <span className="mono text-[12px]" style={{ color: 'rgba(255,255,255,0.28)', whiteSpace: 'nowrap' }}>
+                              reform-
+                            </span>
+                            <input
+                              autoFocus
+                              type="text"
+                              placeholder="my-project"
+                              value={newRepoName}
+                              onChange={(e) => setNewRepoName(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleCreateRepo()}
+                              className="flex-1 bg-transparent outline-none text-sm rounded-none border-b pb-1.5"
+                              style={{ color: 'rgba(255,255,255,0.84)', borderColor: 'rgba(255,255,255,0.12)' }}
+                            />
+                            <button
+                              onClick={handleCreateRepo}
+                              disabled={!newRepoName.trim() || creatingRepo}
+                              className="btn-primary px-3 py-1.5 rounded-lg text-xs font-semibold"
+                              style={{ opacity: creatingRepo ? 0.6 : 1 }}
+                            >
+                              {creatingRepo ? 'Creating...' : 'Create'}
+                            </button>
+                            <button
+                              onClick={() => setShowCreateForm(false)}
+                              style={{ color: 'rgba(255,255,255,0.28)', fontSize: '18px', lineHeight: 1 }}
+                            >
+                              &times;
+                            </button>
+                          </div>
                         )}
                       </div>
-                    </div>
-                    {repo.private && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)' }}>
-                        Private
-                      </span>
-                    )}
-                  </Link>
-                ))}
-
-                {/* Create new repo (logged in only) */}
-                {session && !loadingRepos && (
-                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                    {!showCreateForm ? (
-                      <button
-                        onClick={() => setShowCreateForm(true)}
-                        className="w-full flex items-center gap-3 px-4 py-3 transition-colors text-left"
-                        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.08)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                      >
-                        <div
-                          className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
-                          style={{ background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.3)' }}
-                        >
-                          <span style={{ color: '#a855f7', fontSize: '14px', lineHeight: 1 }}>+</span>
-                        </div>
-                        <span style={{ fontSize: '13px', color: 'rgba(168,85,247,0.8)' }}>
-                          Create new repo in your account
-                        </span>
-                      </button>
-                    ) : createdRepo ? (
-                      <div className="px-4 py-4 text-center">
-                        <div className="flex items-center justify-center gap-2 mb-2">
-                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                            <circle cx="8" cy="8" r="7" stroke="#34d399" strokeWidth="1.5"/>
-                            <path d="M5 8l2.5 2.5L11 5.5" stroke="#34d399" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                          <span style={{ fontSize: '13px', color: '#34d399' }}>Repo created!</span>
-                        </div>
-                        <a
-                          href={createdRepo}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs underline"
-                          style={{ color: 'rgba(255,255,255,0.4)' }}
-                        >
-                          {createdRepo}
-                        </a>
-                      </div>
-                    ) : (
-                      <div className="px-4 py-3 flex items-center gap-2">
-                        <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.3)', whiteSpace: 'nowrap' }}>
-                          reform-
-                        </span>
-                        <input
-                          autoFocus
-                          type="text"
-                          placeholder="my-project"
-                          value={newRepoName}
-                          onChange={(e) => setNewRepoName(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleCreateRepo()}
-                          className="flex-1 bg-transparent outline-none text-sm"
-                          style={{ color: 'rgba(255,255,255,0.8)', borderBottom: '1px solid rgba(255,255,255,0.15)' }}
-                        />
-                        <button
-                          onClick={handleCreateRepo}
-                          disabled={!newRepoName.trim() || creatingRepo}
-                          className="px-3 py-1 rounded-lg text-xs font-medium text-white transition-opacity"
-                          style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', opacity: creatingRepo ? 0.6 : 1 }}
-                        >
-                          {creatingRepo ? 'Creating...' : 'Create'}
-                        </button>
-                        <button
-                          onClick={() => setShowCreateForm(false)}
-                          style={{ color: 'rgba(255,255,255,0.2)', fontSize: '18px', lineHeight: 1 }}
-                        >
-                          ×
-                        </button>
-                      </div>
                     )}
                   </div>
-                )}
+                </div>
+
+                <button onClick={() => { setView('main'); setQuery('') }} className="link-muted mt-6 text-xs">
+                  &larr; Back
+                </button>
               </div>
-            </div>
-
-            <button
-              onClick={() => { setView('main'); setQuery('') }}
-              className="mt-4 text-xs transition-colors mx-auto block"
-              style={{ color: 'rgba(255,255,255,0.25)' }}
-            >
-              ← Back
-            </button>
-          </div>
-
-        ) : (
-          /* ── Main command palette ── */
-          <div className="w-full max-w-lg">
-            <div
-              className="rounded-2xl overflow-hidden"
-              style={{
-                border: '1px solid rgba(255,255,255,0.1)',
-                background: 'rgba(13,12,22,0.95)',
-                boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
-              }}
-            >
-              {/* Search input */}
-              <input
-                autoFocus
-                type="text"
-                placeholder="What would you like to refine?"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="w-full bg-transparent px-5 py-4 text-sm outline-none"
-                style={{
-                  color: 'rgba(255,255,255,0.85)',
-                  fontSize: '14px',
-                  borderBottom: '1px solid rgba(255,255,255,0.08)',
-                }}
-              />
-
-              {/* AI suggestions */}
-              {!query && (
-                <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', padding: '8px 0' }}>
-                  {SUGGESTIONS.map((s) => (
-                    <div
-                      key={s}
-                      className="flex items-center gap-3 px-5 py-2.5 cursor-pointer"
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.08)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="1.5">
-                        <path d="M12 3l1.912 5.813a2 2 0 001.272 1.272L21 12l-5.816 1.916a2 2 0 00-1.272 1.272L12 21l-1.912-5.812a2 2 0 00-1.272-1.272L3 12l5.816-1.915a2 2 0 001.272-1.272L12 3z"/>
-                      </svg>
-                      <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.4)' }}>{s}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Options */}
-              <div style={{ padding: '8px 0' }}>
-                {/* GitHub Repository */}
+            ) : (
+              /* ── Main view ── */
+              <div className="pb-20">
+                {/* Prompt input */}
                 <div
-                  className="flex items-center justify-between px-5 py-3 cursor-pointer"
-                  onClick={() => setView('github')}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  className="rounded-xl overflow-hidden mb-3"
+                  style={{ border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)' }}
                 >
-                  <div className="flex items-center gap-3">
-                    <div style={{ color: 'rgba(255,255,255,0.4)', width: 20, display: 'flex', justifyContent: 'center' }}>
-                      <GitHubIcon size={16} />
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="What would you like to refine?"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    className="w-full bg-transparent px-4 py-3.5 text-sm outline-none"
+                    style={{ color: 'rgba(255,255,255,0.85)' }}
+                  />
+                  {!query && (
+                    <div className="px-2 pb-2">
+                      {SUGGESTIONS.map((suggestion) => (
+                        <div
+                          key={suggestion}
+                          className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-white/[0.03]"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#aab4ff" strokeWidth="1.5">
+                            <path d="M12 3l1.912 5.813a2 2 0 001.272 1.272L21 12l-5.816 1.916a2 2 0 00-1.272 1.272L12 21l-1.912-5.812a2 2 0 00-1.272-1.272L3 12l5.816-1.915a2 2 0 001.272-1.272L12 3z"/>
+                          </svg>
+                          <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)' }}>{suggestion}</span>
+                        </div>
+                      ))}
                     </div>
-                    <div>
-                      <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.75)', fontWeight: 500 }}>GitHub Repository</div>
-                      <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)', marginTop: 1 }}>
-                        {session ? `Signed in as ${session.user?.name ?? 'you'}` : 'Refine any public GitHub repo'}
+                  )}
+                </div>
+
+                {/* Action rows */}
+                <div className="space-y-2">
+                  <button
+                    className="w-full flex items-center justify-between gap-4 rounded-xl px-4 py-3.5 transition-colors hover:bg-white/[0.03] text-left"
+                    style={{ border: '1px solid rgba(255,255,255,0.07)' }}
+                    onClick={() => setView('github')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <GitHubIcon size={16} color="rgba(255,255,255,0.45)" />
+                      <div>
+                        <div className="text-sm font-medium text-white">GitHub Repository</div>
+                        <div className="text-[12px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                          {session ? `Signed in as ${session.user?.name ?? 'you'}` : 'Use any public GitHub repo'}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="rgba(255,255,255,0.25)" strokeWidth="1.2" strokeLinecap="round"/>
-                  </svg>
-                </div>
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M5 3.5L8.5 7 5 10.5" stroke="rgba(255,255,255,0.2)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
 
-                {/* Create new project */}
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: '8px', paddingTop: '8px' }}>
                   {!showCreateForm ? (
-                    <div
-                      className="flex items-center justify-between px-5 py-3 cursor-pointer"
+                    <button
+                      className="w-full flex items-center justify-between gap-4 rounded-xl px-4 py-3.5 transition-colors hover:bg-white/[0.03] text-left"
+                      style={{ border: '1px solid rgba(255,255,255,0.07)' }}
                       onClick={() => session ? setShowCreateForm(true) : signIn('github')}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                     >
                       <div className="flex items-center gap-3">
-                        <div style={{ color: 'rgba(255,255,255,0.4)', width: 20, display: 'flex', justifyContent: 'center' }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                            <path d="M12 4v16M4 12h16" strokeLinecap="round"/>
-                          </svg>
-                        </div>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="1.5">
+                          <path d="M12 4v16M4 12h16" strokeLinecap="round"/>
+                        </svg>
                         <div>
-                          <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.75)', fontWeight: 500 }}>Create new project</div>
-                          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)', marginTop: 1 }}>
-                            {session ? 'Automatically creates a repo in your GitHub account' : 'Sign in with GitHub to create a new repo'}
+                          <div className="text-sm font-medium text-white">Create new project</div>
+                          <div className="text-[12px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                            {session ? 'New GitHub repo from this workspace' : 'Sign in with GitHub to create'}
                           </div>
                         </div>
                       </div>
-                      {!session && (
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                          <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="rgba(255,255,255,0.25)" strokeWidth="1.2" strokeLinecap="round"/>
-                        </svg>
-                      )}
-                    </div>
+                    </button>
                   ) : createdRepo ? (
-                    <div className="px-5 py-4 text-center">
-                      <div className="flex items-center justify-center gap-2 mb-2">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                          <circle cx="8" cy="8" r="7" stroke="#34d399" strokeWidth="1.5"/>
-                          <path d="M5 8l2.5 2.5L11 5.5" stroke="#34d399" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                        <span style={{ fontSize: '13px', color: '#34d399' }}>Repo created!</span>
-                      </div>
-                      <a href={createdRepo} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                    <div
+                      className="rounded-xl px-4 py-4 text-center"
+                      style={{ border: '1px solid rgba(255,255,255,0.07)' }}
+                    >
+                      <div className="text-sm text-white mb-1">Repo created</div>
+                      <a href={createdRepo} target="_blank" rel="noopener noreferrer" className="text-sm underline" style={{ color: 'rgba(255,255,255,0.45)' }}>
                         {createdRepo}
                       </a>
                     </div>
                   ) : (
-                    <div className="px-5 py-3 flex items-center gap-3">
-                      <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.25)', whiteSpace: 'nowrap' }}>reform-</span>
-                      <input
-                        autoFocus
-                        type="text"
-                        placeholder="project-name"
-                        value={newRepoName}
-                        onChange={(e) => setNewRepoName(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleCreateRepo()}
-                        className="flex-1 bg-transparent outline-none text-sm"
-                        style={{ color: 'rgba(255,255,255,0.8)', borderBottom: '1px solid rgba(255,255,255,0.15)' }}
-                      />
-                      <button
-                        onClick={handleCreateRepo}
-                        disabled={!newRepoName.trim() || creatingRepo}
-                        className="px-3 py-1 rounded-lg text-xs font-medium text-white"
-                        style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', opacity: creatingRepo ? 0.6 : 1 }}
-                      >
-                        {creatingRepo ? 'Creating...' : 'Create'}
-                      </button>
-                      <button onClick={() => setShowCreateForm(false)} style={{ color: 'rgba(255,255,255,0.2)', fontSize: '18px', lineHeight: 1 }}>×</button>
+                    <div
+                      className="rounded-xl px-4 py-4"
+                      style={{ border: '1px solid rgba(255,255,255,0.07)' }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="mono text-[12px]" style={{ color: 'rgba(255,255,255,0.28)', whiteSpace: 'nowrap' }}>reform-</span>
+                        <input
+                          autoFocus
+                          type="text"
+                          placeholder="project-name"
+                          value={newRepoName}
+                          onChange={(e) => setNewRepoName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleCreateRepo()}
+                          className="flex-1 bg-transparent outline-none text-sm rounded-none border-b pb-1.5"
+                          style={{ color: 'rgba(255,255,255,0.84)', borderColor: 'rgba(255,255,255,0.12)' }}
+                        />
+                      </div>
+                      <div className="flex items-center gap-3 mt-3">
+                        <button
+                          onClick={handleCreateRepo}
+                          disabled={!newRepoName.trim() || creatingRepo}
+                          className="btn-primary px-4 py-2 rounded-lg text-xs font-semibold"
+                          style={{ opacity: creatingRepo ? 0.6 : 1 }}
+                        >
+                          {creatingRepo ? 'Creating...' : 'Create'}
+                        </button>
+                        <button onClick={() => setShowCreateForm(false)} className="link-muted text-xs">
+                          Cancel
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
 
-            <p className="text-center mt-5 text-xs" style={{ color: 'rgba(255,255,255,0.15)' }}>
-              Works with any public GitHub repository · No account required
-            </p>
+                {/* Steps — minimal, no cards */}
+                <div className="mt-16 sm:mt-20">
+                  <div className="flex items-center gap-2 mb-8">
+                    <div className="w-1 h-1 rounded-full" style={{ background: 'rgba(170,180,255,0.5)' }} />
+                    <span className="mono text-[11px]" style={{ color: 'rgba(255,255,255,0.25)' }}>How it works</span>
+                  </div>
+                  <div className="grid sm:grid-cols-3 gap-10 sm:gap-8">
+                    {STEPS.map((step) => (
+                      <div key={step.num}>
+                        <div className="mono text-[11px] mb-2" style={{ color: 'rgba(170,180,255,0.5)' }}>{step.num}</div>
+                        <p className="text-[14px]" style={{ color: 'rgba(255,255,255,0.55)', lineHeight: 1.65 }}>{step.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Process notes — clean list */}
+                <div className="mt-16 sm:mt-20" style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '2.5rem' }}>
+                  <div className="flex items-center gap-2 mb-8">
+                    <div className="w-1 h-1 rounded-full" style={{ background: 'rgba(170,180,255,0.5)' }} />
+                    <span className="mono text-[11px]" style={{ color: 'rgba(255,255,255,0.25)' }}>What to know</span>
+                  </div>
+                  <div className="space-y-5">
+                    {PROCESS_NOTES.map((note) => (
+                      <p key={note} className="text-[14px]" style={{ color: 'rgba(255,255,255,0.4)', lineHeight: 1.7 }}>
+                        {note}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Footer context */}
+                <div className="mt-16 sm:mt-20 pb-8" style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '2.5rem' }}>
+                  <div className="sm:flex sm:items-start sm:justify-between gap-12">
+                    <div className="mb-6 sm:mb-0">
+                      <div className="mono text-[11px] mb-2" style={{ color: 'rgba(255,255,255,0.25)' }}>Outcome</div>
+                      <p className="text-[14px] max-w-sm" style={{ color: 'rgba(255,255,255,0.45)', lineHeight: 1.7 }}>
+                        Better UI signal before any code transformation starts. The intake flow frames the repo, design intent, and next steps in one place.
+                      </p>
+                    </div>
+                    <div>
+                      <div className="mono text-[11px] mb-2" style={{ color: 'rgba(255,255,255,0.25)' }}>Constraint</div>
+                      <p className="text-[14px] max-w-sm" style={{ color: 'rgba(255,255,255,0.45)', lineHeight: 1.7 }}>
+                        Frontend redesign only. This stage improves visual quality and structure, not product flows. Works with any public GitHub repo.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </div>
-        )}
+        </div>
       </div>
     </div>
   )
