@@ -53,6 +53,8 @@ function DiscoveryPageInner() {
   const [currentStep, setCurrentStep] = useState(0)
   const [loading, setLoading] = useState(false)
   const [loadingStatus, setLoadingStatus] = useState('')
+  const [stageIdx, setStageIdx] = useState(0)
+  const [siteProgress, setSiteProgress] = useState<{ url: string; status: 'pending' | 'ok' | 'timeout' | 'failed' }[]>([])
   const [error, setError] = useState('')
   const [completed, setCompleted] = useState(false)
   const [discovery, setDiscovery] = useState<DiscoveryData | null>(null)
@@ -105,12 +107,15 @@ function DiscoveryPageInner() {
 
     const description = QUESTIONS.map(q => `${q.label} ${answers[q.key] || ''}`).join('. ')
     try {
+      setStageIdx(0)
       setLoadingStatus('Finding competitors in your space...')
       updateProgress(10)
       const discoverRes = await fetch(apiUrl('/discover-competitors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_description: description, style_goal: '' }) })
       if (!discoverRes.ok) throw new Error('Discovery failed')
       const discoveryData = await discoverRes.json()
 
+      setStageIdx(1)
+      setSiteProgress((discoveryData.selected_for_analysis || []).map((u: string) => ({ url: u, status: 'pending' as const })))
       setLoadingStatus(`Analyzing ${discoveryData.selected_for_analysis.length} sites with TinyFish...`)
       updateProgress(30)
 
@@ -145,12 +150,15 @@ function DiscoveryPageInner() {
                 if (evt.event === 'site_complete') {
                   const domain = evt.url.replace('https://', '').replace(/\/$/, '')
                   const status = evt.status === 'timeout' ? ' (timed out, skipping)' : evt.status === 'failed' ? ' (blocked, skipping)' : ''
+                  setSiteProgress(prev => prev.map(s => s.url === evt.url ? { ...s, status: evt.status } : s))
                   setLoadingStatus(`Analyzed ${domain}${status} (${evt.index}/${evt.total})`)
                   updateProgress(30 + Math.round((evt.index / evt.total) * 50))
                 } else if (evt.event === 'retrying') {
                   const domain = evt.url.replace('https://', '').replace(/\/$/, '')
+                  setSiteProgress(prev => [...prev, { url: evt.url, status: 'pending' as const }])
                   setLoadingStatus(`Trying backup: ${domain}...`)
                 } else if (evt.event === 'aggregating') {
+                  setStageIdx(2)
                   setLoadingStatus('Synthesizing design intelligence...')
                   updateProgress(85)
                 } else if (evt.event === 'complete') {
@@ -328,8 +336,7 @@ function DiscoveryPageInner() {
       { label: 'Analyzing sites with TinyFish...', est: 30 },
       { label: 'Synthesizing design intelligence...', est: 5 },
     ]
-    const currentStage = STAGES.find(s => loadingStatus.toLowerCase().includes(s.label.split('...')[0].toLowerCase().slice(0, 10))) || STAGES[0]
-    const stageIdx = STAGES.indexOf(currentStage)
+    const currentStage = STAGES[stageIdx] || STAGES[0]
     const completedEst = STAGES.slice(0, stageIdx).reduce((a, s) => a + s.est, 0)
     const totalEst = STAGES.reduce((a, s) => a + s.est, 0)
     const progressPct = Math.min(95, ((completedEst + currentStage.est * 0.5) / totalEst) * 100)
@@ -374,6 +381,35 @@ function DiscoveryPageInner() {
               )
             })}
           </div>
+
+          {/* Per-site live progress */}
+          {siteProgress.length > 0 && (
+            <div className="mt-6 pt-5 space-y-2" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+              <p className="text-[9px] font-medium uppercase tracking-wider mb-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                Sites
+              </p>
+              {siteProgress.map(site => {
+                const domain = site.url.replace(/^https?:\/\//, '').replace(/\/$/, '')
+                const color = site.status === 'ok' ? '#22c55e'
+                  : site.status === 'timeout' || site.status === 'failed' ? '#ef4444'
+                  : '#a855f7'
+                return (
+                  <div key={site.url} className="flex items-center gap-2.5">
+                    {site.status === 'pending' ? (
+                      <div className="w-3 h-3 rounded-full animate-spin flex-shrink-0" style={{ border: '1.5px solid rgba(168,85,247,0.15)', borderTopColor: '#a855f7' }} />
+                    ) : site.status === 'ok' ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0"><polyline points="20 6 9 17 4 12" /></svg>
+                    ) : (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    )}
+                    <span className="text-[11px] font-mono truncate" style={{ color: site.status === 'pending' ? 'rgba(255,255,255,0.45)' : site.status === 'ok' ? 'rgba(34,197,94,0.55)' : 'rgba(239,68,68,0.5)' }}>
+                      {domain}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           <p className="text-[10px] text-center mt-7" style={{ color: 'rgba(255,255,255,0.15)' }}>
             Estimated total: ~{totalEst}s — TinyFish visits each site in a real browser
