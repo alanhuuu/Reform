@@ -46,5 +46,15 @@ async def create_tables():
     """Create all tables. Called once on startup."""
     if not engine:
         return
+    from sqlalchemy import text
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight in-place migrations for columns added after initial deploy.
+        # `create_all` never alters existing tables, so add columns idempotently.
+        await conn.execute(text(
+            "ALTER TABLE transform_runs ADD COLUMN IF NOT EXISTS source_commit_sha VARCHAR"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_transform_runs_source_commit_sha "
+            "ON transform_runs (source_commit_sha)"
+        ))

@@ -23,32 +23,41 @@ def analyze_competitors(
     succeeded_urls: set[str] = set()
     backups = list(backup_urls or [])
 
-    # Visit each site in parallel using TinyFish
-    with ThreadPoolExecutor(max_workers=min(len(urls), 5)) as executor:
-        future_to_url = {
-            executor.submit(extract_site_data, url): url for url in urls
-        }
+    # Visit each site in parallel using TinyFish.
+    # NOTE: we intentionally do NOT use `with ThreadPoolExecutor(...)` — its
+    # __exit__ calls shutdown(wait=True), which would block until in-flight
+    # TinyFish SSE requests finish, defeating the batch timeout. Instead we
+    # manage the executor manually and shutdown(wait=False) on timeout so
+    # unfinished threads are abandoned (they'll die when httpx returns).
+    executor = ThreadPoolExecutor(max_workers=min(len(urls), 5))
+    future_to_url = {
+        executor.submit(extract_site_data, url): url for url in urls
+    }
+    timed_out = False
 
-        try:
-            for future in as_completed(future_to_url, timeout=BATCH_TIMEOUT_SECONDS):
-                url = future_to_url[future]
-                try:
-                    result = future.result(timeout=10)
-                    site_analyses.append(result)
-                    succeeded_urls.add(url)
-                    logger.info("Successfully analyzed: %s", url)
-                except TimeoutError:
-                    logger.warning("TinyFish result timeout for %s", url)
-                except Exception as e:
-                    logger.warning("TinyFish failed for %s (%s)", url, e)
-        except TimeoutError:
-            unfinished = [u for u in urls if u not in succeeded_urls]
-            logger.warning(
-                "Batch timeout after %ds. Unfinished: %s",
-                BATCH_TIMEOUT_SECONDS, unfinished,
-            )
-            for future in future_to_url:
-                future.cancel()
+    try:
+        for future in as_completed(future_to_url, timeout=BATCH_TIMEOUT_SECONDS):
+            url = future_to_url[future]
+            try:
+                result = future.result(timeout=10)
+                site_analyses.append(result)
+                succeeded_urls.add(url)
+                logger.info("Successfully analyzed: %s", url)
+            except TimeoutError:
+                logger.warning("TinyFish result timeout for %s", url)
+            except Exception as e:
+                logger.warning("TinyFish failed for %s (%s)", url, e)
+    except TimeoutError:
+        timed_out = True
+        unfinished = [u for u in urls if u not in succeeded_urls]
+        logger.warning(
+            "Batch timeout after %ds. Abandoning: %s",
+            BATCH_TIMEOUT_SECONDS, unfinished,
+        )
+    finally:
+        # wait=False so we don't block on in-flight TinyFish calls.
+        # cancel_futures=True drops anything not yet started.
+        executor.shutdown(wait=not timed_out, cancel_futures=True)
 
     failed_urls = [u for u in urls if u not in succeeded_urls]
 

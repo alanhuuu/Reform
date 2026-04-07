@@ -70,6 +70,7 @@ class RunResponse(BaseModel):
     project_id: str
     status: str
     user_intent: str
+    source_commit_sha: str | None = None
     total_pages_found: int
     total_transformed: int
     total_skipped: int
@@ -92,6 +93,7 @@ class SaveRunRequest(BaseModel):
     branch: str
     framework: str
     user_intent: str = ""
+    source_commit_sha: str | None = None
     design_intelligence: dict | None = None
     # File snapshot
     file_tree: list[str] = []
@@ -266,6 +268,91 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
         project_id=str(run.project_id),
         status=run.status,
         user_intent=run.user_intent or "",
+        source_commit_sha=run.source_commit_sha,
+        total_pages_found=run.total_pages_found,
+        total_transformed=run.total_transformed,
+        total_skipped=run.total_skipped,
+        global_summary=run.global_summary or [],
+        pipeline_errors=run.pipeline_errors or [],
+        created_at=run.created_at.isoformat(),
+        completed_at=run.completed_at.isoformat() if run.completed_at else None,
+        repo_name=project.repo_name,
+        branch=project.branch,
+        framework=framework,
+        pages=pages,
+    )
+
+
+@router.get("/latest-run", response_model=RunResponse)
+async def get_latest_run_by_commit(
+    github_user_id: str,
+    repo_name: str,
+    branch: str = "main",
+    commit_sha: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the most recent complete run for this user+repo+branch whose
+    source_commit_sha matches `commit_sha`. Used by the frontend to avoid
+    re-running the pipeline when the repo hasn't changed since the last run.
+    """
+    # Find the project
+    proj_result = await db.execute(
+        select(Project).where(
+            Project.github_user_id == github_user_id,
+            Project.repo_name == repo_name,
+        )
+    )
+    project = proj_result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="No project for this repo")
+
+    # Find the latest complete run matching commit
+    q = (
+        select(TransformRun)
+        .where(
+            TransformRun.project_id == project.id,
+            TransformRun.status == "complete",
+        )
+        .order_by(TransformRun.created_at.desc())
+        .options(selectinload(TransformRun.page_results), selectinload(TransformRun.snapshot))
+    )
+    if commit_sha:
+        q = q.where(TransformRun.source_commit_sha == commit_sha)
+
+    runs_result = await db.execute(q)
+    run = runs_result.scalars().first()
+    if not run:
+        raise HTTPException(status_code=404, detail="No cached run for this commit")
+
+    framework = run.snapshot.framework if run.snapshot else "unknown"
+
+    pages = []
+    for pr in run.page_results:
+        before_b64 = download_screenshot(pr.before_screenshot_key) if pr.before_screenshot_key else ""
+        after_b64 = download_screenshot(pr.after_screenshot_key) if pr.after_screenshot_key else ""
+        pages.append(PageResultResponse(
+            page_path=pr.page_path,
+            page_name=pr.page_name,
+            route=pr.route,
+            score=pr.score,
+            status=pr.status,
+            original_code=pr.original_code,
+            updated_code=pr.updated_code,
+            diff_summary=pr.diff_summary,
+            change_annotations=pr.change_annotations or [],
+            change_summary=pr.change_summary or [],
+            before_screenshot=before_b64,
+            after_screenshot=after_b64,
+            error=pr.error,
+            retries_used=pr.retries_used,
+        ))
+
+    return RunResponse(
+        id=str(run.id),
+        project_id=str(run.project_id),
+        status=run.status,
+        user_intent=run.user_intent or "",
+        source_commit_sha=run.source_commit_sha,
         total_pages_found=run.total_pages_found,
         total_transformed=run.total_transformed,
         total_skipped=run.total_skipped,
@@ -331,6 +418,7 @@ async def save_run(req: SaveRunRequest, db: AsyncSession = Depends(get_db)):
         status="complete",
         design_intelligence=req.design_intelligence,
         user_intent=req.user_intent,
+        source_commit_sha=req.source_commit_sha,
         total_pages_found=req.total_pages_found,
         total_transformed=req.total_transformed,
         total_skipped=req.total_skipped,

@@ -13,7 +13,10 @@ export default function TransformCarousel({
   pages: TransformedPageData[]
   result: MultiPageTransformResult
 }) {
-  const transformed = pages.filter(p => p.status === 'transformed')
+  // Include transformed AND errored pages so users can see failures.
+  // High-quality (skipped) pages aren't shown here — they live in their own panel.
+  const visible = pages.filter(p => p.status === 'transformed' || p.status === 'error')
+  const transformed = visible
   const [currentIndex, setCurrentIndex] = useState(0)
 
   const goTo = useCallback((idx: number) => {
@@ -52,66 +55,108 @@ export default function TransformCarousel({
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* Carousel navigation header */}
-      <div className="flex items-center justify-between mb-5">
-        {/* Page selector pills */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-1 min-w-0">
-          {transformed.map((page, i) => (
-            <button
-              key={page.page_path}
-              onClick={() => goTo(i)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex-shrink-0"
-              style={i === currentIndex
-                ? { background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', color: '#d8b4fe' }
-                : { background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)' }
-              }
-            >
-              <span
-                className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold"
-                style={{
-                  background: i === currentIndex ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)',
-                  color: i === currentIndex ? '#c084fc' : 'rgba(255,255,255,0.25)',
-                }}
+      {/* Carousel navigation header — large, prominent tabs */}
+      <div className="flex items-start justify-between gap-4 mb-6">
+        {/* Page selector tabs */}
+        <div className="flex items-stretch gap-2.5 overflow-x-auto pb-2 flex-1 min-w-0">
+          {transformed.map((page, i) => {
+            const isActive = i === currentIndex
+            const isError = page.status === 'error'
+            const accent = isError ? '239,68,68' : '168,85,247'
+            const textActive = isError ? '#fca5a5' : '#d8b4fe'
+            const badgeActive = isError ? '#f87171' : '#c084fc'
+            return (
+              <button
+                key={page.page_path}
+                onClick={() => goTo(i)}
+                className="group flex items-center gap-3 px-5 py-3.5 rounded-xl transition-all flex-shrink-0 text-left"
+                style={isActive
+                  ? {
+                      background: `rgba(${accent},0.10)`,
+                      border: `1px solid rgba(${accent},0.35)`,
+                      boxShadow: `0 0 0 3px rgba(${accent},0.06), 0 4px 20px rgba(${accent},0.08)`,
+                    }
+                  : {
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.06)',
+                    }
+                }
               >
-                {i + 1}
-              </span>
-              {page.page_name}
-            </button>
-          ))}
+                <span
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold flex-shrink-0 transition-all"
+                  style={{
+                    background: isActive ? `rgba(${accent},0.18)` : 'rgba(255,255,255,0.04)',
+                    color: isActive ? badgeActive : 'rgba(255,255,255,0.35)',
+                    border: isActive ? `1px solid rgba(${accent},0.25)` : '1px solid transparent',
+                  }}
+                >
+                  {i + 1}
+                </span>
+                <div className="flex flex-col min-w-0">
+                  <span
+                    className="text-[14px] font-semibold leading-tight truncate max-w-[180px]"
+                    style={{ color: isActive ? textActive : 'rgba(255,255,255,0.85)' }}
+                  >
+                    {page.page_name}
+                  </span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{ background: isError ? '#ef4444' : '#a855f7' }}
+                    />
+                    <span
+                      className="text-[11px] font-medium"
+                      style={{ color: isActive ? `rgba(${accent},0.75)` : 'rgba(255,255,255,0.4)' }}
+                    >
+                      {isError ? 'Failed' : 'Improved'}
+                    </span>
+                    {page.score > 0 && (
+                      <>
+                        <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>·</span>
+                        <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                          {page.score}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </button>
+            )
+          })}
         </div>
 
         {/* Arrow controls */}
         {transformed.length > 1 && (
-          <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0 pt-2">
             <button
               onClick={goPrev}
               disabled={currentIndex === 0}
-              className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+              className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:bg-white/5"
               style={{
                 background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                opacity: currentIndex === 0 ? 0.3 : 1,
+                border: '1px solid rgba(255,255,255,0.08)',
+                opacity: currentIndex === 0 ? 0.25 : 1,
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M8.5 3.5L5 7l3.5 3.5" stroke="rgba(255,255,255,0.5)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+              <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
+                <path d="M8.5 3.5L5 7l3.5 3.5" stroke="rgba(255,255,255,0.6)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
-            <span className="text-[10px] font-mono px-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
+            <span className="text-[12px] font-mono px-1 tabular-nums" style={{ color: 'rgba(255,255,255,0.3)' }}>
               {currentIndex + 1}/{transformed.length}
             </span>
             <button
               onClick={goNext}
               disabled={currentIndex === transformed.length - 1}
-              className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+              className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:bg-white/5"
               style={{
                 background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                opacity: currentIndex === transformed.length - 1 ? 0.3 : 1,
+                border: '1px solid rgba(255,255,255,0.08)',
+                opacity: currentIndex === transformed.length - 1 ? 0.25 : 1,
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="rgba(255,255,255,0.5)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+              <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
+                <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="rgba(255,255,255,0.6)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
           </div>
