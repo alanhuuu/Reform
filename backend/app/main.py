@@ -18,6 +18,8 @@ from app.routes.transcribe import router as transcribe_router
 from app.routes.code_pipeline import router as code_pipeline_router
 from app.routes.pipeline_v2 import router as pipeline_v2_router
 from app.routes.re_render import router as re_render_router
+from app.routes.github_publish import router as github_publish_router
+from app.routes.projects import router as projects_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +31,13 @@ app = FastAPI(
     description="AI-powered UI/UX analysis and refactoring for Reform",
     version="1.0.0",
 )
+
+
+@app.on_event("startup")
+async def startup():
+    from app.db import create_tables
+    await create_tables()
+    logging.getLogger(__name__).info("Database tables created/verified")
 
 # CORS: allow origins from env or sensible defaults
 _default_origins = "http://localhost:3000,https://refineui-chi.vercel.app"
@@ -54,6 +63,8 @@ app.include_router(transcribe_router)
 app.include_router(code_pipeline_router)
 app.include_router(pipeline_v2_router)
 app.include_router(re_render_router)
+app.include_router(github_publish_router)
+app.include_router(projects_router)
 
 
 @app.get("/health")

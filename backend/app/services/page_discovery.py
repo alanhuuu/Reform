@@ -19,10 +19,17 @@ def _is_app_router_page(path: str) -> bool:
 
 
 def _is_pages_router_page(path: str) -> bool:
-    """Match pages/**/*.[jt]sx? excluding _app, _document, api/."""
-    if not re.match(r'^(?:[^/]+/)*pages/.*\.[jt]sx?$', path):
+    """Match Next.js pages/**/*.[jt]sx? excluding _app, _document, api/.
+    Only matches when pages/ is at root or one level deep (e.g. frontend/pages/),
+    NOT when under src/ (that's SPA convention, not Next.js)."""
+    if not re.search(r'\.[jt]sx?$', path):
         return False
-    inner = re.sub(r'^(?:[^/]+/)*pages/', '', path)
+    # Must have pages/ but NOT src/pages/ (that's CRA/Vite)
+    if '/src/pages/' in path or path.startswith('src/pages/'):
+        return False
+    if not re.match(r'^(?:[^/]+/)?pages/.*\.[jt]sx?$', path):
+        return False
+    inner = re.sub(r'^(?:[^/]+/)?pages/', '', path)
     if inner.startswith('_app') or inner.startswith('_document'):
         return False
     if inner.startswith('api/'):
@@ -91,6 +98,45 @@ def _pages_router_label(path: str) -> tuple[str, str] | None:
 
     label = ' / '.join(labels)
     route = '/' + '/'.join(route_parts)
+    return (label, route)
+
+
+def _is_spa_page(path: str) -> bool:
+    """Match SPA page patterns: src/pages/*.jsx, src/views/*.tsx, etc.
+    Covers CRA, Vite, and any SPA with conventional page directories."""
+    # Must be a JS/JSX/TS/TSX file
+    if not re.search(r'\.[jt]sx?$', path):
+        return False
+    # Skip test files, config, index entry points
+    basename = path.split('/')[-1]
+    if basename.startswith('_') or basename in ('index.js', 'index.jsx', 'index.ts', 'index.tsx'):
+        return False
+    if 'test' in basename.lower() or 'spec' in basename.lower():
+        return False
+    if basename in ('App.js', 'App.jsx', 'App.tsx', 'main.tsx', 'main.jsx'):
+        return False
+    if basename in ('setupTests.js', 'reportWebVitals.js', 'firebase.js'):
+        return False
+    # Must be in a pages/, views/, screens/, or routes/ directory
+    page_dirs = re.compile(r'(?:^|/)(?:pages|views|screens|routes)/')
+    return bool(page_dirs.search(path))
+
+
+def _spa_page_label(path: str) -> tuple[str, str] | None:
+    """Convert a SPA page path to a (label, route) tuple.
+    e.g. frontend/src/pages/Login.js → ('Login', '/Login')
+    Route is based on filename — actual routing is client-side."""
+    basename = path.split('/')[-1]
+    name = re.sub(r'\.[jt]sx?$', '', basename)
+    if name.startswith('[') or name.startswith('_'):
+        return None
+    # Split camelCase/PascalCase into words: TemplateForm → Template Form
+    spaced = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', name)
+    label = _segment_label(spaced)
+    # Use filename as route identifier (for dedup). Actual screenshot goes to /
+    route = f"/{name}"
+    if name.lower() in ('home', 'homepage', 'landing', 'main'):
+        route = "/"
     return (label, route)
 
 
@@ -171,6 +217,9 @@ def discover_pages(
         elif _is_pages_router_page(path):
             result = _pages_router_label(path)
             page_framework = "pages_router"
+        elif _is_spa_page(path):
+            result = _spa_page_label(path)
+            page_framework = "spa"
 
         if result is None:
             continue

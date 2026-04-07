@@ -11,7 +11,7 @@ class TransformRepoV2Request(BaseModel):
     access_token: str | None = None
     design_intelligence: dict | None = None
     user_intent: str = ""
-    quality_threshold: int = 85
+    quality_threshold: int = 95
     max_pages: int = 5
 
 

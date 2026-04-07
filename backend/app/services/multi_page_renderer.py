@@ -14,12 +14,14 @@ from app.services.preview_renderer import (
     _clone_repo,
     _find_frontend_root,
     _install_deps,
+    _generate_dummy_env,
+    _detect_framework,
     _start_dev_server,
     _wait_for_server,
     _kill_server,
     _guess_route,
 )
-from app.services.screenshot import take_screenshot_b64
+from app.services.screenshot import take_screenshot_b64, take_screenshot_b64_with_error_check
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +69,27 @@ async def render_multi_page_previews(
         frontend_dir = _find_frontend_root(tmp_dir)
         _install_deps(frontend_dir)
 
+        # ── Step 2.5: Generate dummy env vars ──
+        _generate_dummy_env(frontend_dir)
+
         # ── Step 3: Start dev server once ──
         proc = _start_dev_server(frontend_dir, port)
-        if not _wait_for_server(port):
+        server_ready = _wait_for_server(port)
+        if not server_ready:
             stderr = ""
+            stdout = ""
             if proc.stderr:
                 try:
-                    stderr = proc.stderr.read(2000).decode("utf-8", errors="replace")
+                    stderr = proc.stderr.read(4000).decode("utf-8", errors="replace")
                 except Exception:
                     pass
+            if proc.stdout:
+                try:
+                    stdout = proc.stdout.read(2000).decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+            logger.error("Dev server failed. stderr: %s", stderr[:1000])
+            logger.error("Dev server failed. stdout: %s", stdout[:500])
             for t in transforms:
                 results[t["path"]] = {
                     "before_screenshot": "",
@@ -84,10 +98,13 @@ async def render_multi_page_previews(
                 }
             return results
 
+        logger.info("Dev server ready on port %d — proceeding with screenshots", port)
+
         # ── Step 4: Screenshot each transformed page ──
         for i, transform in enumerate(transforms):
             page_path = transform["path"]
-            route = transform.get("route") or _guess_route(page_path)
+            framework = _detect_framework(frontend_dir)
+            route = transform.get("route") or _guess_route(page_path, framework)
             updated_code = transform["updated_code"]
             preview_url = f"http://localhost:{port}{route}"
 
@@ -127,10 +144,13 @@ async def render_multi_page_previews(
                 # Wait for HMR
                 await asyncio.sleep(4)
 
-                # Screenshot AFTER
+                # Screenshot AFTER (with error detection)
                 logger.info("Screenshotting AFTER: %s", preview_url)
                 try:
-                    after_b64 = await take_screenshot_b64(preview_url)
+                    after_b64, has_error = await take_screenshot_b64_with_error_check(preview_url)
+                    if has_error:
+                        logger.warning("AFTER screenshot shows build error for %s — using BEFORE", page_path)
+                        after_b64 = before_b64
                 except Exception as e:
                     logger.warning("AFTER screenshot failed for %s: %s", page_path, e)
                     after_b64 = before_b64

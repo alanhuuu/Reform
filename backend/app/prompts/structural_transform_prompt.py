@@ -1,7 +1,6 @@
 """
-Enhanced transformation prompt that enforces STRUCTURAL changes,
-not cosmetic tweaks. Issue-driven: uses evaluator output to target
-specific problems.
+Transformation prompt that enforces DRAMATIC, VISIBLE structural changes.
+The before/after must be obviously different at a glance.
 """
 
 import json
@@ -16,19 +15,6 @@ def build_structural_transform_prompt(
     user_intent: str = "",
     is_retry: bool = False,
 ) -> str:
-    """
-    Build a prompt that instructs Claude to perform structural UI refactoring.
-
-    Args:
-        target_code: The full source code of the page to transform.
-        target_path: File path of the target.
-        supporting_files: Formatted string of imported files for context.
-        evaluation: Dict with score, breakdown, issues, reasoning from the evaluator.
-        design_intelligence: Competitor analysis data (tokens, patterns, etc.).
-        user_intent: Optional user-provided goal.
-        is_retry: If True, the previous attempt was cosmetic-only.
-    """
-    # Extract evaluation data
     score = evaluation.get("score", 50)
     issues = evaluation.get("issues", [])
     reasoning = evaluation.get("reasoning", "")
@@ -44,7 +30,7 @@ def build_structural_transform_prompt(
             issue_lines.append(f"  - [{sev}] {area}: {desc}")
         issues_text = "\n".join(issue_lines)
     else:
-        issues_text = "  No specific issues identified — apply general improvements."
+        issues_text = "  No specific issues identified — apply aggressive general improvements."
 
     breakdown_text = ""
     if breakdown:
@@ -53,7 +39,6 @@ def build_structural_transform_prompt(
             for k, v in breakdown.items()
         )
 
-    # Extract design intelligence sections
     di = design_intelligence or {}
     design_tokens = di.get("design_tokens", {})
     global_patterns = di.get("global_patterns", {})
@@ -68,24 +53,24 @@ def build_structural_transform_prompt(
     retry_warning = ""
     if is_retry:
         retry_warning = """
-## ⚠️  CRITICAL RETRY WARNING ⚠️
+## CRITICAL RETRY WARNING
 
-Your PREVIOUS attempt was REJECTED because it only made COSMETIC changes
-(padding, font sizes, colors, className tweaks). Those changes are NOT sufficient.
+Your PREVIOUS attempt was REJECTED because the before and after looked too similar.
+The user could not see a meaningful difference.
 
-This time you MUST make STRUCTURAL changes:
-- Reorganize sections and reorder content
-- Introduce new grouping containers (cards, panels, grid sections)
-- Change the composition of the page layout
-- Restructure the visual hierarchy by changing what elements exist and how they nest
-- Add or restructure section dividers, headers, content areas
+This time you MUST make DRAMATIC changes:
+- Completely reorganize the page layout
+- Introduce new section groupings, cards, grids
+- Change the spatial composition of the entire page
+- Make the difference visible in a THUMBNAIL
 
-If you only change className or style props again → this will be REJECTED again.
+If you play it safe again → this will be REJECTED again.
 """
 
-    return f"""{retry_warning}You are a senior React + Tailwind engineer performing a STRUCTURAL UI refactor.
+    return f"""{retry_warning}You are a senior UI engineer performing an AGGRESSIVE UI transformation.
 
-This is NOT a styling task. You must significantly improve layout, hierarchy, and usability.
+YOUR #1 GOAL: The before and after must look DRAMATICALLY different.
+If a user cannot instantly see the improvement in under 1 second, you have FAILED.
 
 ## QUALITY EVALUATION (this page scored {score}/100)
 
@@ -127,78 +112,137 @@ This is NOT a styling task. You must significantly improve layout, hierarchy, an
 {intent_line}
 ---
 
-## TRANSFORMATION RULES (CRITICAL — follow in this exact order)
+## TRANSFORMATION PHILOSOPHY
 
-### RULE 0: STRUCTURAL CHANGES ARE MANDATORY
+You are NOT polishing. You are REBUILDING the UI.
 
-You MUST change the JSX TREE STRUCTURE, not just styles. Specifically:
+Think of this as: "the same app, redesigned by a world-class design team."
+The logic stays. The UI gets a complete makeover.
 
-- You MUST introduce new grouping elements (section wrappers, card containers, grid layouts)
-- You MUST reorder or reorganize content sections for better logical flow
-- You MUST change the nesting hierarchy of elements
-- You MUST improve the composition (how sections relate to each other spatially)
+The user is paying for a transformation they can SEE. Subtle changes are worthless.
 
-Changes that ONLY modify className, style props, font sizes, padding, or colors
-are NOT sufficient and will be REJECTED.
+## MANDATORY CHANGES (you MUST do ALL of these)
 
-### Step 1: Layout Restructuring (HIGHEST PRIORITY)
-- Break flat structures into distinct card/panel sections
-- Group related elements into containers with clear boundaries
-- Introduce grid or flexbox layouts where content is currently stacked vertically
-- Add section headers and dividers to separate concerns
-- Apply modern SaaS patterns: dashboard grids, card layouts, sidebar+main patterns
+### 1. LAYOUT OVERHAUL (most important)
+- Restructure the entire page layout — do NOT preserve the original grid/flex structure
+- If content is in a single column, make it multi-column or card-based
+- If content is cramped, add generous whitespace and section breaks
+- Introduce clear visual sections: hero/header area, content area, sidebar, footer
+- Add wrapper cards/panels to group related content with borders and backgrounds
+- Use modern patterns: dashboard grids, bento layouts, split panels
 
-### Step 2: Visual Hierarchy
-- Make the page's purpose obvious within 3 seconds
-- Ensure primary CTA is visually dominant (largest, most colorful, best-placed)
-- Create a clear reading order: title → description → content → action
-- Reduce competing elements that fight for attention
+### 2. VISUAL HIERARCHY REDESIGN
+- Make the primary action 3x more prominent (bigger, bolder, better placed)
+- Add clear section headings with proper typographic scale
+- Create obvious visual weight differences between primary, secondary, tertiary content
+- Remove visual noise — if something isn't essential, dim it or remove it
+- Add visual anchors: icons, status badges, colored accents on key elements
 
-### Step 3: UX Flow Improvements
-- Surface important actions prominently
-- Reduce clicks needed for common tasks
-- Consolidate related information that is spread across sections
-- Add clear visual paths that guide the user
+### 3. COMPONENT UPGRADES
+- Replace basic buttons with properly sized, styled, prominent buttons
+- Turn flat lists into card grids with padding, borders, and hover states
+- Add proper input styling with labels, focus states, and spacing
+- Upgrade nav elements with active states, icons, and clear hierarchy
+- Add empty states, loading states, or placeholder content where appropriate
 
-### Step 4: Spacing & Component Polish
-- Apply consistent spacing scale
-- Ensure consistent button, card, and input styling
-- Apply hover/focus states
-- Use Tailwind classes (prefer utilities over arbitrary values)
+### 4. SPACING REVOLUTION
+- Double the padding inside containers (if it was p-4, make it p-8)
+- Add generous gaps between sections (minimum gap-6 between major sections)
+- Ensure consistent spacing scale throughout (4, 8, 12, 16, 24, 32, 48)
+- Add breathing room — the #1 sign of amateur UI is cramped layouts
 
-## STRICT CONSTRAINTS
-- This is a REFACTOR, NOT a rewrite
+### 5. VISUAL POLISH
+- Apply a consistent color system from the design tokens
+- Add subtle borders (1px, low opacity) to separate sections
+- Use background color variations to create depth (surface vs background)
+- Add rounded corners consistently (rounded-lg or rounded-xl)
+- Apply subtle shadows on elevated elements (cards, modals, dropdowns)
+
+## HANDLING DIFFERENT FRONTEND TYPES
+
+Adapt your transformation strategy to the type of UI:
+
+### Image-heavy / media UIs (games, creative tools, media players)
+- The background image/video is NOT yours to change — focus on the OVERLAY components
+- Make overlay cards/panels LARGER, more prominent, with stronger backgrounds (higher opacity)
+- Increase the contrast between overlay elements and the background
+- Restructure the layout of overlays — reposition them, group them into panels
+- Add glassmorphism with stronger blur/opacity so UI elements stand out
+- Make buttons and controls significantly bigger and more visible
+- If controls are scattered, consolidate them into a unified control panel
+
+### Dashboards / admin panels
+- Reorganize into clear grid sections with cards
+- Add a proper sidebar if one doesn't exist
+- Create stat cards with large numbers and labels
+- Add visual hierarchy between primary metrics and secondary data
+
+### Landing pages / marketing sites
+- Restructure into clear full-width sections
+- Make the hero dramatically bigger with prominent CTA
+- Add proper spacing between sections (64px+)
+- Upgrade feature sections from lists to card grids
+
+### Forms / data entry
+- Add proper labels, spacing, and grouping
+- Split long forms into logical sections with headers
+- Make submit buttons prominent and properly placed
+- Add visual feedback states
+
+### Single-page apps (SPAs)
+- Add proper navigation structure
+- Create clear content areas with boundaries
+- Add breadcrumbs or progress indicators where appropriate
+
+## WHAT "DRAMATICALLY DIFFERENT" MEANS
+
+GOOD transformation (visible at a glance):
+- Single column list → card grid layout
+- Flat page → sectioned dashboard with sidebar
+- Basic form → multi-step wizard with progress
+- Plain text list → rich cards with icons and metadata
+- Cramped layout → spacious layout with clear sections
+- Small scattered overlays → consolidated prominent panels
+- Tiny controls on image → large glassmorphic control panel
+
+BAD transformation (too subtle):
+- Only changed colors/fonts
+- Only adjusted padding by a few pixels
+- Only added shadows or borders
+- Layout structure stayed the same
+- User would struggle to spot the difference
+
+## CONSTRAINTS
 - PRESERVE all imports, exports, hooks, state, event handlers, and business logic
 - DO NOT remove any functionality
 - DO NOT rename props or state variables
-- DO NOT add new dependencies or imports that don't exist
-- DO NOT change file structure
-- KEEP the same component names
+- DO NOT add new npm dependencies
+- KEEP the same component names and file exports
 - Return the COMPLETE updated file — not a partial snippet
-- Prefer Tailwind classes over inline styles
+- Use Tailwind classes
 
 ## OUTPUT FORMAT
 
 Return a JSON object with this exact structure:
 {{
-  "updated_code": "the complete refactored file content",
-  "diff_summary": "1 sentence, plain English, no code terms",
+  "updated_code": "the complete transformed file content",
+  "diff_summary": "1 sentence describing the visible change",
   "change_annotations": [
     {{
-      "region": "human-readable section name (NOT code terms)",
+      "region": "section name (e.g. 'Header area', 'Main content')",
       "change_type": "flow|layout|spacing|component|visual",
-      "description": "Plain English description a designer would write",
-      "ux_impact": "User-facing benefit in plain English"
+      "description": "What changed visually",
+      "ux_impact": "Why it's better for the user"
     }}
   ],
   "change_summary": [
-    "Plain English improvement a non-developer would understand"
+    "Plain English description of a visible improvement"
   ]
 }}
 
-CRITICAL LANGUAGE RULES for all text fields:
-- Write as if explaining to a product manager or designer
-- NEVER use: className, div, span, Tailwind, CSS, px, rem, hex, tag, element, utility
-- Focus on WHAT THE USER SEES, not what the code does
+LANGUAGE RULES for all text fields:
+- Write for a product manager, not a developer
+- NEVER mention: className, div, span, CSS, px, rem, Tailwind, utility
+- Focus on WHAT THE USER SEES
 
 Return ONLY valid JSON — no markdown fences, no explanation."""

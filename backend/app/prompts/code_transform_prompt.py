@@ -55,7 +55,10 @@ def build_code_transform_prompt(
     components = design_intelligence.get("components", {})
     avoid = design_intelligence.get("avoid", [])
 
-    return f"""You are a senior React + Tailwind engineer performing a SAFE UI refactor.
+    return f"""You are a senior UI engineer performing an AGGRESSIVE UI transformation.
+
+YOUR #1 GOAL: The before and after must look DRAMATICALLY different.
+If a user cannot instantly see the improvement in under 1 second, you have FAILED.
 
 ## TARGET FILE: {target_path}
 ```tsx
@@ -85,75 +88,98 @@ def build_code_transform_prompt(
 
 ---
 
-## TRANSFORMATION RULES (CRITICAL — follow in this exact order)
+## TRANSFORMATION PHILOSOPHY
 
-### Step 0: UX FLOW IMPROVEMENTS (HIGHEST PRIORITY)
-- Reduce the number of clicks needed to accomplish key tasks
-- Surface important actions (CTAs, primary buttons) more prominently
-- Remove unnecessary nesting, extra pages, or hidden options
-- Add quick-action buttons, inline controls, or shortcuts where users currently need multiple steps
-- Consolidate related information that is currently spread across sections
-- Make the most common user action reachable in 1-2 clicks instead of 3+
-- Add clear visual hierarchy so users instantly know where to go
-- Look at competitor patterns and apply their flow efficiency
+You are NOT polishing. You are REBUILDING the UI.
+The logic stays. The UI gets a complete makeover.
+Subtle changes are worthless — the user is paying for a visible transformation.
 
-### Step 1: Layout
-- Improve structure, grouping, and visual hierarchy
-- Apply layout patterns from design intelligence
-- Restructure sections to reduce cognitive load
+## MANDATORY CHANGES (do ALL of these)
 
-### Step 2: Spacing
-- Improve padding, margins, gap values
-- Apply spacing scale from design tokens
-- Ensure consistent density
+### 1. LAYOUT OVERHAUL (most important)
+- Restructure the entire page layout — do NOT preserve the original structure
+- If single column → make it multi-column, card grid, or dashboard layout
+- Add wrapper cards/panels to group related content
+- Introduce clear visual sections with distinct backgrounds
+- Use modern patterns: dashboard grids, bento layouts, split panels
 
-### Step 3: Components
-- Improve buttons, cards, nav elements, form controls
-- Make primary actions visually dominant (larger, higher contrast, better placement)
-- Add hover/focus states that guide users through the flow
-- Apply component patterns from design intelligence
+### 2. VISUAL HIERARCHY REDESIGN
+- Make primary actions 3x more prominent
+- Add clear section headings with proper typographic scale
+- Create obvious weight differences between primary/secondary/tertiary
+- Remove visual noise
 
-### Step 4: Visual Polish
-- Apply colors, borders, shadows, typography from design tokens
-- Make the UI feel premium and competitor-quality
-- Use Tailwind classes (prefer utilities over arbitrary values)
-- Apply motion/transition patterns for a polished feel
+### 3. COMPONENT UPGRADES
+- Replace basic buttons with properly sized, styled buttons
+- Turn flat lists into card grids with padding, borders, hover states
+- Upgrade nav elements with active states and clear hierarchy
 
-## STRICT CONSTRAINTS
-- This is a REFACTOR, NOT a rewrite
-- PRESERVE all imports, exports, hooks, state, event handlers, and business logic
-- DO NOT remove any functionality
+### 4. SPACING REVOLUTION
+- Double the padding inside containers
+- Add generous gaps between sections (minimum gap-6)
+- The #1 sign of amateur UI is cramped layouts — add breathing room
+
+### 5. VISUAL POLISH
+- Apply consistent color system from design tokens
+- Add subtle borders to separate sections
+- Use background variations for depth
+- Consistent rounded corners and shadows
+
+## HANDLING DIFFERENT FRONTEND TYPES
+
+Adapt your strategy to what you're transforming:
+
+- **Image-heavy UIs** (media players, games, creative tools): Focus on OVERLAY components. Make panels larger, higher opacity, stronger glassmorphism. Consolidate scattered controls into unified panels. The image stays — the UI on top of it gets dramatically better.
+- **Dashboards**: Reorganize into grid cards, add sidebar, create stat cards with large numbers.
+- **Landing pages**: Full-width sections, dramatic hero, prominent CTA, 64px+ section spacing.
+- **Forms**: Add grouping, labels, spacing. Split into logical sections.
+- **SPAs**: Add navigation structure, clear content areas, breadcrumbs.
+
+## WHAT "DRAMATICALLY DIFFERENT" MEANS
+
+GOOD (visible at a glance):
+- Single column → card grid
+- Flat page → sectioned dashboard
+- Cramped → spacious with clear sections
+- Basic form → styled form with proper spacing
+- Scattered overlays on image → consolidated glassmorphic panel
+
+BAD (too subtle):
+- Only changed colors
+- Only adjusted padding slightly
+- Layout structure stayed the same
+
+## CONSTRAINTS
+- PRESERVE all imports, exports, hooks, state, event handlers, business logic
+- DO NOT remove functionality
 - DO NOT rename props or state variables
-- DO NOT add new dependencies or imports that don't exist
-- DO NOT change file structure
-- KEEP the same component names
-- Return the COMPLETE updated file — not a partial snippet
-- Prefer Tailwind classes over inline styles
+- DO NOT add new npm dependencies
+- KEEP component names and file exports
+- Return the COMPLETE updated file
+- Use Tailwind classes
 
 ## OUTPUT FORMAT
 
 Return a JSON object with this exact structure:
 {{
-  "updated_code": "the complete refactored file content",
-  "diff_summary": "1 sentence, plain English, no code terms. Example: 'Improved page layout and visual consistency'",
+  "updated_code": "the complete transformed file content",
+  "diff_summary": "1 sentence describing the visible change",
   "change_annotations": [
     {{
-      "region": "human-readable section name like 'Hero section', 'Navigation bar', 'Page layout' — NOT code terms like 'body element' or 'div container'",
+      "region": "section name",
       "change_type": "flow|layout|spacing|component|visual",
-      "description": "Plain English description a designer would write. NO code terms, NO class names, NO HTML tags. BAD: 'Added min-h-screen Tailwind utility to body className'. GOOD: 'Made the page fill the full screen height'",
-      "ux_impact": "User-facing benefit in plain English. BAD: 'Improves developer experience'. GOOD: 'Eliminates white gaps on short pages'"
+      "description": "What changed visually",
+      "ux_impact": "Why it's better for the user"
     }}
   ],
   "change_summary": [
-    "Plain English improvement a non-developer would understand. NO backticks, NO code terms, NO class names, NO HTML tags. BAD: 'Added min-h-screen to the body element'. GOOD: 'Pages now fill the full screen height, preventing blank gaps at the bottom'"
+    "Plain English description of a visible improvement"
   ]
 }}
 
-CRITICAL LANGUAGE RULES for change_annotations, change_summary, and diff_summary:
-- Write as if explaining to a product manager or designer, NOT a developer
-- NEVER use: className, div, span, Tailwind, CSS, px, rem, hex, tag, element, utility, component name
-- NEVER use backticks or code formatting
-- Focus on WHAT THE USER SEES, not what the code does
-- Use words like: section, area, button, heading, spacing, alignment, contrast, visibility
+LANGUAGE RULES:
+- Write for a product manager, not a developer
+- NEVER mention: className, div, span, CSS, px, rem, Tailwind
+- Focus on WHAT THE USER SEES
 
 Return ONLY valid JSON — no markdown fences, no explanation."""

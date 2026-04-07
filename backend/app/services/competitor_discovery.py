@@ -20,7 +20,7 @@ BLOCKED_DOMAINS = {
 }
 
 # How many top URLs to select for immediate analysis
-ANALYSIS_LIMIT = 5
+ANALYSIS_LIMIT = 3
 
 
 def _validate_url(url: str) -> str | None:

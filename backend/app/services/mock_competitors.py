@@ -77,6 +77,44 @@ def mock_site_analysis(url: str) -> dict:
                 "consistent_spacing_rhythm",
                 "high_information_density_without_clutter",
             ],
+            "user_goal": "start_using_platform_quickly",
+            "why_it_works": [
+                "single_clear_primary_action",
+                "low_competition_around_cta",
+                "clear_value_prop_above_fold",
+                "strong_visual_hierarchy",
+            ],
+            "problems": [
+                "dense_footer_may_overwhelm",
+                "secondary_paths_not_immediately_visible",
+            ],
+            "cta_analysis": {
+                "primary_cta_label": "Sign up for GitHub",
+                "primary_cta_location": "hero_above_fold",
+                "cta_prominence": "high",
+                "cta_clarity": "high",
+                "cta_competition": "low",
+            },
+            "post_click_experience": {
+                "destination_type": "signup_form",
+                "next_step_clarity": "high",
+                "friction_level": "low",
+                "notes": "clean_single_step_email_signup",
+            },
+            "flows": [
+                {
+                    "flow_name": "landing_to_signup",
+                    "steps": ["see_hero", "click_signup_cta", "enter_email", "complete_setup"],
+                    "clarity": "high",
+                    "friction": "low",
+                },
+                {
+                    "flow_name": "landing_to_explore_features",
+                    "steps": ["scroll_past_hero", "scan_feature_grid", "click_feature_link"],
+                    "clarity": "medium",
+                    "friction": "low",
+                },
+            ],
         },
     }
 
@@ -236,6 +274,37 @@ MOCK_RESPONSE = {
             "workspace": "primary_task_execution",
             "footer": "secondary_navigation_escape",
         },
+    },
+    "ux_intelligence": {
+        "common_user_goals": [
+            "start_using_platform_quickly",
+            "explore_product_capabilities",
+        ],
+        "effective_patterns": [
+            "single_clear_primary_action",
+            "progressive_disclosure_of_complexity",
+            "strong_visual_hierarchy_guides_eye",
+            "clear_value_prop_above_fold",
+        ],
+        "common_problems": [
+            "dense_footer_may_overwhelm",
+            "secondary_paths_not_immediately_visible",
+        ],
+        "cta_insights": {
+            "dominant_location": "hero_above_fold",
+            "dominant_prominence": "high",
+            "common_labels": ["Sign up", "Get Started", "Start Free"],
+            "best_practice_notes": "single_prominent_cta_in_hero_with_ghost_secondary",
+        },
+        "post_click_quality": "high",
+        "strongest_flows": [
+            {
+                "flow_name": "landing_to_signup",
+                "seen_in_sites": 2,
+                "avg_clarity": "high",
+                "avg_friction": "low",
+            },
+        ],
     },
     "recommendations": [
         {

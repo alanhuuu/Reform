@@ -53,9 +53,7 @@ interface GithubRepo {
 type PipelineStep = 'idle' | 'ingesting' | 'analyzing' | 'transforming' | 'complete'
 
 const PIPELINE_STAGES = [
-  { key: 'ingesting', label: 'Fetching files', duration: 8 },
-  { key: 'analyzing', label: 'Analyzing code', duration: 12 },
-  { key: 'transforming', label: 'Transforming UI', duration: 45 },
+  { key: 'ingesting', label: 'Analyzing & transforming pages', duration: 240 },
 ]
 
 function PipelineProgress({ step, repoName, targetFile }: { step: PipelineStep; repoName: string; targetFile: string }) {
@@ -76,9 +74,9 @@ function PipelineProgress({ step, repoName, targetFile }: { step: PipelineStep; 
   const stageProgress = currentStage ? Math.min(elapsed / currentStage.duration, 0.95) : 0
   const overallProgress = ((completedTime + (currentStage ? stageProgress * currentStage.duration : 0)) / totalEstimate) * 100
 
-  const subtitle = step === 'ingesting' ? `Pulling frontend files from ${repoName}`
-    : step === 'analyzing' ? 'Identifying the highest-impact UI surface'
-    : `Refactoring ${targetFile.split('/').pop()} and rendering previews`
+  const subtitle = step === 'ingesting' ? `Discovering, evaluating, and transforming all pages in ${repoName}`
+    : step === 'analyzing' ? 'Scoring UI quality and planning improvements'
+    : 'Rendering before & after previews'
 
   return (
     <div className="max-w-xl mx-auto pt-6 pb-10 w-full">
@@ -111,7 +109,11 @@ function PipelineProgress({ step, repoName, targetFile }: { step: PipelineStep; 
       </div>
       <div className="text-center">
         <p className="text-[13px] text-white/60 mb-0.5">{subtitle}</p>
-        <p className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.15)' }}>{elapsed}s elapsed · ~{Math.max(0, totalEstimate - completedTime - elapsed)}s remaining</p>
+        <p className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.15)' }}>
+          {elapsed}s elapsed · {(totalEstimate - completedTime - elapsed) > 0
+            ? `~${Math.max(0, totalEstimate - completedTime - elapsed)}s remaining`
+            : 'Almost done, finishing up...'}
+        </p>
       </div>
     </div>
   )
@@ -692,8 +694,8 @@ export default function TransformPage() {
   const [repos, setRepos] = useState<GithubRepo[]>([])
   const [loadingRepos, setLoadingRepos] = useState(false)
   const [repoSearch, setRepoSearch] = useState('')
-  const [commitLoading, setCommitLoading] = useState(false)
-  const [commitResult, setCommitResult] = useState<{ sha: string; url: string } | null>(null)
+  const [publishLoading, setPublishLoading] = useState(false)
+  const [publishResult, setPublishResult] = useState<{ branch_name: string; branch_url: string; files_changed: string[] } | null>(null)
   const [multiPageResult, setMultiPageResult] = useState<MultiPageTransformResult | null>(null)
   const [reRendering, setReRendering] = useState(false)
   const [reRenderStatus, setReRenderStatus] = useState('')
@@ -771,72 +773,103 @@ export default function TransformPage() {
     setPipelineError(''); setRepoName(repo.full_name); setRepoBranch(repo.default_branch || 'main')
 
     setPipelineStep('ingesting')
-    let files: FileEntry[]
     try {
-      const res = await fetch(apiUrl('/ingest-repo'), {
+      // Use the v2 multi-page pipeline — one call does everything
+      const res = await fetch(apiUrl('/transform-repo-v2'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ github_url: `https://github.com/${repo.full_name}`, branch: repo.default_branch || 'main', access_token: session?.accessToken || null }),
-      })
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || `Ingestion failed: ${res.status}`) }
-      const data = await res.json(); files = data.files; setIngestedFiles(files)
-    } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Ingestion failed'); setPipelineStep('idle'); return }
-
-    setPipelineStep('analyzing')
-    let target: string; let codeAnalysisResult: CodeAnalysis
-    try {
-      const res = await fetch(apiUrl('/analyze-code'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files }),
-      })
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Analysis failed') }
-      codeAnalysisResult = await res.json(); setCodeAnalysis(codeAnalysisResult)
-      target = codeAnalysisResult.recommended_target; setSelectedTarget(target)
-    } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Analysis failed'); setPipelineStep('idle'); return }
-
-    setPipelineStep('transforming')
-    try {
-      const res = await fetch(apiUrl('/transform-code'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files, target_file: target, design_intelligence: analysis || {}, user_intent: userIntent, repo_clone_url: `https://github.com/${repo.full_name}.git`, branch: repo.default_branch || 'main', access_token: session?.accessToken || '' }),
+        body: JSON.stringify({
+          github_url: `https://github.com/${repo.full_name}`,
+          branch: repo.default_branch || 'main',
+          access_token: session?.accessToken || null,
+          design_intelligence: analysis || null,
+          user_intent: userIntent,
+          max_pages: 5,
+        }),
       })
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Transform failed') }
-      const result: TransformResult = await res.json()
-      setTransformResult(result); setPipelineStep('complete')
-      const adapted = adaptLegacyResult(result, repo.full_name, target)
-      setMultiPageResult(adapted)
-      sessionStorage.setItem('refineui_transform', JSON.stringify({ result, codeAnalysis: codeAnalysisResult, target, repoName: repo.full_name, branch: repo.default_branch || 'main' }))
-      const firstImpact = result.change_annotations[0]?.ux_impact?.split(',')[0]?.split('.')[0]?.trim()
-      const commitLabel = firstImpact || result.transformed_files[0]?.diff_summary?.split('.')[0]?.trim()?.slice(0, 50) || 'Improve UI layout and polish'
-      const newCommit: CommitEntry = { hash: Math.random().toString(16).slice(2, 8), msg: commitLabel, color: '#f59e0b', status: 'pending', code: result.transformed_files[0]?.updated_code, suggestion: userIntent || 'Applied design intelligence' }
-      setCommits(prev => [newCommit, ...prev]); setScOpen(true)
+      const result = await res.json()
+
+      setMultiPageResult(result)
+      setPipelineStep('complete')
+
+      // Save for session persistence (legacy)
+      sessionStorage.setItem('refineui_transform', JSON.stringify({
+        multiPageResult: result,
+        repoName: repo.full_name,
+        branch: repo.default_branch || 'main',
+      }))
+
+      // Save to database + S3 for permanent persistence
+      if (session?.githubId) {
+        try {
+          await fetch(apiUrl('/projects/save-run'), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              github_user_id: session.githubId,
+              github_username: session.githubUsername || '',
+              repo_name: repo.full_name,
+              repo_url: `https://github.com/${repo.full_name}`,
+              branch: repo.default_branch || 'main',
+              framework: result.framework || 'unknown',
+              user_intent: userIntent,
+              design_intelligence: analysis || null,
+              file_tree: [],
+              files: [],
+              total_pages_found: result.total_pages_found || 0,
+              total_transformed: result.total_transformed || 0,
+              total_skipped: result.total_skipped || 0,
+              global_summary: result.global_summary || [],
+              pipeline_errors: result.pipeline_errors || [],
+              pages: result.pages || [],
+            }),
+          })
+        } catch (e) {
+          console.warn('Failed to save run to DB (non-fatal):', e)
+        }
+      }
+
+      // Create commit entry from first transformed page
+      const firstTransformed = result.pages?.find((p: { status: string }) => p.status === 'transformed')
+      if (firstTransformed) {
+        setSelectedTarget(firstTransformed.page_path)
+        const commitLabel = firstTransformed.diff_summary?.split('.')[0]?.trim()?.slice(0, 60) || 'UI improvements'
+        const newCommit: CommitEntry = { hash: Math.random().toString(16).slice(2, 8), msg: commitLabel, color: '#f59e0b', status: 'pending', code: firstTransformed.updated_code, suggestion: userIntent || 'Applied design intelligence' }
+        setCommits(prev => [newCommit, ...prev]); setScOpen(true)
+      }
     } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Transform failed'); setPipelineStep('idle') }
   }
 
   async function handleAccept() {
-    let ghSha = ''
-    if (transformResult?.transformed_files[0] && session?.accessToken && repoName && selectedTarget) {
-      setCommitLoading(true); setPipelineError('')
+    // Collect all transformed pages with updated code
+    const pages = multiPageResult?.pages.filter(p => p.status === 'transformed' && p.updated_code) || []
+    const hasGitHub = session?.accessToken && repoName && pages.length > 0
+
+    if (hasGitHub) {
+      setPublishLoading(true); setPipelineError('')
       try {
-        const tf = transformResult.transformed_files[0]
-        // Build a clean, human-readable commit title from change annotations
-        const impactParts = transformResult.change_annotations.slice(0, 2).map(a => a.ux_impact).filter(Boolean)
-        const commitTitle = impactParts.length > 0
-          ? impactParts[0].split(',')[0].split('.')[0].trim()
-          : tf.diff_summary?.split('.')[0]?.trim() || 'Improve UI layout and polish'
-        const commitMsg = `reform: ${commitTitle.slice(0, 60)}`
-        const res = await fetch(apiUrl('/commit-to-github'), {
+        const [owner, repo] = repoName.split('/')
+        const res = await fetch(apiUrl('/github/publish-approved-branch'), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repo_name: repoName, branch: repoBranch, file_path: selectedTarget, new_content: tf.updated_code, commit_message: commitMsg, access_token: session.accessToken }),
+          body: JSON.stringify({
+            owner, repo,
+            base_branch: repoBranch || null,
+            approved_files: pages.map(p => ({ path: p.page_path, content: p.updated_code })),
+            transform_summary: {
+              pages_transformed: pages.map(p => p.page_path),
+              summary_text: multiPageResult?.global_summary?.[0] || null,
+            },
+            access_token: session.accessToken,
+          }),
         })
-        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Commit failed') }
+        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Publish failed') }
         const data = await res.json()
-        ghSha = data.commit_sha || ''
-        setCommitResult({ sha: ghSha, url: data.commit_url || '' })
-      } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Commit to GitHub failed'); setCommitLoading(false); return }
-      setCommitLoading(false)
+        setPublishResult({ branch_name: data.branch_name, branch_url: data.branch_url, files_changed: data.files_changed })
+      } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Failed to publish changes'); setPublishLoading(false); return }
+      setPublishLoading(false)
     }
+
     setChangeStatus('accepted')
-    const realHash = ghSha ? ghSha.slice(0, 7) : Math.random().toString(16).slice(2, 8)
+    const realHash = Math.random().toString(16).slice(2, 8)
     setCommits(prev => {
       const hasPending = prev.some(c => c.status === 'pending')
       if (hasPending) return prev.map(c => c.status === 'pending' ? { ...c, status: 'accepted' as const, color: '#22c55e', hash: realHash } : c)
@@ -1000,7 +1033,7 @@ export default function TransformPage() {
 
         {/* ── HEADER ── */}
         {pipelineStep === 'complete' && multiPageResult ? (
-          <TransformSummaryHeader result={multiPageResult} commitResult={commitResult} />
+          <TransformSummaryHeader result={multiPageResult} publishResult={publishResult} />
         ) : (
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-white mb-3">UI Transformation</h1>
@@ -1098,14 +1131,14 @@ export default function TransformPage() {
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={handleAccept}
-                  disabled={commitLoading}
+                  disabled={publishLoading}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-medium transition-all hover:bg-green-500/[0.06] active:scale-[0.97]"
-                  style={{ color: 'rgba(34,197,94,0.7)', border: '1px solid transparent', opacity: commitLoading ? 0.5 : 1 }}
+                  style={{ color: 'rgba(34,197,94,0.7)', border: '1px solid transparent', opacity: publishLoading ? 0.5 : 1 }}
                 >
-                  {commitLoading ? (
-                    <><div className="w-3 h-3 rounded-full animate-spin" style={{ border: '2px solid rgba(34,197,94,0.2)', borderTopColor: 'rgba(34,197,94,0.7)' }} />Committing...</>
+                  {publishLoading ? (
+                    <><div className="w-3 h-3 rounded-full animate-spin" style={{ border: '2px solid rgba(34,197,94,0.2)', borderTopColor: 'rgba(34,197,94,0.7)' }} />Publishing approved changes...</>
                   ) : (
-                    <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>Apply Changes</>
+                    <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>Publish to GitHub</>
                   )}
                 </button>
                 <button

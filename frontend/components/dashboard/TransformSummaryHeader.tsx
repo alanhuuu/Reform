@@ -5,9 +5,11 @@ import type { MultiPageTransformResult } from './TransformTypes'
 export default function TransformSummaryHeader({
   result,
   commitResult,
+  publishResult,
 }: {
   result: MultiPageTransformResult
   commitResult?: { sha: string; url: string } | null
+  publishResult?: { branch_name: string; branch_url: string; files_changed: string[] } | null
 }) {
   const improved = result.pages.filter(p => p.status === 'transformed')
   const skipped = result.pages.filter(p => p.status === 'high_quality')
@@ -41,8 +43,30 @@ export default function TransformSummaryHeader({
         </div>
       </div>
 
-      {/* Commit banner */}
-      {commitResult && (
+      {/* Publish banner */}
+      {publishResult && (
+        <div
+          className="rounded-xl px-5 py-3 mb-5"
+          style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.15)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              <span className="text-[12px]" style={{ color: '#86efac' }}>Changes published to GitHub</span>
+              <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.25)' }}>{publishResult.branch_name}</span>
+            </div>
+            <a href={publishResult.branch_url} target="_blank" rel="noopener noreferrer" className="text-[11px] font-medium" style={{ color: 'rgba(168,85,247,0.7)' }}>Open in GitHub &rarr;</a>
+          </div>
+          <div className="mt-2 flex items-center gap-1.5">
+            <span className="text-[10px] font-medium" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              {publishResult.files_changed.length} file{publishResult.files_changed.length !== 1 ? 's' : ''} changed
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Legacy commit banner */}
+      {!publishResult && commitResult && (
         <div
           className="rounded-xl px-5 py-3 mb-5 flex items-center justify-between"
           style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.15)' }}

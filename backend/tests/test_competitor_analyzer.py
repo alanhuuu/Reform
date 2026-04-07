@@ -54,8 +54,8 @@ class TestAnalyzeCompetitors:
         urls_in_analyses = {s["url"] for s in site_analyses}
         assert urls_in_analyses == {"https://github.com", "https://railway.app"}
 
-    def test_partial_failure_uses_mock_for_failed_site(self, mock_competitor_response):
-        """When one URL fails, the mock fallback for that site is used and analysis continues."""
+    def test_partial_failure_skips_failed_site(self, mock_competitor_response):
+        """When one URL fails, analysis continues with only the successful site."""
         def side_effect(url):
             if "github" in url:
                 raise RuntimeError("TinyFish timeout")
@@ -64,37 +64,23 @@ class TestAnalyzeCompetitors:
         with (
             patch("app.services.competitor_analyzer.extract_site_data", side_effect=side_effect),
             patch("app.services.competitor_analyzer.aggregate_patterns") as mock_aggregate,
-            patch("app.services.competitor_analyzer.mock_site_analysis") as mock_fallback,
         ):
             mock_aggregate.return_value = mock_competitor_response
-            mock_fallback.return_value = {
-                "url": "https://github.com",
-                "raw_analysis": {"page_type": "mock"},
-            }
 
             result = analyze_competitors(["https://github.com", "https://railway.app"], "")
 
-        # Fallback called for the failing URL
-        mock_fallback.assert_called_once_with("https://github.com")
-        # aggregate still called with 2 analyses (real + mock)
+        # aggregate called with only the 1 successful analysis
         site_analyses = mock_aggregate.call_args.args[0]
-        assert len(site_analyses) == 2
+        assert len(site_analyses) == 1
 
-    def test_all_failures_use_mock_per_site(self, mock_competitor_response):
-        """All extractions fail → each site gets its own mock, aggregate still runs."""
+    def test_all_failures_raises_error(self, mock_competitor_response):
+        """All extractions fail → raises RuntimeError (no mock fallback)."""
         with (
             patch("app.services.competitor_analyzer.extract_site_data",
                   side_effect=RuntimeError("failed")),
-            patch("app.services.competitor_analyzer.aggregate_patterns") as mock_aggregate,
-            patch("app.services.competitor_analyzer.mock_site_analysis") as mock_fallback,
         ):
-            mock_aggregate.return_value = mock_competitor_response
-            mock_fallback.side_effect = lambda url: {"url": url, "raw_analysis": {"page_type": "mock"}}
-
-            result = analyze_competitors(["https://github.com", "https://railway.app"], "")
-
-        assert mock_fallback.call_count == 2
-        mock_aggregate.assert_called_once()
+            with pytest.raises(RuntimeError, match="All competitor sites failed"):
+                analyze_competitors(["https://github.com", "https://railway.app"], "")
 
     def test_single_url_success(self, mock_competitor_response):
         with (

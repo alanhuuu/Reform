@@ -12,14 +12,14 @@ import subprocess
 import tempfile
 import time
 
-from app.services.screenshot import take_screenshot_b64
+from app.services.screenshot import take_screenshot_b64, take_screenshot_b64_with_error_check
 
 logger = logging.getLogger(__name__)
 
 # How long to wait for npm install (seconds)
 INSTALL_TIMEOUT = 120
 # How long to wait for dev server to be ready (seconds)
-SERVER_READY_TIMEOUT = 60
+SERVER_READY_TIMEOUT = 90
 # How long to wait between health checks (seconds)
 HEALTH_CHECK_INTERVAL = 2
 
@@ -53,10 +53,28 @@ def _clone_repo(repo_url: str, branch: str, target_dir: str, access_token: str =
         raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
 
 
+def _is_frontend_package(pkg_path: str) -> bool:
+    """Check if a package.json contains Next.js or React as a dependency."""
+    import json as _json
+    try:
+        with open(pkg_path, "r") as f:
+            data = _json.load(f)
+        all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+        return "next" in all_deps or "react" in all_deps
+    except Exception:
+        return False
+
+
 def _find_frontend_root(repo_dir: str) -> str:
-    """Find the directory containing package.json with a Next.js or React setup."""
-    # Check common locations
-    candidates = [
+    """Find the directory containing package.json with a Next.js or React setup.
+
+    Strategy:
+    1. Check common hardcoded names first (fast path)
+    2. Scan all immediate subdirectories
+    3. Prefer dirs with 'next' in deps over plain 'react'
+    """
+    # Fast path: check common locations first
+    priority_dirs = [
         repo_dir,
         os.path.join(repo_dir, "frontend"),
         os.path.join(repo_dir, "client"),
@@ -64,40 +82,208 @@ def _find_frontend_root(repo_dir: str) -> str:
         os.path.join(repo_dir, "app"),
         os.path.join(repo_dir, "src"),
     ]
-    for d in candidates:
+    for d in priority_dirs:
         pkg = os.path.join(d, "package.json")
-        if os.path.isfile(pkg):
+        if os.path.isfile(pkg) and _is_frontend_package(pkg):
+            logger.info("Frontend root (priority): %s", d)
             return d
-    raise RuntimeError("Could not find package.json in repo")
+
+    # Scan all immediate subdirectories for any package.json with react/next
+    best = None
+    for entry in os.listdir(repo_dir):
+        subdir = os.path.join(repo_dir, entry)
+        if not os.path.isdir(subdir) or entry.startswith(".") or entry == "node_modules":
+            continue
+        pkg = os.path.join(subdir, "package.json")
+        if os.path.isfile(pkg) and _is_frontend_package(pkg):
+            logger.info("Frontend root (scan): %s", subdir)
+            # Prefer next over plain react
+            import json as _json
+            try:
+                with open(pkg) as f:
+                    data = _json.load(f)
+                all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+                if "next" in all_deps:
+                    return subdir
+                if best is None:
+                    best = subdir
+            except Exception:
+                if best is None:
+                    best = subdir
+
+    if best:
+        return best
+
+    # Last resort: repo root if it has any package.json
+    root_pkg = os.path.join(repo_dir, "package.json")
+    if os.path.isfile(root_pkg):
+        logger.warning("Frontend root fallback to repo root (no react/next detected)")
+        return repo_dir
+
+    raise RuntimeError("Could not find package.json with React or Next.js in repo")
 
 
 def _install_deps(frontend_dir: str) -> None:
     """Run npm install in the frontend directory."""
     logger.info("Installing dependencies in %s", frontend_dir)
-    # Prefer npm ci for speed, fall back to npm install
+    env = {**os.environ, "NODE_ENV": "development"}
+
+    # Try npm ci first (faster), fall back to npm install if it fails
     lock_file = os.path.join(frontend_dir, "package-lock.json")
-    cmd = ["npm", "ci", "--prefer-offline"] if os.path.isfile(lock_file) else ["npm", "install"]
+    if os.path.isfile(lock_file):
+        start = time.time()
+        result = subprocess.run(
+            ["npm", "ci", "--prefer-offline"], cwd=frontend_dir,
+            capture_output=True, text=True, timeout=INSTALL_TIMEOUT, env=env,
+        )
+        if result.returncode == 0:
+            logger.info("Dependencies installed via npm ci in %.1fs", time.time() - start)
+            return
+        logger.warning("npm ci failed, falling back to npm install: %s", result.stderr[-200:])
+
+    # Fallback: npm install (works with any lock file version)
+    start = time.time()
     result = subprocess.run(
-        cmd, cwd=frontend_dir,
-        capture_output=True, text=True, timeout=INSTALL_TIMEOUT,
-        env={**os.environ, "NODE_ENV": "development"},
+        ["npm", "install"], cwd=frontend_dir,
+        capture_output=True, text=True, timeout=INSTALL_TIMEOUT, env=env,
     )
+    elapsed = time.time() - start
     if result.returncode != 0:
-        logger.error("npm install stderr: %s", result.stderr[-500:])
+        logger.error("npm install failed after %.1fs: %s", elapsed, result.stderr[-500:])
         raise RuntimeError(f"npm install failed: {result.stderr.strip()[-200:]}")
+
+    # Sanity check
+    if elapsed < 5:
+        node_modules = os.path.join(frontend_dir, "node_modules")
+        if not os.path.isdir(node_modules) or len(os.listdir(node_modules)) < 10:
+            logger.warning("npm install finished in %.1fs but node_modules looks empty", elapsed)
+    logger.info("Dependencies installed via npm install in %.1fs", elapsed)
+
+
+def _generate_dummy_env(frontend_dir: str) -> None:
+    """Scan code for env var references and create a .env with placeholders.
+
+    This prevents apps from crashing when env vars like REACT_APP_FIREBASE_API_KEY
+    are undefined. The app won't connect to real services but will render the UI.
+    """
+    import re as _re
+
+    env_vars: set[str] = set()
+
+    # Scan all JS/JSX/TS/TSX files for env var references
+    for root, _dirs, files in os.walk(frontend_dir):
+        if "node_modules" in root or ".next" in root:
+            continue
+        for fname in files:
+            if not any(fname.endswith(ext) for ext in (".js", ".jsx", ".ts", ".tsx", ".mjs")):
+                continue
+            fpath = os.path.join(root, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                # Match process.env.REACT_APP_*, process.env.NEXT_PUBLIC_*, import.meta.env.VITE_*
+                env_vars.update(_re.findall(r'process\.env\.(REACT_APP_\w+)', content))
+                env_vars.update(_re.findall(r'process\.env\.(NEXT_PUBLIC_\w+)', content))
+                env_vars.update(_re.findall(r'import\.meta\.env\.(VITE_\w+)', content))
+                # Also catch generic process.env.VAR_NAME patterns
+                env_vars.update(_re.findall(r'process\.env\.([A-Z][A-Z0-9_]{2,})', content))
+            except Exception:
+                continue
+
+    if not env_vars:
+        return
+
+    # Don't overwrite an existing .env
+    env_path = os.path.join(frontend_dir, ".env")
+    existing_vars: set[str] = set()
+    if os.path.isfile(env_path):
+        try:
+            with open(env_path, "r") as f:
+                for line in f:
+                    if "=" in line and not line.strip().startswith("#"):
+                        existing_vars.add(line.split("=", 1)[0].strip())
+        except Exception:
+            pass
+
+    # Only add vars that don't already exist
+    new_vars = env_vars - existing_vars
+    if not new_vars:
+        return
+
+    logger.info("Generating dummy .env with %d placeholder vars: %s", len(new_vars), sorted(new_vars)[:10])
+
+    with open(env_path, "a", encoding="utf-8") as f:
+        f.write("\n# Auto-generated by Reform for preview rendering\n")
+        for var in sorted(new_vars):
+            # Use realistic-looking placeholders based on common patterns
+            if "KEY" in var or "SECRET" in var:
+                f.write(f"{var}=placeholder_key_for_preview\n")
+            elif "URL" in var or "ENDPOINT" in var or "DOMAIN" in var:
+                f.write(f"{var}=https://placeholder.example.com\n")
+            elif "ID" in var or "PROJECT" in var:
+                f.write(f"{var}=placeholder-id\n")
+            elif "BUCKET" in var or "STORAGE" in var:
+                f.write(f"{var}=placeholder-bucket\n")
+            elif "SENDER" in var:
+                f.write(f"{var}=placeholder-sender\n")
+            else:
+                f.write(f"{var}=placeholder\n")
+
+
+def _detect_framework(frontend_dir: str) -> str:
+    """Detect the frontend framework from package.json."""
+    import json as _json
+    pkg_path = os.path.join(frontend_dir, "package.json")
+    try:
+        with open(pkg_path) as f:
+            data = _json.load(f)
+        all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+        if "next" in all_deps:
+            return "next"
+        if "vite" in all_deps:
+            return "vite"
+        # Check scripts for clues
+        scripts = data.get("scripts", {})
+        dev_script = scripts.get("dev", "")
+        if "vite" in dev_script:
+            return "vite"
+        if "next" in dev_script:
+            return "next"
+        if "react-scripts" in all_deps:
+            return "cra"
+        return "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _start_dev_server(frontend_dir: str, port: int) -> subprocess.Popen:
-    """Start the Next.js dev server on a specific port."""
-    logger.info("Starting dev server on port %d in %s", port, frontend_dir)
+    """Start the appropriate dev server based on the detected framework."""
+    framework = _detect_framework(frontend_dir)
+    logger.info("Detected framework: %s — starting dev server on port %d in %s", framework, port, frontend_dir)
+
     env = {
         **os.environ,
         "PORT": str(port),
         "NODE_ENV": "development",
         "NEXT_TELEMETRY_DISABLED": "1",
+        "BROWSER": "none",
     }
+
+    if framework == "next":
+        cmd = ["npx", "next", "dev", "--port", str(port)]
+    elif framework == "vite":
+        cmd = ["npx", "vite", "--port", str(port), "--host"]
+    elif framework == "cra":
+        cmd = ["npx", "react-scripts", "start"]
+        env["PORT"] = str(port)
+    else:
+        # Fallback: try npm run dev with PORT set
+        cmd = ["npm", "run", "dev"]
+        env["PORT"] = str(port)
+        logger.warning("Unknown framework, falling back to 'npm run dev' with PORT=%d", port)
+
     proc = subprocess.Popen(
-        ["npx", "next", "dev", "--port", str(port)],
+        cmd,
         cwd=frontend_dir,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env,
@@ -166,7 +352,7 @@ async def render_previews(
     tmp_dir = tempfile.mkdtemp(prefix="reform_preview_")
     proc = None
     port = _find_free_port()
-    route = _guess_route(target_file)
+    route = "/"  # Will be updated after framework detection
 
     try:
         # ── Step 1: Clone ──
@@ -175,6 +361,13 @@ async def render_previews(
         # ── Step 2: Find frontend root & install deps ──
         frontend_dir = _find_frontend_root(tmp_dir)
         _install_deps(frontend_dir)
+
+        # ── Step 2.5: Generate dummy env vars so apps don't crash ──
+        _generate_dummy_env(frontend_dir)
+
+        # ── Step 2.6: Detect framework and guess route ──
+        framework = _detect_framework(frontend_dir)
+        route = _guess_route(target_file, framework)
 
         # ── Step 3: Start dev server ──
         proc = _start_dev_server(frontend_dir, port)
@@ -239,7 +432,15 @@ async def render_previews(
         # ── Step 7: Screenshot AFTER (the modified code) ──
         logger.info("Screenshotting AFTER: %s", preview_url)
         try:
-            after_b64 = await take_screenshot_b64(preview_url)
+            after_b64, has_error = await take_screenshot_b64_with_error_check(preview_url)
+            if has_error:
+                logger.warning("AFTER screenshot shows a build/syntax error — falling back to BEFORE")
+                return {
+                    "before_screenshot": before_b64,
+                    "after_screenshot": before_b64,
+                    "preview_route": route,
+                    "preview_error": "Transformed code had a syntax error. Showing original preview instead.",
+                }
         except Exception as e:
             logger.warning("AFTER screenshot failed: %s", e)
             after_b64 = before_b64
@@ -270,9 +471,19 @@ async def render_previews(
             pass
 
 
-def _guess_route(target_path: str) -> str:
-    """Convert file path to Next.js route."""
+def _guess_route(target_path: str, framework: str = "unknown") -> str:
+    """Convert file path to a route based on the framework.
+
+    Next.js: file-based routing (app/page.tsx → /, pages/about.tsx → /about)
+    CRA/Vite/other: always / (client-side routing, SPA)
+    """
     import re
+
+    # CRA and Vite are SPAs — always serve from root
+    if framework in ("cra", "vite", "unknown"):
+        return "/"
+
+    # Next.js App Router: app/dashboard/page.tsx → /dashboard
     match = re.search(r'app/(.*?)page\.[jt]sx?$', target_path)
     if match:
         inner = match.group(1).rstrip("/")
@@ -280,8 +491,11 @@ def _guess_route(target_path: str) -> str:
             return "/"
         parts = [p for p in inner.split("/") if not p.startswith("(")]
         return "/" + "/".join(parts) if parts else "/"
+
+    # Next.js Pages Router: pages/about.tsx → /about
     match = re.search(r'pages/(.*?)\.[jt]sx?$', target_path)
     if match:
         inner = match.group(1)
         return "/" if inner == "index" else "/" + inner
+
     return "/"

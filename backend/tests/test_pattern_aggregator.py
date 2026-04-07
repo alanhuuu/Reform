@@ -58,51 +58,34 @@ class TestAggregatePatterns:
             result = aggregate_patterns(SITE_ANALYSES, "test")
         assert isinstance(result, CompetitorAnalysisResponse)
 
-    def test_missing_anthropic_api_key_falls_back_to_mock(self, monkeypatch):
+    def test_missing_anthropic_api_key_raises_error(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        result = aggregate_patterns(SITE_ANALYSES, "any_goal")
-        assert isinstance(result, CompetitorAnalysisResponse)
-        # Returns the canonical MOCK_RESPONSE
-        assert result.meta.project_style_goal == MOCK_RESPONSE["meta"]["project_style_goal"]
+        with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY not set"):
+            aggregate_patterns(SITE_ANALYSES, "any_goal")
 
-    def test_anthropic_exception_falls_back_to_mock(self, monkeypatch):
+    def test_anthropic_exception_propagates(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = Exception("Connection error")
         mock_anthropic = MagicMock(return_value=mock_client)
         with patch("app.services.pattern_aggregator.anthropic.Anthropic", mock_anthropic):
-            result = aggregate_patterns(SITE_ANALYSES, "")
-        assert isinstance(result, CompetitorAnalysisResponse)
-        assert result.meta.project_style_goal == MOCK_RESPONSE["meta"]["project_style_goal"]
+            with pytest.raises(Exception, match="Connection error"):
+                aggregate_patterns(SITE_ANALYSES, "")
 
-    def test_malformed_json_response_falls_back(self, monkeypatch):
+    def test_malformed_json_response_raises(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         mock_anthropic = _make_claude_mock("This is not JSON at all, sorry!")
         with patch("app.services.pattern_aggregator.anthropic.Anthropic", mock_anthropic):
-            result = aggregate_patterns(SITE_ANALYSES, "")
-        assert isinstance(result, CompetitorAnalysisResponse)
-        assert result.meta.project_style_goal == MOCK_RESPONSE["meta"]["project_style_goal"]
+            with pytest.raises(json.JSONDecodeError):
+                aggregate_patterns(SITE_ANALYSES, "")
 
-    def test_valid_json_but_invalid_schema_falls_back(self, monkeypatch):
+    def test_valid_json_but_invalid_schema_raises(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        # Valid JSON but wrong structure for CompetitorAnalysisResponse
         bad_data = {"unexpected_key": "unexpected_value", "no_meta": True}
         mock_anthropic = _make_claude_mock(json.dumps(bad_data))
         with patch("app.services.pattern_aggregator.anthropic.Anthropic", mock_anthropic):
-            result = aggregate_patterns(SITE_ANALYSES, "")
-        # Pydantic validation fails → fallback
-        assert isinstance(result, CompetitorAnalysisResponse)
-        assert result.meta.project_style_goal == MOCK_RESPONSE["meta"]["project_style_goal"]
-
-    def test_fallback_response_conforms_to_schema(self, monkeypatch):
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        result = aggregate_patterns(SITE_ANALYSES, "")
-        # Full schema validation — no AttributeError, correct types
-        assert isinstance(result.meta.confidence.layout_patterns, float)
-        assert isinstance(result.design_tokens.shadow.sm, str)
-        assert isinstance(result.design_tokens.border.default, str)
-        assert isinstance(result.design_tokens.motion.easing, str)
-        assert isinstance(result.design_tokens.typography.font_family, str)
+            with pytest.raises(Exception):
+                aggregate_patterns(SITE_ANALYSES, "")
 
     def test_claude_called_with_correct_model(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
@@ -153,7 +136,6 @@ class TestBuildAggregationPrompt:
 
     def test_style_goal_in_meta_section_of_prompt(self):
         prompt = build_aggregation_prompt(SITE_ANALYSES, "my_goal")
-        # The prompt template uses style_goal in the JSON template
         assert "my_goal" in prompt
 
     def test_empty_analyses_produces_valid_prompt_string(self):

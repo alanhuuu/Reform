@@ -30,6 +30,11 @@ async def transform_code(
     if not target:
         raise ValueError(f"Target file not found: {target_file}")
 
+    # Cap target file to avoid very slow Claude calls on huge files
+    if len(target["content"]) > 30000:
+        logger.warning("Target file %s is %d chars, truncating to 30000", target_file, len(target["content"]))
+        target = {**target, "content": target["content"][:30000] + "\n// ... truncated for transform (original file too large)"}
+
     supporting_parts = []
     total_chars = 0
     for sf in supporting:
@@ -56,11 +61,10 @@ async def transform_code(
     )
 
     raw = message.content[0].text.strip()
-    if raw.startswith("```"):
-        lines = raw.split("\n")
-        raw = "\n".join(lines[1:])
-        if raw.endswith("```"):
-            raw = raw[: raw.rfind("```")].strip()
+
+    # Strip markdown fences if present
+    if "```" in raw:
+        raw = raw.replace("```json", "").replace("```", "").strip()
 
     try:
         result = json.loads(raw)
@@ -71,6 +75,11 @@ async def transform_code(
     updated_code = result.get("updated_code", "")
     if not updated_code:
         raise ValueError("Transformation returned empty code")
+
+    # Sanity check: does it look like valid code?
+    if not any(kw in updated_code[:300] for kw in ["import", "export", "function", "const", "'use client'", "<!DOCTYPE"]):
+        logger.error("updated_code doesn't look like valid code (first 200 chars: %s)", updated_code[:200])
+        raise ValueError("Transformation returned invalid code (prose instead of JSX)")
 
     # ── Real preview: clone repo, run dev server, screenshot BEFORE & AFTER ──
     preview = await render_previews(
