@@ -19,6 +19,7 @@ from app.routes.code_pipeline import router as code_pipeline_router
 from app.routes.pipeline_v2 import router as pipeline_v2_router
 from app.routes.re_render import router as re_render_router
 from app.routes.github_publish import router as github_publish_router
+from app.routes.projects import router as projects_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,6 +64,7 @@ app.include_router(code_pipeline_router)
 app.include_router(pipeline_v2_router)
 app.include_router(re_render_router)
 app.include_router(github_publish_router)
+app.include_router(projects_router)
 
 
 @app.get("/health")
