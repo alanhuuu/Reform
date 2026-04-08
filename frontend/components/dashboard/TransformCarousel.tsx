@@ -54,7 +54,7 @@ export default function TransformCarousel({
   if (!current) return null
 
   return (
-    <div className="max-w-[1400px] mx-auto px-4">
+    <div className="max-w-[1760px] mx-auto px-4">
       {/* Carousel navigation header — large, prominent tabs */}
       <div className="flex items-start justify-between gap-4 mb-6">
         {/* Page selector tabs */}

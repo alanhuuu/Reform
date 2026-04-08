@@ -102,7 +102,7 @@ export default function BeforeAfterShowcase({
           {/* Screenshot — capped scrollable so full-page captures stay readable */}
           <div
             className="overflow-y-auto"
-            style={{ background: '#0d0c16', height: '640px' }}
+            style={{ background: '#0d0c16', height: '820px' }}
           >
             {screenshot ? (
               // eslint-disable-next-line @next/next/no-img-element
