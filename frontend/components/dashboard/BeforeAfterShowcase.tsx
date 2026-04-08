@@ -109,7 +109,7 @@ export default function BeforeAfterShowcase({
               <img
                 src={`data:image/png;base64,${screenshot}`}
                 alt={`${label} — ${pageName}`}
-                className="w-full block"
+                className="w-full h-full block"
                 style={{ objectFit: 'cover', objectPosition: 'top' }}
               />
             ) : (
