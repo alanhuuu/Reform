@@ -13,7 +13,10 @@ export default function TransformCarousel({
   pages: TransformedPageData[]
   result: MultiPageTransformResult
 }) {
-  const transformed = pages.filter(p => p.status === 'transformed')
+  // Include transformed AND errored pages so users can see failures.
+  // High-quality (skipped) pages aren't shown here — they live in their own panel.
+  const visible = pages.filter(p => p.status === 'transformed' || p.status === 'error')
+  const transformed = visible
   const [currentIndex, setCurrentIndex] = useState(0)
 
   const goTo = useCallback((idx: number) => {
@@ -51,131 +54,159 @@ export default function TransformCarousel({
   if (!current) return null
 
   return (
-    <div className="max-w-5xl mx-auto">
-      {/* Carousel navigation header */}
-      <div className="flex items-center justify-between mb-5">
-        {/* Page selector pills */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-1 min-w-0">
-          {transformed.map((page, i) => (
-            <button
-              key={page.page_path}
-              onClick={() => goTo(i)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex-shrink-0"
-              style={i === currentIndex
-                ? { background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', color: '#d8b4fe' }
-                : { background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)' }
-              }
-            >
-              <span
-                className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold"
-                style={{
-                  background: i === currentIndex ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)',
-                  color: i === currentIndex ? '#c084fc' : 'rgba(255,255,255,0.25)',
-                }}
+    <div className="max-w-[1760px] mx-auto px-4">
+      {/* Carousel navigation header — large, prominent tabs */}
+      <div className="flex items-start justify-between gap-4 mb-6">
+        {/* Page selector tabs */}
+        <div className="flex items-stretch gap-2.5 overflow-x-auto pb-2 flex-1 min-w-0">
+          {transformed.map((page, i) => {
+            const isActive = i === currentIndex
+            const isError = page.status === 'error'
+            const accent = isError ? '239,68,68' : '168,85,247'
+            const textActive = isError ? '#fca5a5' : '#d8b4fe'
+            const badgeActive = isError ? '#f87171' : '#c084fc'
+            return (
+              <button
+                key={page.page_path}
+                onClick={() => goTo(i)}
+                className="group flex items-center gap-3 px-5 py-3.5 rounded-xl transition-all flex-shrink-0 text-left"
+                style={isActive
+                  ? {
+                      background: `rgba(${accent},0.10)`,
+                      border: `1px solid rgba(${accent},0.35)`,
+                      boxShadow: `0 0 0 3px rgba(${accent},0.06), 0 4px 20px rgba(${accent},0.08)`,
+                    }
+                  : {
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.06)',
+                    }
+                }
               >
-                {i + 1}
-              </span>
-              {page.page_name}
-            </button>
-          ))}
+                <span
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold flex-shrink-0 transition-all"
+                  style={{
+                    background: isActive ? `rgba(${accent},0.18)` : 'rgba(255,255,255,0.04)',
+                    color: isActive ? badgeActive : 'rgba(255,255,255,0.35)',
+                    border: isActive ? `1px solid rgba(${accent},0.25)` : '1px solid transparent',
+                  }}
+                >
+                  {i + 1}
+                </span>
+                <div className="flex flex-col min-w-0">
+                  <span
+                    className="text-[14px] font-semibold leading-tight truncate max-w-[180px]"
+                    style={{ color: isActive ? textActive : 'rgba(255,255,255,0.85)' }}
+                  >
+                    {page.page_name}
+                  </span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{ background: isError ? '#ef4444' : '#a855f7' }}
+                    />
+                    <span
+                      className="text-[11px] font-medium"
+                      style={{ color: isActive ? `rgba(${accent},0.75)` : 'rgba(255,255,255,0.4)' }}
+                    >
+                      {isError ? 'Failed' : 'Improved'}
+                    </span>
+                    {page.score > 0 && (
+                      <>
+                        <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>·</span>
+                        <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                          {page.score}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </button>
+            )
+          })}
         </div>
 
         {/* Arrow controls */}
         {transformed.length > 1 && (
-          <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0 pt-2">
             <button
               onClick={goPrev}
               disabled={currentIndex === 0}
-              className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+              className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:bg-white/5"
               style={{
                 background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                opacity: currentIndex === 0 ? 0.3 : 1,
+                border: '1px solid rgba(255,255,255,0.08)',
+                opacity: currentIndex === 0 ? 0.25 : 1,
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M8.5 3.5L5 7l3.5 3.5" stroke="rgba(255,255,255,0.5)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+              <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
+                <path d="M8.5 3.5L5 7l3.5 3.5" stroke="rgba(255,255,255,0.6)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
-            <span className="text-[10px] font-mono px-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
+            <span className="text-[12px] font-mono px-1 tabular-nums" style={{ color: 'rgba(255,255,255,0.3)' }}>
               {currentIndex + 1}/{transformed.length}
             </span>
             <button
               onClick={goNext}
               disabled={currentIndex === transformed.length - 1}
-              className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+              className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:bg-white/5"
               style={{
                 background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                opacity: currentIndex === transformed.length - 1 ? 0.3 : 1,
+                border: '1px solid rgba(255,255,255,0.08)',
+                opacity: currentIndex === transformed.length - 1 ? 0.25 : 1,
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="rgba(255,255,255,0.5)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+              <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
+                <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="rgba(255,255,255,0.6)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
           </div>
         )}
       </div>
 
-      {/* Current slide */}
+      {/* Current slide — before/after is the hero */}
       <div
-        className="rounded-2xl overflow-hidden"
+        className="rounded-3xl overflow-hidden"
         style={{
           background: 'rgba(255,255,255,0.015)',
           border: '1px solid rgba(255,255,255,0.06)',
           boxShadow: '0 8px 40px rgba(0,0,0,0.3)',
         }}
       >
-        {/* Slide header */}
+        {/* Compact slide header */}
         <div
-          className="flex items-center justify-between px-6 py-4"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+          className="flex items-center justify-between px-8 pt-6 pb-4"
         >
           <div className="flex items-center gap-3">
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              className="w-9 h-9 rounded-xl flex items-center justify-center"
               style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.12)' }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 3l1.912 5.813a2 2 0 001.272 1.272L21 12l-5.816 1.916a2 2 0 00-1.272 1.272L12 21l-1.912-5.812a2 2 0 00-1.272-1.272L3 12l5.816-1.915a2 2 0 001.272-1.272L12 3z" />
               </svg>
             </div>
             <div>
-              <h2 className="text-white font-semibold text-[15px]">{current.page_name}</h2>
+              <h2 className="text-white font-semibold text-[18px] leading-tight">{current.page_name}</h2>
               <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.25)' }}>{current.route}</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {current.score > 0 && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <span className="text-[9px] font-medium uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.25)' }}>Score</span>
-                <span className="text-[12px] font-bold" style={{ color: '#d8b4fe' }}>{current.score}</span>
+                <span className="text-[13px] font-bold" style={{ color: '#d8b4fe' }}>{current.score}</span>
               </div>
             )}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.12)' }}>
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a855f7' }} />
-              <span className="text-[10px] font-medium" style={{ color: 'rgba(168,85,247,0.8)' }}>Improved</span>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.18)' }}>
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a855f7', boxShadow: '0 0 6px rgba(168,85,247,0.6)' }} />
+              <span className="text-[11px] font-medium" style={{ color: 'rgba(216,180,254,0.95)' }}>Improved</span>
             </div>
           </div>
         </div>
 
-        {/* Diff summary callout */}
-        {current.diff_summary && (
-          <div
-            className="mx-6 mt-5 rounded-lg px-4 py-3 flex items-start gap-2.5"
-            style={{ background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.1)' }}
-          >
-            <svg className="mt-0.5 flex-shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 3l1.912 5.813a2 2 0 001.272 1.272L21 12l-5.816 1.916a2 2 0 00-1.272 1.272L12 21l-1.912-5.812a2 2 0 00-1.272-1.272L3 12l5.816-1.915a2 2 0 001.272-1.272L12 3z" />
-            </svg>
-            <p className="text-[12px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.55)' }}>{current.diff_summary}</p>
-          </div>
-        )}
-
-        {/* Before/After screenshots — only show if we have actual screenshot data */}
+        {/* HERO: Before/After — full-width, oversized */}
         {isPagePreviewAvailable(current) && (
-          <div className="p-6">
+          <div className="px-8 pt-2 pb-8">
             <BeforeAfterShowcase
               beforeScreenshot={current.before_screenshot}
               afterScreenshot={current.after_screenshot}
@@ -185,8 +216,21 @@ export default function TransformCarousel({
           </div>
         )}
 
+        {/* Diff summary callout — under the hero */}
+        {current.diff_summary && (
+          <div
+            className="mx-8 mb-6 rounded-xl px-5 py-4 flex items-start gap-3"
+            style={{ background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.1)' }}
+          >
+            <svg className="mt-0.5 flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3l1.912 5.813a2 2 0 001.272 1.272L21 12l-5.816 1.916a2 2 0 00-1.272 1.272L12 21l-1.912-5.812a2 2 0 00-1.272-1.272L3 12l5.816-1.915a2 2 0 001.272-1.272L12 3z" />
+            </svg>
+            <p className="text-[13px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.65)' }}>{current.diff_summary}</p>
+          </div>
+        )}
+
         {/* Structural changes */}
-        <div className="px-6 pb-6">
+        <div className="px-8 pb-8">
           <StructuralChangesPanel
             annotations={current.change_annotations || []}
             changeSummary={current.change_summary || []}

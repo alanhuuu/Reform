@@ -68,6 +68,7 @@ class TransformRun(Base):
     status = Column(String, nullable=False, default="running")   # running / complete / failed
     design_intelligence = Column(JSON, nullable=True)
     user_intent = Column(String, default="")
+    source_commit_sha = Column(String, nullable=True, index=True)   # GitHub HEAD SHA the run was built against
     total_pages_found = Column(Integer, default=0)
     total_transformed = Column(Integer, default=0)
     total_skipped = Column(Integer, default=0)

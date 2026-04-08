@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -47,63 +48,68 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
     urls = [str(u) for u in request.urls]
     backups = [str(u) for u in request.backup_urls]
 
-    def event_stream():
-        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
-
-        site_analyses = []
-        succeeded_urls = set()
+    async def event_stream():
+        """Async SSE generator. Runs each blocking TinyFish call on a worker
+        thread and pushes completion events onto an asyncio.Queue so the
+        frontend receives them the moment each site finishes — not batched
+        at the end.
+        """
         total = len(urls)
         BATCH_TIMEOUT = 120
+        site_analyses: list[dict] = []
+        succeeded_urls: set[str] = set()
+        queue: asyncio.Queue = asyncio.Queue()
 
-        with ThreadPoolExecutor(max_workers=min(total, 5)) as executor:
-            future_to_url = {
-                executor.submit(extract_site_data, url): url for url in urls
-            }
-            completed_count = 0
-
+        async def _run(url: str):
             try:
-                for future in as_completed(future_to_url, timeout=BATCH_TIMEOUT):
-                    url = future_to_url[future]
-                    completed_count += 1
-                    try:
-                        result = future.result(timeout=10)
-                        site_analyses.append(result)
-                        succeeded_urls.add(url)
-                        yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': completed_count, 'total': total, 'status': 'ok'})}\n\n"
-                    except TimeoutError:
-                        logger.warning("TinyFish result timeout for %s", url)
-                        yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': completed_count, 'total': total, 'status': 'timeout'})}\n\n"
-                    except Exception as e:
-                        logger.warning("TinyFish failed for %s (%s)", url, e)
-                        yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': completed_count, 'total': total, 'status': 'failed'})}\n\n"
-            except TimeoutError:
-                # Batch timeout — mark remaining as timed out
-                for url in urls:
-                    if url not in succeeded_urls:
-                        completed_count += 1
-                        yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': completed_count, 'total': total, 'status': 'timeout'})}\n\n"
-                for future in future_to_url:
-                    future.cancel()
+                # extract_site_data is blocking — offload to a worker thread.
+                result = await asyncio.to_thread(extract_site_data, url)
+                await queue.put(("ok", url, result))
+            except Exception as e:
+                logger.warning("TinyFish failed for %s (%s)", url, e)
+                await queue.put(("failed", url, None))
+
+        tasks = [asyncio.create_task(_run(url)) for url in urls]
+        done_count = 0
+        deadline = asyncio.get_event_loop().time() + BATCH_TIMEOUT
+
+        while done_count < total:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                break
+            try:
+                status, url, result = await asyncio.wait_for(queue.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            done_count += 1
+            if status == "ok":
+                site_analyses.append(result)
+                succeeded_urls.add(url)
+            yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': done_count, 'total': total, 'status': status})}\n\n"
+
+        # Any tasks still pending after the batch timeout — mark as timeouts
+        # and cancel them so the event loop isn't blocked.
+        for task, url in zip(tasks, urls):
+            if url not in succeeded_urls and not task.done():
+                task.cancel()
+                done_count += 1
+                yield f"data: {json.dumps({'event': 'site_complete', 'url': url, 'index': done_count, 'total': total, 'status': 'timeout'})}\n\n"
 
         failed_urls = [u for u in urls if u not in succeeded_urls]
 
-        # Retry failures with backup URLs
+        # Retry failures with backup URLs (sequential, each still streams its event)
         remaining_backups = [u for u in backups if u not in set(urls) and u not in set(failed_urls)]
         for backup_url in remaining_backups:
             if not failed_urls:
                 break
+            yield f"data: {json.dumps({'event': 'retrying', 'url': backup_url})}\n\n"
             try:
-                yield f"data: {json.dumps({'event': 'retrying', 'url': backup_url})}\n\n"
-                result = extract_site_data(backup_url)
+                result = await asyncio.to_thread(extract_site_data, backup_url)
                 site_analyses.append(result)
                 failed_urls.pop(0)
                 yield f"data: {json.dumps({'event': 'site_complete', 'url': backup_url, 'index': total, 'total': total, 'status': 'ok'})}\n\n"
             except Exception:
-                pass
-
-        # Skip failed URLs — no mock data
-        for url in failed_urls:
-            logger.warning("No data for %s — skipping", url)
+                continue
 
         if not site_analyses:
             yield f"data: {json.dumps({'event': 'error', 'message': 'All competitor sites failed or timed out'})}\n\n"
@@ -111,10 +117,20 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
 
         yield f"data: {json.dumps({'event': 'aggregating'})}\n\n"
 
-        result = aggregate_patterns(site_analyses, request.style_goal)
+        result = await asyncio.to_thread(aggregate_patterns, site_analyses, request.style_goal)
         yield f"data: {json.dumps({'event': 'complete', 'data': result.model_dump()})}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            # Disable proxy/browser buffering so each yielded event reaches
+            # the client immediately (Railway/nginx otherwise batches them).
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.post("/extract-raw")

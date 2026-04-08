@@ -9,10 +9,12 @@ Bucket structure:
 
 import base64
 import gzip
+import hashlib
 import json
 import logging
 import os
 import re
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from botocore.exceptions import ClientError
@@ -103,6 +105,57 @@ def upload_snapshot(project_id: str, snapshot_id: str, files: list[dict]) -> str
     except Exception as e:
         logger.error("Failed to upload snapshot %s: %s", key, e)
         return ""
+
+
+# ─── TinyFish analysis cache ─────────────────────────────────────────
+# Persisted across deploys so we stop paying TinyFish + wall-clock time for
+# sites we've already analyzed recently. Key: tinyfish-cache/{sha1(url)}.json
+
+def _tinyfish_key(url: str) -> str:
+    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
+    return f"tinyfish-cache/{digest}.json"
+
+
+def upload_tinyfish_cache(url: str, data: dict) -> None:
+    """Persist a TinyFish analysis result for this URL."""
+    key = _tinyfish_key(url)
+    try:
+        _get_client().put_object(
+            Bucket=_bucket(),
+            Key=key,
+            Body=json.dumps(data).encode("utf-8"),
+            ContentType="application/json",
+            Metadata={"source_url": url},
+        )
+    except Exception as e:
+        logger.warning("TinyFish cache upload failed for %s: %s", url, e)
+
+
+def download_tinyfish_cache(url: str, max_age_days: int = 7) -> dict | None:
+    """Return cached TinyFish data if it exists and isn't older than max_age_days."""
+    key = _tinyfish_key(url)
+    try:
+        response = _get_client().get_object(Bucket=_bucket(), Key=key)
+    except ClientError as e:
+        # NoSuchKey is expected on a miss — stay quiet.
+        if e.response.get("Error", {}).get("Code") not in ("NoSuchKey", "404"):
+            logger.warning("TinyFish cache fetch failed for %s: %s", url, e)
+        return None
+    except Exception as e:
+        logger.warning("TinyFish cache fetch failed for %s: %s", url, e)
+        return None
+
+    last_modified = response.get("LastModified")
+    if last_modified:
+        age = datetime.now(timezone.utc) - last_modified
+        if age > timedelta(days=max_age_days):
+            return None
+
+    try:
+        return json.loads(response["Body"].read().decode("utf-8"))
+    except Exception as e:
+        logger.warning("TinyFish cache parse failed for %s: %s", url, e)
+        return None
 
 
 def download_snapshot(key: str) -> list[dict]:

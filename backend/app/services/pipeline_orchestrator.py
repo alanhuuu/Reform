@@ -4,6 +4,7 @@ planning, transformation, validation, rendering, and aggregation into
 a single multi-page transformation pipeline.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -173,7 +174,26 @@ async def _transform_single_page(
             retries_used = attempt + 1
             continue
 
-        # Accept the transformation (either structural or final attempt)
+        # Final attempt still cosmetic-only → the UI is already good. Mark
+        # as no_changes_needed so the frontend says "UI is perfect" instead
+        # of rendering identical before/after screenshots.
+        if not validation["is_structural"]:
+            logger.info(
+                "Transform of %s produced no structural changes after all "
+                "retries — marking as no_changes_needed",
+                page_path,
+            )
+            return {
+                "updated_code": "",
+                "diff_summary": "",
+                "change_annotations": [],
+                "change_summary": [],
+                "retries_used": retries_used,
+                "error": "",
+                "no_changes_needed": True,
+            }
+
+        # Accept the transformation (structural change detected)
         return {
             "updated_code": updated_code,
             "diff_summary": result.get("diff_summary", "UI layout and structure improved."),
@@ -265,24 +285,25 @@ async def run_pipeline_v2(
         len(to_transform), len(skipped),
     )
 
-    # ── Step 5: Transform selected pages ────────────────────────────
+    # ── Step 5: Transform selected pages (in parallel) ──────────────
     content_lookup = {f["path"]: f["content"] for f in files}
     transform_results: dict[str, dict] = {}
 
-    for ev in to_transform:
+    async def _run_one(ev) -> tuple[str, dict]:
         page_code = content_lookup.get(ev.page_path, "")
         if not page_code:
-            pipeline_errors.append(f"No content found for {ev.page_path}")
-            continue
-
-        try:
-            eval_dict = {
-                "score": ev.score,
-                "breakdown": ev.breakdown.model_dump() if ev.breakdown else {},
-                "issues": [i.model_dump() for i in ev.issues],
-                "reasoning": ev.reasoning,
+            return ev.page_path, {
+                "updated_code": "", "diff_summary": "", "change_annotations": [],
+                "change_summary": [], "retries_used": 0,
+                "error": f"No content found for {ev.page_path}",
             }
-
+        eval_dict = {
+            "score": ev.score,
+            "breakdown": ev.breakdown.model_dump() if ev.breakdown else {},
+            "issues": [i.model_dump() for i in ev.issues],
+            "reasoning": ev.reasoning,
+        }
+        try:
             result = await _transform_single_page(
                 page_path=ev.page_path,
                 page_code=page_code,
@@ -293,19 +314,20 @@ async def run_pipeline_v2(
                 user_intent=user_intent,
                 api_key=api_key,
             )
-            transform_results[ev.page_path] = result
-
+            return ev.page_path, result
         except Exception as e:
             logger.error("Transform failed for %s: %s", ev.page_path, e, exc_info=True)
-            pipeline_errors.append(f"Transform failed for {ev.page_path}: {e}")
-            transform_results[ev.page_path] = {
-                "updated_code": "",
-                "diff_summary": "",
-                "change_annotations": [],
-                "change_summary": [],
-                "retries_used": 0,
-                "error": str(e),
+            return ev.page_path, {
+                "updated_code": "", "diff_summary": "", "change_annotations": [],
+                "change_summary": [], "retries_used": 0, "error": str(e),
             }
+
+    logger.info("Pipeline v2: Transforming %d pages in parallel", len(to_transform))
+    results = await asyncio.gather(*[_run_one(ev) for ev in to_transform])
+    for path, result in results:
+        transform_results[path] = result
+        if result.get("error") and not result.get("updated_code"):
+            pipeline_errors.append(f"Transform failed for {path}: {result['error']}")
 
     # ── Step 6: Render screenshots ──────────────────────────────────
     # Build list of successful transforms for screenshotting
@@ -358,16 +380,27 @@ async def run_pipeline_v2(
         page = page_lookup.get(ev.page_path)
 
         has_code = bool(result.get("updated_code"))
+        no_changes = result.get("no_changes_needed", False)
+
+        if has_code:
+            status = "transformed"
+        elif no_changes:
+            status = "high_quality"
+        else:
+            status = "error"
 
         page_results.append({
             "page_path": ev.page_path,
             "page_name": ev.page_name,
             "route": page.route if page else "/",
-            "status": "transformed" if has_code else "error",
+            "status": status,
             "score": ev.score,
             "original_code": content_lookup.get(ev.page_path, ""),
             "updated_code": result.get("updated_code", ""),
-            "diff_summary": result.get("diff_summary", ""),
+            "diff_summary": (
+                "The UI is already well-designed — we don't recommend any changes."
+                if no_changes else result.get("diff_summary", "")
+            ),
             "change_annotations": result.get("change_annotations", []),
             "change_summary": result.get("change_summary", []),
             "before_screenshot": screenshots.get("before_screenshot", ""),

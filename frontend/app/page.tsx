@@ -1,17 +1,17 @@
 import Navbar from '@/components/layout/Navbar'
 import Footer from '@/components/layout/Footer'
-import HeroSection from '@/components/landing/HeroSection'
+import MacBookHero from '@/components/landing/MacBookHero'
 import HowItWorks from '@/components/landing/HowItWorks'
 import FeatureHighlights from '@/components/landing/FeatureHighlights'
 import InteractiveBackground from '@/components/landing/InteractiveBackground'
 
 export default function Home() {
   return (
-    <main className="min-h-screen overflow-x-hidden" style={{ background: '#13111c' }}>
+    <main className="app-shell min-h-screen overflow-x-hidden">
       <InteractiveBackground />
       <div className="relative" style={{ zIndex: 1 }}>
         <Navbar />
-        <HeroSection />
+        <MacBookHero />
         <HowItWorks />
         <FeatureHighlights />
         <Footer />

@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import Editor from '@monaco-editor/react'
 import { apiUrl } from '@/lib/api'
@@ -664,7 +664,15 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
   )
 }
 
-export default function TransformPage() {
+export default function TransformPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <TransformPage />
+    </Suspense>
+  )
+}
+
+function TransformPage() {
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
   const [transform, setTransform] = useState<TransformData | null>(null)
   const [scOpen, setScOpen] = useState(false)
@@ -679,6 +687,7 @@ export default function TransformPage() {
   const [suggestLoading, setSuggestLoading] = useState(false)
   const [selectedCommit, setSelectedCommit] = useState<CommitEntry | null>(null)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { data: session } = useSession()
 
   // ── Code Pipeline State ──
@@ -738,6 +747,63 @@ export default function TransformPage() {
     }
   }, [])
 
+  // Restore a past run when navigated with ?project=<id>
+  const restoredProjectRef = useRef<string | null>(null)
+  useEffect(() => {
+    const projectId = searchParams?.get('project')
+    if (!projectId || restoredProjectRef.current === projectId) return
+    restoredProjectRef.current = projectId
+    autoStartedRef.current = true // prevent auto-start from sessionStorage repo
+    ;(async () => {
+      try {
+        setPipelineStep('ingesting')
+        const runsRes = await fetch(apiUrl(`/projects/${projectId}/runs`))
+        if (!runsRes.ok) throw new Error('runs fetch failed')
+        const runs: { id: string; status: string }[] = await runsRes.json()
+        const latest = runs[0]
+        if (!latest) throw new Error('no runs')
+        const runRes = await fetch(apiUrl(`/projects/runs/${latest.id}`))
+        if (!runRes.ok) throw new Error('run fetch failed')
+        const run = await runRes.json()
+        const multi: MultiPageTransformResult = {
+          repo_name: run.repo_name,
+          branch: run.branch,
+          framework: run.framework,
+          total_pages_found: run.total_pages_found,
+          total_evaluated: run.total_pages_found,
+          total_transformed: run.total_transformed,
+          total_skipped: run.total_skipped,
+          global_summary: run.global_summary || [],
+          pipeline_errors: run.pipeline_errors || [],
+          pages: (run.pages || []).map((p: Record<string, unknown>) => ({
+            page_path: p.page_path as string,
+            page_name: p.page_name as string,
+            route: p.route as string,
+            status: (p.status as 'transformed' | 'high_quality' | 'error') || 'transformed',
+            score: (p.score as number) || 0,
+            original_code: p.original_code as string,
+            updated_code: p.updated_code as string,
+            diff_summary: p.diff_summary as string,
+            change_annotations: (p.change_annotations as ChangeAnnotation[]) || [],
+            change_summary: (p.change_summary as string[]) || [],
+            before_screenshot: p.before_screenshot as string,
+            after_screenshot: p.after_screenshot as string,
+            error: p.error as string,
+            retries_used: (p.retries_used as number) || 0,
+          })),
+        }
+        setMultiPageResult(multi)
+        setRepoName(run.repo_name)
+        setRepoBranch(run.branch || 'main')
+        setPipelineStep('complete')
+      } catch (e) {
+        setPipelineError(e instanceof Error ? e.message : 'Failed to load past run')
+        setPipelineStep('idle')
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
   // Auto-start pipeline if a repo was selected in Discovery
   useEffect(() => {
     if (autoStartedRef.current || pipelineStep !== 'idle' || transformResult) return
@@ -771,6 +837,61 @@ export default function TransformPage() {
 
   async function runPipeline(repo: GithubRepo) {
     setPipelineError(''); setRepoName(repo.full_name); setRepoBranch(repo.default_branch || 'main')
+    const branch = repo.default_branch || 'main'
+
+    // ── Fetch current HEAD SHA from GitHub so we can look up a cached run.
+    // A run is considered valid until the next commit on this branch.
+    let headSha: string | null = null
+    try {
+      const shaRes = await fetch(
+        `https://api.github.com/repos/${repo.full_name}/commits/${branch}`,
+        session?.accessToken
+          ? { headers: { Authorization: `Bearer ${session.accessToken}` } }
+          : undefined,
+      )
+      if (shaRes.ok) {
+        const shaData = await shaRes.json()
+        headSha = shaData?.sha || null
+      }
+    } catch { /* non-fatal — we'll just run fresh */ }
+
+    // ── Try cached run for this (user, repo, branch, commit). If the DB has
+    // a complete run for the same commit SHA, load it and skip the pipeline.
+    if (headSha && session?.githubId) {
+      try {
+        const cacheRes = await fetch(
+          apiUrl(`/projects/latest-run?github_user_id=${encodeURIComponent(session.githubId)}`
+            + `&repo_name=${encodeURIComponent(repo.full_name)}`
+            + `&branch=${encodeURIComponent(branch)}`
+            + `&commit_sha=${encodeURIComponent(headSha)}`),
+        )
+        if (cacheRes.ok) {
+          const cached = await cacheRes.json()
+          // Adapt RunResponse → MultiPageTransformResult (shapes match closely).
+          const adapted: MultiPageTransformResult = {
+            repo_name: cached.repo_name,
+            branch: cached.branch,
+            framework: cached.framework,
+            total_pages_found: cached.total_pages_found,
+            total_evaluated: cached.total_pages_found,
+            total_transformed: cached.total_transformed,
+            total_skipped: cached.total_skipped,
+            pages: cached.pages || [],
+            global_summary: cached.global_summary || [],
+            pipeline_errors: cached.pipeline_errors || [],
+          }
+          setMultiPageResult(adapted)
+          setPipelineStep('complete')
+          sessionStorage.setItem('refineui_transform', JSON.stringify({
+            multiPageResult: adapted,
+            repoName: repo.full_name,
+            branch,
+          }))
+          console.info('Loaded cached transform for', repo.full_name, 'at', headSha.slice(0, 7))
+          return
+        }
+      } catch { /* non-fatal — fall through to fresh run */ }
+    }
 
     setPipelineStep('ingesting')
     try {
@@ -811,6 +932,7 @@ export default function TransformPage() {
               repo_url: `https://github.com/${repo.full_name}`,
               branch: repo.default_branch || 'main',
               framework: result.framework || 'unknown',
+              source_commit_sha: headSha,
               user_intent: userIntent,
               design_intelligence: analysis || null,
               file_tree: [],
@@ -834,7 +956,7 @@ export default function TransformPage() {
         setSelectedTarget(firstTransformed.page_path)
         const commitLabel = firstTransformed.diff_summary?.split('.')[0]?.trim()?.slice(0, 60) || 'UI improvements'
         const newCommit: CommitEntry = { hash: Math.random().toString(16).slice(2, 8), msg: commitLabel, color: '#f59e0b', status: 'pending', code: firstTransformed.updated_code, suggestion: userIntent || 'Applied design intelligence' }
-        setCommits(prev => [newCommit, ...prev]); setScOpen(true)
+        setCommits(prev => [newCommit, ...prev])
       }
     } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Transform failed'); setPipelineStep('idle') }
   }
@@ -1029,7 +1151,7 @@ export default function TransformPage() {
 
   return (
     <div className="flex justify-center px-3 sm:px-6 py-6 sm:py-10 pb-20">
-      <div className="w-full max-w-6xl space-y-10">
+      <div className="w-full max-w-[1760px] space-y-10">
 
         {/* ── HEADER ── */}
         {pipelineStep === 'complete' && multiPageResult ? (
