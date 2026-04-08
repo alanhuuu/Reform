@@ -1085,7 +1085,7 @@ export default function TransformPage() {
 
   return (
     <div className="flex justify-center px-3 sm:px-6 py-6 sm:py-10 pb-20">
-      <div className="w-full max-w-6xl space-y-10">
+      <div className="w-full max-w-[1760px] space-y-10">
 
         {/* ── HEADER ── */}
         {pipelineStep === 'complete' && multiPageResult ? (

@@ -110,7 +110,7 @@ export default function BeforeAfterShowcase({
                 src={`data:image/png;base64,${screenshot}`}
                 alt={`${label} — ${pageName}`}
                 className="w-full block"
-                style={{ objectFit: 'contain', objectPosition: 'top' }}
+                style={{ objectFit: 'cover', objectPosition: 'top' }}
               />
             ) : (
               <div className="flex items-center justify-center h-full">
