@@ -20,7 +20,7 @@ async def take_screenshot_b64(url: str) -> str:
             if len(body_html.strip()) < 50:
                 logger.warning("Page body is nearly empty (%d chars) — app may need env vars to render", len(body_html.strip()))
 
-            screenshot = await page.screenshot(type="png", full_page=False)
+            screenshot = await page.screenshot(type="png", full_page=True)
             return base64.b64encode(screenshot).decode("utf-8")
         finally:
             await browser.close()
@@ -66,7 +66,7 @@ async def take_screenshot_b64_with_error_check(url: str) -> tuple[str, bool]:
             except Exception:
                 pass
 
-            screenshot = await page.screenshot(type="png", full_page=False)
+            screenshot = await page.screenshot(type="png", full_page=True)
             return base64.b64encode(screenshot).decode("utf-8"), has_error
         finally:
             await browser.close()
@@ -84,7 +84,7 @@ async def take_screenshot_with_css_b64(url: str, css_patch: str) -> str:
             await page.wait_for_timeout(1500)
             await page.add_style_tag(content=css_patch)
             await page.wait_for_timeout(500)
-            screenshot = await page.screenshot(type="png", full_page=False)
+            screenshot = await page.screenshot(type="png", full_page=True)
             return base64.b64encode(screenshot).decode("utf-8")
         finally:
             await browser.close()
