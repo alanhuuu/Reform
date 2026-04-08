@@ -174,7 +174,26 @@ async def _transform_single_page(
             retries_used = attempt + 1
             continue
 
-        # Accept the transformation (either structural or final attempt)
+        # Final attempt still cosmetic-only → the UI is already good. Mark
+        # as no_changes_needed so the frontend says "UI is perfect" instead
+        # of rendering identical before/after screenshots.
+        if not validation["is_structural"]:
+            logger.info(
+                "Transform of %s produced no structural changes after all "
+                "retries — marking as no_changes_needed",
+                page_path,
+            )
+            return {
+                "updated_code": "",
+                "diff_summary": "",
+                "change_annotations": [],
+                "change_summary": [],
+                "retries_used": retries_used,
+                "error": "",
+                "no_changes_needed": True,
+            }
+
+        # Accept the transformation (structural change detected)
         return {
             "updated_code": updated_code,
             "diff_summary": result.get("diff_summary", "UI layout and structure improved."),
@@ -361,16 +380,27 @@ async def run_pipeline_v2(
         page = page_lookup.get(ev.page_path)
 
         has_code = bool(result.get("updated_code"))
+        no_changes = result.get("no_changes_needed", False)
+
+        if has_code:
+            status = "transformed"
+        elif no_changes:
+            status = "high_quality"
+        else:
+            status = "error"
 
         page_results.append({
             "page_path": ev.page_path,
             "page_name": ev.page_name,
             "route": page.route if page else "/",
-            "status": "transformed" if has_code else "error",
+            "status": status,
             "score": ev.score,
             "original_code": content_lookup.get(ev.page_path, ""),
             "updated_code": result.get("updated_code", ""),
-            "diff_summary": result.get("diff_summary", ""),
+            "diff_summary": (
+                "The UI is already well-designed — we don't recommend any changes."
+                if no_changes else result.get("diff_summary", "")
+            ),
             "change_annotations": result.get("change_annotations", []),
             "change_summary": result.get("change_summary", []),
             "before_screenshot": screenshots.get("before_screenshot", ""),
