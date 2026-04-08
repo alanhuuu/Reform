@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import Editor from '@monaco-editor/react'
 import { apiUrl } from '@/lib/api'
@@ -679,6 +679,7 @@ export default function TransformPage() {
   const [suggestLoading, setSuggestLoading] = useState(false)
   const [selectedCommit, setSelectedCommit] = useState<CommitEntry | null>(null)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { data: session } = useSession()
 
   // ── Code Pipeline State ──
@@ -737,6 +738,63 @@ export default function TransformPage() {
       } catch { /* */ }
     }
   }, [])
+
+  // Restore a past run when navigated with ?project=<id>
+  const restoredProjectRef = useRef<string | null>(null)
+  useEffect(() => {
+    const projectId = searchParams?.get('project')
+    if (!projectId || restoredProjectRef.current === projectId) return
+    restoredProjectRef.current = projectId
+    autoStartedRef.current = true // prevent auto-start from sessionStorage repo
+    ;(async () => {
+      try {
+        setPipelineStep('ingesting')
+        const runsRes = await fetch(apiUrl(`/projects/${projectId}/runs`))
+        if (!runsRes.ok) throw new Error('runs fetch failed')
+        const runs: { id: string; status: string }[] = await runsRes.json()
+        const latest = runs[0]
+        if (!latest) throw new Error('no runs')
+        const runRes = await fetch(apiUrl(`/projects/runs/${latest.id}`))
+        if (!runRes.ok) throw new Error('run fetch failed')
+        const run = await runRes.json()
+        const multi: MultiPageTransformResult = {
+          repo_name: run.repo_name,
+          branch: run.branch,
+          framework: run.framework,
+          total_pages_found: run.total_pages_found,
+          total_evaluated: run.total_pages_found,
+          total_transformed: run.total_transformed,
+          total_skipped: run.total_skipped,
+          global_summary: run.global_summary || [],
+          pipeline_errors: run.pipeline_errors || [],
+          pages: (run.pages || []).map((p: Record<string, unknown>) => ({
+            page_path: p.page_path as string,
+            page_name: p.page_name as string,
+            route: p.route as string,
+            status: (p.status as 'transformed' | 'high_quality' | 'error') || 'transformed',
+            score: (p.score as number) || 0,
+            original_code: p.original_code as string,
+            updated_code: p.updated_code as string,
+            diff_summary: p.diff_summary as string,
+            change_annotations: (p.change_annotations as ChangeAnnotation[]) || [],
+            change_summary: (p.change_summary as string[]) || [],
+            before_screenshot: p.before_screenshot as string,
+            after_screenshot: p.after_screenshot as string,
+            error: p.error as string,
+            retries_used: (p.retries_used as number) || 0,
+          })),
+        }
+        setMultiPageResult(multi)
+        setRepoName(run.repo_name)
+        setRepoBranch(run.branch || 'main')
+        setPipelineStep('complete')
+      } catch (e) {
+        setPipelineError(e instanceof Error ? e.message : 'Failed to load past run')
+        setPipelineStep('idle')
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   // Auto-start pipeline if a repo was selected in Discovery
   useEffect(() => {

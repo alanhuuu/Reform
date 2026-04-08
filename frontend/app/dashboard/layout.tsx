@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { ProgressProvider, useProgress } from '@/components/dashboard/ProgressContext'
 import InteractiveBackground from '@/components/landing/InteractiveBackground'
+import ProjectsDrawer from '@/components/layout/ProjectsDrawer'
 
 const NAV_ITEMS = [
   { href: '/dashboard/discovery', label: 'Project Discovery' },
@@ -72,6 +73,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
       >
         <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 flex justify-between items-center gap-4">
           <div className="flex items-center gap-3 sm:gap-8 min-w-0">
+            <ProjectsDrawer />
             <Link href="/" className="flex items-center gap-3 flex-shrink-0">
               <div
                 className="w-10 h-10 rounded-2xl flex items-center justify-center"
