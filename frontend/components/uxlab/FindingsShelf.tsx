@@ -59,7 +59,7 @@ const SHELF_COLLAPSED = 44;
 const SHELF_EXPANDED  = 300;
 const SNAP_THRESHOLD  = 120; // px — below this snaps to collapsed
 const PREVIEW_ASPECT_RATIO = 1440 / 900;
-const PREVIEW_MIN_VISIBLE_RATIO = 0.82;
+const PREVIEW_MIN_VISIBLE_RATIO = 0.94;
 const PANEL_HEADER_HEIGHT = 32;
 
 function clampShelfHeight(height: number, maxHeight: number): number {
@@ -274,6 +274,8 @@ interface FindingsShelfProps {
   setPillOrder: React.Dispatch<React.SetStateAction<string[]>>;
   onApplyFinding: (id: string) => void;
   onScrollToAnnotation: (id: string) => void;
+  status?: 'idle' | 'loading' | 'error' | 'ready';
+  statusMessage?: string;
 }
 
 export default function FindingsShelf({
@@ -286,6 +288,8 @@ export default function FindingsShelf({
   setPillOrder,
   onApplyFinding,
   onScrollToAnnotation,
+  status = 'ready',
+  statusMessage,
 }: FindingsShelfProps) {
   const [activeDragId, setActiveDragId]   = useState<string | null>(null);
   const [isAnimating, setIsAnimating]     = useState(false);
@@ -413,6 +417,44 @@ export default function FindingsShelf({
 
   const activeFinding = findings.find(f => f.id === activeFindingId) ?? findings[0] ?? null;
   const patchedCount  = findings.filter(f => f.status === 'patched').length;
+  const isEmpty = findings.length === 0;
+
+  const emptyStateTitle =
+    status === 'loading'
+      ? 'Preparing findings'
+      : status === 'error'
+        ? 'Analysis needs another pass'
+        : 'Waiting for analysis';
+
+  const emptyStateBody =
+    statusMessage ?? (
+      status === 'loading'
+        ? 'We are scanning this screen now. Findings, principles, and recommendations will appear here as soon as the analysis completes.'
+        : status === 'error'
+          ? 'This screen did not return findings. Try rerunning the analysis or switching to another route.'
+          : 'Run a UX analysis to populate this shelf with prioritized findings, rationale, and recommended changes.'
+    );
+
+  const headerSummary =
+    status === 'loading'
+      ? 'Preparing findings'
+      : status === 'error'
+        ? 'Analysis failed'
+        : isEmpty
+          ? 'No findings yet'
+          : `${findings.length} findings · ${patchedCount} patched`;
+
+  const placeholderPills = [
+    'Primary friction point',
+    'Hierarchy issue',
+    'Recommendation preview',
+  ];
+
+  const placeholderRows = [
+    'Finding will appear here',
+    'Severity, component, and recommendation load after analysis',
+    status === 'error' ? 'Try rerunning this screen to repopulate the shelf' : 'Switch screens or rerun to refresh the review',
+  ];
 
   return (
     <div
@@ -435,55 +477,70 @@ export default function FindingsShelf({
         {/* ── Header (count + pill row) ── */}
         <div className="shelf-header">
           <span style={{ fontSize: 11, color: 'var(--reform-text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-            {findings.length} findings · {patchedCount} patched
+            {headerSummary}
           </span>
 
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragStart={handlePillDragStart}
-            onDragEnd={handlePillDragEnd}
-            autoScroll={{ enabled: true, threshold: { x: 0.15, y: 0 }, acceleration: 12 }}
-          >
-            <SortableContext items={pillOrder} strategy={horizontalListSortingStrategy}>
-              <div
-                className="pill-row-container"
-                ref={pillRowRef}
-                onClick={e => e.stopPropagation()}
-              >
-                {pillOrder.map(id => {
-                  const finding = findings.find(f => f.id === id);
-                  if (!finding) return null;
-                  return (
-                    <SortablePill
-                      key={id}
-                      finding={finding}
-                      isActive={activeFindingId === id}
-                      onSelect={fid => { handleSelectFinding(fid); setExpanded(true); setShelfHeight(h => clampShelfHeight(Math.max(h, SHELF_EXPANDED), maxShelfHeight)); }}
-                      onDismiss={handleDismissPill}
-                    />
-                  );
-                })}
-              </div>
-            </SortableContext>
+          {isEmpty ? (
+            <div
+              className="pill-row-container"
+              ref={pillRowRef}
+              onClick={e => e.stopPropagation()}
+            >
+              {placeholderPills.map((label) => (
+                <div key={label} className="finding-pill finding-pill-placeholder ai-shimmer">
+                  <span className="finding-pill-dot" style={{ background: 'rgba(255,255,255,0.16)' }} />
+                  <span className="finding-pill-label" style={{ color: 'rgba(204,195,216,0.32)' }}>{label}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handlePillDragStart}
+              onDragEnd={handlePillDragEnd}
+              autoScroll={{ enabled: true, threshold: { x: 0.15, y: 0 }, acceleration: 12 }}
+            >
+              <SortableContext items={pillOrder} strategy={horizontalListSortingStrategy}>
+                <div
+                  className="pill-row-container"
+                  ref={pillRowRef}
+                  onClick={e => e.stopPropagation()}
+                >
+                  {pillOrder.map(id => {
+                    const finding = findings.find(f => f.id === id);
+                    if (!finding) return null;
+                    return (
+                      <SortablePill
+                        key={id}
+                        finding={finding}
+                        isActive={activeFindingId === id}
+                        onSelect={fid => { handleSelectFinding(fid); setExpanded(true); setShelfHeight(h => clampShelfHeight(Math.max(h, SHELF_EXPANDED), maxShelfHeight)); }}
+                        onDismiss={handleDismissPill}
+                      />
+                    );
+                  })}
+                </div>
+              </SortableContext>
 
-            <DragOverlay>
-              {activeDragId ? (() => {
-                const f = findings.find(f => f.id === activeDragId);
-                if (!f) return null;
-                return (
-                  <div
-                    className="finding-pill"
-                    data-active={activeDragId === activeFindingId ? 'true' : 'false'}
-                    style={{ transform: 'scale(1.06)', boxShadow: '0 8px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(123,92,224,0.3)', cursor: 'grabbing', opacity: 1 }}
-                  >
-                    <span className="finding-pill-dot" style={{ background: severityColor(f.severity) }} />
-                    <span className="finding-pill-label">{f.title}</span>
-                  </div>
-                );
-              })() : null}
-            </DragOverlay>
-          </DndContext>
+              <DragOverlay>
+                {activeDragId ? (() => {
+                  const f = findings.find(f => f.id === activeDragId);
+                  if (!f) return null;
+                  return (
+                    <div
+                      className="finding-pill"
+                      data-active={activeDragId === activeFindingId ? 'true' : 'false'}
+                      style={{ transform: 'scale(1.06)', boxShadow: '0 8px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(123,92,224,0.3)', cursor: 'grabbing', opacity: 1 }}
+                    >
+                      <span className="finding-pill-dot" style={{ background: severityColor(f.severity) }} />
+                      <span className="finding-pill-label">{f.title}</span>
+                    </div>
+                  );
+                })() : null}
+              </DragOverlay>
+            </DndContext>
+          )}
         </div>
 
         {/* ── Expanded content ── */}
@@ -530,7 +587,14 @@ export default function FindingsShelf({
                 </div>
               </>
             ) : (
-              <div style={{ fontSize: 13, color: 'var(--reform-text-muted)', paddingTop: 8 }}>Select a finding to view details.</div>
+              <div className="shelf-empty-detail">
+                <div className="shelf-empty-eyebrow">{emptyStateTitle}</div>
+                <div className="shelf-empty-title">This shelf is ready for UX review.</div>
+                <div className="shelf-empty-body">{emptyStateBody}</div>
+                <div className="shelf-empty-note">
+                  Findings will appear here with rationale, principles, and patch status once the analysis returns.
+                </div>
+              </div>
             )}
           </div>
 
@@ -541,22 +605,34 @@ export default function FindingsShelf({
                 All Findings
               </span>
               <span style={{ fontSize: 10, color: 'var(--reform-text-muted)' }}>
-                {findings.length} findings · {patchedCount} patched
+                {headerSummary}
               </span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {findings.map((f, i) => (
-                <TriageRow
-                  key={f.id}
-                  finding={f}
-                  index={i}
-                  isActive={activeFindingId === f.id}
-                  onSelect={handleSelectFinding}
-                  onApply={onApplyFinding}
-                  onScrollToAnnotation={onScrollToAnnotation}
-                  isAnimating={isAnimating}
-                />
-              ))}
+              {isEmpty ? (
+                placeholderRows.map((label) => (
+                  <div key={label} className="triage-row triage-row-placeholder">
+                    <div className="triage-row-placeholder-index" />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="triage-row-placeholder-title ai-shimmer" />
+                      <div className="triage-row-placeholder-copy">{label}</div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                findings.map((f, i) => (
+                  <TriageRow
+                    key={f.id}
+                    finding={f}
+                    index={i}
+                    isActive={activeFindingId === f.id}
+                    onSelect={handleSelectFinding}
+                    onApply={onApplyFinding}
+                    onScrollToAnnotation={onScrollToAnnotation}
+                    isAnimating={isAnimating}
+                  />
+                ))
+              )}
             </div>
           </div>
         </div>

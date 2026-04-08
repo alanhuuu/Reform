@@ -546,6 +546,13 @@ a {
   border-color: var(--reform-purple-border);
 }
 
+.finding-pill-placeholder {
+  cursor: default;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .finding-pill-dot {
   width: 6px;
   height: 6px;
@@ -566,6 +573,44 @@ a {
 
 .finding-pill[data-active="true"] .finding-pill-label {
   color: var(--reform-text-primary);
+}
+
+.shelf-empty-detail {
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shelf-empty-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: rgba(167, 139, 250, 0.78);
+}
+
+.shelf-empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--reform-text-primary);
+}
+
+.shelf-empty-body {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--reform-text-secondary);
+}
+
+.shelf-empty-note {
+  border-left: 2px solid rgba(123, 92, 224, 0.45);
+  background: rgba(123, 92, 224, 0.08);
+  border-radius: 0 6px 6px 0;
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(204, 195, 216, 0.72);
 }
 
 .pill-dismiss {
@@ -612,6 +657,39 @@ a {
 .triage-row[data-active="true"] {
   background: var(--reform-purple-dim);
   border-color: var(--reform-purple-border);
+}
+
+.triage-row-placeholder {
+  cursor: default;
+  border-color: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.triage-row-placeholder:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.triage-row-placeholder-index {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.triage-row-placeholder-title {
+  width: 56%;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(167,139,250,0.18), rgba(255,255,255,0.06));
+  background-size: 200% 100%;
+  margin-bottom: 8px;
+}
+
+.triage-row-placeholder-copy {
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(204, 195, 216, 0.42);
 }
 
 .triage-row[data-animating="true"] {
