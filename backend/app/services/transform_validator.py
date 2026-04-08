@@ -150,13 +150,15 @@ def validate_transformation(original_code: str, transformed_code: str) -> dict:
             ),
         }
 
-    # Moderate changes — accept but note it's borderline
+    # Moderate changes — treat as not structural enough. The pipeline will
+    # reclassify this page as "already great" so the UI doesn't show a
+    # near-identical before/after that looks like a no-op.
     return {
-        "is_structural": True,
-        "confidence": 0.6,
+        "is_structural": False,
+        "confidence": 0.7,
         "reasoning": (
-            f"Moderate structural changes: {tag_changes} tag changes, "
-            f"{meaningful_changes} meaningful line changes. "
-            f"Accepting but could be more dramatic."
+            f"Only moderate changes: {tag_changes} tag changes, "
+            f"{meaningful_changes} meaningful line changes. Not dramatic "
+            f"enough to show as a transformation — the UI is already good."
         ),
     }
