@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import Editor from '@monaco-editor/react'
@@ -664,7 +664,15 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
   )
 }
 
-export default function TransformPage() {
+export default function TransformPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <TransformPage />
+    </Suspense>
+  )
+}
+
+function TransformPage() {
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
   const [transform, setTransform] = useState<TransformData | null>(null)
   const [scOpen, setScOpen] = useState(false)
