@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import FindingsShelf from '@/components/uxlab/FindingsShelf'
 import { apiUrl } from '@/lib/api'
 import type { Finding, FindingSeverity, FindingType, UXLabSession } from '@/types/uxlab'
@@ -24,24 +25,17 @@ const DEFAULT_SCREENS = [
 ]
 
 const ANNOTATION_COLORS = {
-  positive: { pin: '#22c55e', ring: 'rgba(34,197,94,0.25)', border: 'rgba(34,197,94,0.5)', zoneBorder: 'rgba(34,197,94,0.45)', label: '#86efac' },
-  issue: { pin: '#ef4444', ring: 'rgba(239,68,68,0.25)', border: 'rgba(239,68,68,0.5)', zoneBorder: 'rgba(239,68,68,0.45)', label: '#fca5a5' },
-  warning: { pin: '#f59e0b', ring: 'rgba(245,158,11,0.25)', border: 'rgba(245,158,11,0.5)', zoneBorder: 'rgba(245,158,11,0.45)', label: '#fcd34d' },
-  insight: { pin: '#6366f1', ring: 'rgba(99,102,241,0.25)', border: 'rgba(99,102,241,0.5)', zoneBorder: 'rgba(99,102,241,0.45)', label: '#a5b4fc' },
+  positive: { pin: '#4ade80', ring: 'rgba(74,222,128,0.28)', glow: 'rgba(74,222,128,0.55)',  border: 'rgba(34,197,94,0.5)',  zoneBorder: 'rgba(34,197,94,0.45)',  label: '#86efac' },
+  issue:    { pin: '#ff5555', ring: 'rgba(255,85,85,0.28)',   glow: 'rgba(255,85,85,0.55)',   border: 'rgba(239,68,68,0.5)',  zoneBorder: 'rgba(239,68,68,0.45)', label: '#fca5a5' },
+  warning:  { pin: '#fbbf24', ring: 'rgba(251,191,36,0.28)',  glow: 'rgba(251,191,36,0.55)',  border: 'rgba(245,158,11,0.5)', zoneBorder: 'rgba(245,158,11,0.45)', label: '#fcd34d' },
+  insight:  { pin: '#818cf8', ring: 'rgba(129,140,248,0.28)', glow: 'rgba(129,140,248,0.55)', border: 'rgba(99,102,241,0.5)', zoneBorder: 'rgba(99,102,241,0.45)', label: '#a5b4fc' },
 }
 
 const CARD_W = 224
 const CARD_H = 116
-const SEVERITY_RANK: Record<FindingSeverity, number> = { critical: 0, major: 1, minor: 2 }
 
 function buildAnnotationId(prefix: 'before' | 'after', route: string, annotationId: string, index: number) {
   return `${prefix}:${route}:${annotationId || index}`
-}
-
-function annotationToSeverity(type: Annotation['type'], confidence: number): FindingSeverity {
-  if (type === 'issue') return confidence >= 0.8 ? 'critical' : 'major'
-  if (type === 'warning' || type === 'insight') return 'major'
-  return 'minor'
 }
 
 function findingToAnnotationType(type: FindingType): Annotation['type'] {
@@ -79,25 +73,15 @@ function buildAnnotationsFromFindings(
   prefix: 'before' | 'after',
   route: string,
 ): Annotation[] {
-  return findings
-    .map((finding, index) => ({
-      id: buildAnnotationId(prefix, route, finding.id, index),
-      label: finding.title,
-      detail: finding.description,
-      type: findingToAnnotationType(finding.type),
-      principle: finding.principle,
-      confidence: severityToConfidence(finding.severity),
-      zone: buildZone(finding.annotation.xPercent, finding.annotation.yPercent),
-    }))
-    .sort((a, b) => {
-      const severityDelta = SEVERITY_RANK[
-        annotationToSeverity(a.type, a.confidence)
-      ] - SEVERITY_RANK[
-        annotationToSeverity(b.type, b.confidence)
-      ]
-      if (severityDelta !== 0) return severityDelta
-      return a.label.localeCompare(b.label)
-    })
+  return findings.map((finding, index) => ({
+    id: buildAnnotationId(prefix, route, finding.id, index),
+    label: finding.title,
+    detail: finding.description,
+    type: findingToAnnotationType(finding.type),
+    principle: finding.principle,
+    confidence: severityToConfidence(finding.severity),
+    zone: buildZone(finding.annotation.xPercent, finding.annotation.yPercent),
+  }))
 }
 
 function toImageSrc(image: string) {
@@ -129,6 +113,7 @@ async function analyzeUxLab(url: string, page: string): Promise<UXLabSession> {
     page: data.page,
     beforeScreenshotUrl: data.before_screenshot_url ?? '',
     afterScreenshotUrl: data.after_screenshot_url ?? '',
+    afterPreviewMessage: data.after_preview_message ?? undefined,
     findings: (data.findings ?? []).map((finding: Record<string, unknown>) => ({
       id: String(finding.id ?? ''),
       type: finding.type as FindingType,
@@ -241,23 +226,54 @@ function AnnotatedPreview({
   showAnnotations,
   activeId,
   onSelect,
+  children,
 }: {
   screenshotB64: string
   annotations: Annotation[]
   showAnnotations: boolean
   activeId?: string | null
   onSelect?: (id: string) => void
+  children?: React.ReactNode
 }) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const outerRef = useRef<HTMLDivElement>(null)
+  const frameRef = useRef<HTMLDivElement>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [cardPos, setCardPos] = useState<{ left: number; top: number } | null>(null)
+  const [imageAspect, setImageAspect] = useState<number | null>(null)
+  const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null)
 
   const hoveredAnn = annotations.find((annotation) => annotation.id === hoveredId) ?? null
 
+  useLayoutEffect(() => {
+    const updateFrameSize = () => {
+      if (!outerRef.current || !imageAspect) return
+      const { width: availableWidth, height: availableHeight } = outerRef.current.getBoundingClientRect()
+      if (!availableWidth || !availableHeight) return
+
+      const availableAspect = availableWidth / availableHeight
+      if (availableAspect > imageAspect) {
+        const height = availableHeight
+        const width = height * imageAspect
+        setFrameSize({ width, height })
+      } else {
+        const width = availableWidth
+        const height = width / imageAspect
+        setFrameSize({ width, height })
+      }
+    }
+
+    updateFrameSize()
+
+    if (!outerRef.current) return
+    const observer = new ResizeObserver(() => updateFrameSize())
+    observer.observe(outerRef.current)
+    return () => observer.disconnect()
+  }, [imageAspect])
+
   const handleEnter = useCallback((annotation: Annotation) => {
     setHoveredId(annotation.id)
-    if (!containerRef.current) return
-    const { width, height } = containerRef.current.getBoundingClientRect()
+    if (!frameRef.current) return
+    const { width, height } = frameRef.current.getBoundingClientRect()
     const cx = ((annotation.zone.x + annotation.zone.w / 2) / 100) * width
     const cy = ((annotation.zone.y + annotation.zone.h / 2) / 100) * height
     const gap = 10
@@ -282,17 +298,57 @@ function AnnotatedPreview({
     : null
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', background: '#0d0c16' }}>
-      <div style={{ overflow: 'hidden', borderRadius: 'inherit' }}>
+    <div
+      ref={outerRef}
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        background: '#0d0c16',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        ref={frameRef}
+        style={{
+          position: 'relative',
+          width: frameSize ? `${frameSize.width}px` : '100%',
+          height: frameSize ? `${frameSize.height}px` : '100%',
+          maxWidth: '100%',
+          maxHeight: '100%',
+          overflow: 'hidden',
+          borderRadius: 'inherit',
+          flexShrink: 0,
+        }}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={toImageSrc(screenshotB64)}
           alt="Page screenshot"
-          style={{ width: '100%', height: 'auto', display: 'block' }}
+          onLoad={(event) => {
+            const target = event.currentTarget
+            if (target.naturalWidth && target.naturalHeight) {
+              setImageAspect(target.naturalWidth / target.naturalHeight)
+            }
+          }}
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'block',
+            objectFit: 'contain',
+          }}
         />
-      </div>
 
-      <div style={{ position: 'absolute', inset: 0, overflow: 'visible', display: showAnnotations ? 'block' : 'none' }}>
+        <style>{`
+          @keyframes annotation-pulse {
+            0%, 100% { box-shadow: 0 0 0 3px var(--pulse-ring), 0 0 5px 1px var(--pulse-glow); }
+            50%       { box-shadow: 0 0 0 4px var(--pulse-ring), 0 0 7px 1px var(--pulse-glow); }
+          }
+        `}</style>
+        <div style={{ position: 'absolute', inset: 0, overflow: 'visible', display: showAnnotations ? 'block' : 'none' }}>
         {annotations.map((annotation, index) => {
           const colors = ANNOTATION_COLORS[annotation.type] ?? ANNOTATION_COLORS.insight
           const isHovered = hoveredId === annotation.id
@@ -301,61 +357,47 @@ function AnnotatedPreview({
           const cy = annotation.zone.y + annotation.zone.h / 2
 
           return (
-            <div key={annotation.id}>
-              <button
-                type="button"
-                aria-label={`Focus annotation ${index + 1}: ${annotation.label}`}
-                onClick={() => onSelect?.(annotation.id)}
-                onMouseEnter={() => handleEnter(annotation)}
-                onMouseLeave={handleLeave}
-                style={{
-                  position: 'absolute',
-                  left: `${annotation.zone.x}%`,
-                  top: `${annotation.zone.y}%`,
-                  width: `${annotation.zone.w}%`,
-                  height: `${annotation.zone.h}%`,
-                  padding: 0,
-                  border: `1.5px solid ${colors.zoneBorder}`,
-                  background: isHovered || isActive ? `${colors.pin}12` : 'transparent',
-                  transition: 'background 0.15s',
-                  cursor: onSelect ? 'pointer' : 'default',
-                }}
-              />
-              <button
-                type="button"
-                aria-label={`Select annotation ${index + 1}: ${annotation.label}`}
-                onClick={() => onSelect?.(annotation.id)}
-                onMouseEnter={() => handleEnter(annotation)}
-                onMouseLeave={handleLeave}
-                style={{
-                  position: 'absolute',
-                  left: `${cx}%`,
-                  top: `${cy}%`,
-                  transform: 'translate(-50%, -50%)',
-                  width: '18px',
-                  height: '18px',
-                  padding: 0,
-                  border: 'none',
-                  borderRadius: '50%',
-                  background: colors.pin,
-                  boxShadow: `0 0 0 ${isHovered || isActive ? '5px' : '3px'} ${colors.ring}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '8px',
-                  fontWeight: 800,
-                  color: 'white',
-                  cursor: onSelect ? 'pointer' : 'default',
-                  zIndex: 20,
-                  transition: 'box-shadow 0.15s',
-                  userSelect: 'none',
-                }}
-              >
-                {index + 1}
-              </button>
-            </div>
+            <button
+              key={annotation.id}
+              type="button"
+              aria-label={`Select annotation ${index + 1}: ${annotation.label}`}
+              onClick={() => onSelect?.(annotation.id)}
+              onMouseEnter={() => handleEnter(annotation)}
+              onMouseLeave={handleLeave}
+              style={{
+                position: 'absolute',
+                left: `${cx}%`,
+                top: `${cy}%`,
+                transform: 'translate(-50%, -50%)',
+                width: '18px',
+                height: '18px',
+                padding: 0,
+                border: 'none',
+                borderRadius: '50%',
+                background: colors.pin,
+                boxShadow: `0 0 0 ${isHovered || isActive ? '5px' : '3px'} ${colors.ring}, 0 0 ${isHovered || isActive ? '10px' : '6px'} 1px ${colors.glow}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '8px',
+                fontWeight: 800,
+                color: 'white',
+                cursor: onSelect ? 'pointer' : 'default',
+                zIndex: 20,
+                transition: 'box-shadow 0.15s',
+                userSelect: 'none',
+                ['--pulse-ring' as string]: colors.ring,
+                ['--pulse-glow' as string]: colors.glow,
+                animation: isHovered || isActive ? 'none' : 'annotation-pulse 1.6s ease-in-out infinite',
+                animationDelay: `${index * 0.3}s`,
+              }}
+            >
+              {index + 1}
+            </button>
           )
         })}
+
+        {children}
 
         {hoveredAnn && hoveredColors && cardPos && (
           <div
@@ -385,11 +427,13 @@ function AnnotatedPreview({
           </div>
         )}
       </div>
+      </div>
     </div>
   )
 }
 
 export default function SimulationPage() {
+  const router = useRouter()
   const [screens, setScreens] = useState<{ label: string; route: string }[]>(DEFAULT_SCREENS)
   const [selectedScreen, setSelectedScreen] = useState<{ label: string; route: string } | null>(null)
   const [loadingScreens, setLoadingScreens] = useState(true)
@@ -676,6 +720,12 @@ export default function SimulationPage() {
               </span>
               <Toggle checked={showAnnotations} onChange={setShowAnnotations} />
             </div>
+            <button
+              onClick={() => router.push('/dashboard/transform')}
+              className="btn-primary px-4 py-2 rounded-xl text-xs font-semibold transition-all active:scale-[0.98]"
+            >
+              View Transformation →
+            </button>
           </div>
         </div>
 
@@ -739,13 +789,12 @@ export default function SimulationPage() {
             <div className="panel-screenshot">
               {loadingAnalysis ? (
                 <PreviewLoadingState title="After" />
-              ) : analysis ? (
-                <div style={{ position: 'relative' }}>
-                  <AnnotatedPreview
-                    screenshotB64={analysis.afterScreenshotUrl || analysis.beforeScreenshotUrl}
-                    annotations={afterAnnotations}
-                    showAnnotations={showAnnotations}
-                  />
+              ) : analysis && analysis.afterScreenshotUrl ? (
+                <AnnotatedPreview
+                  screenshotB64={analysis.afterScreenshotUrl}
+                  annotations={afterAnnotations}
+                  showAnnotations={showAnnotations}
+                >
                   {patchedFindings.map((finding) => (
                     <div
                       key={finding.id}
@@ -759,7 +808,12 @@ export default function SimulationPage() {
                       + {finding.title.toLowerCase()}
                     </div>
                   ))}
-                </div>
+                </AnnotatedPreview>
+              ) : analysis ? (
+                <PreviewPlaceholder
+                  title="After"
+                  message={analysis.afterPreviewMessage ?? 'No modified preview screenshot is available for this run.'}
+                />
               ) : (
                 <PreviewPlaceholder title="After" message="Run an analysis to compare the predicted transformed experience." />
               )}

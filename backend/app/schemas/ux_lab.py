@@ -9,6 +9,7 @@ class AnalyzeRequest(BaseModel):
     page: str = "home"
     competitor_urls: list[str] = []
     workspace_id: str = "anonymous"
+    analysis_only: bool = False
 
 
 class CompetitorEvidenceOut(BaseModel):
@@ -39,6 +40,7 @@ class SessionOut(BaseModel):
     page: str
     before_screenshot_url: str
     after_screenshot_url: str
+    after_preview_message: Optional[str] = None
     findings: list[FindingOut]
     created_at: str
     status: str

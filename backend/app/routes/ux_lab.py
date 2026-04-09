@@ -10,12 +10,14 @@ POST /api/ux-lab/sessions/{id}/apply — mark a finding as patched
 from __future__ import annotations
 
 import logging
+import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.db import get_db, get_optional_db
 from app.models import UXLabSession as UXLabSessionModel
 from app.schemas.ux_lab import AnalyzeRequest, ApplyFindingRequest, SessionOut
 from app.services.s3_client import download_screenshot, upload_screenshot
@@ -25,8 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ux-lab", tags=["ux-lab"])
 
 
-def _session_to_out(session: UXLabSessionModel) -> SessionOut:
-    findings_raw = session.findings_json or []
+def _findings_to_out(findings_raw: list[dict]) -> list[dict]:
     findings_out = []
     for f in findings_raw:
         findings_out.append({
@@ -51,7 +52,13 @@ def _session_to_out(session: UXLabSessionModel) -> SessionOut:
             ],
             "annotation": f.get("annotation", {"xPercent": 50, "yPercent": 50}),
         })
+    return findings_out
 
+
+def _session_to_out(
+    session: UXLabSessionModel,
+    after_preview_message_override: str | None = None,
+) -> SessionOut:
     return SessionOut(
         id=str(session.id),
         url=session.url,
@@ -62,14 +69,51 @@ def _session_to_out(session: UXLabSessionModel) -> SessionOut:
         after_screenshot_url=f"data:image/png;base64,{download_screenshot(session.after_screenshot_key)}"
         if session.after_screenshot_key
         else "",
-        findings=findings_out,
+        after_preview_message=(
+            after_preview_message_override
+            if after_preview_message_override is not None
+            else (
+                "We found UX issues for this page, but no modified preview screenshot is available for this run."
+                if session.status == "complete" and not session.after_screenshot_key
+                else None
+            )
+        ),
+        findings=_findings_to_out(session.findings_json or []),
         created_at=session.created_at.isoformat(),
         status=session.status,
     )
 
 
 @router.post("/analyze", response_model=SessionOut)
-async def analyze(req: AnalyzeRequest, db: AsyncSession = Depends(get_db)):
+async def analyze(req: AnalyzeRequest, db: AsyncSession | None = Depends(get_optional_db)):
+    """Run the UX analysis pipeline and optionally persist the session."""
+    if req.analysis_only:
+        try:
+            result = await run_analysis(
+                req.url,
+                req.page,
+                req.competitor_urls,
+                analysis_only=True,
+            )
+        except Exception as exc:
+            logger.error("UX Lab analysis-only run failed for %s: %s", req.url, exc)
+            raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
+
+        return SessionOut(
+            id=str(uuid.uuid4()),
+            url=req.url,
+            page=req.page,
+            before_screenshot_url=f"data:image/png;base64,{result['before_b64']}",
+            after_screenshot_url="",
+            after_preview_message=result.get("after_message"),
+            findings=_findings_to_out(result["findings"]),
+            created_at=datetime.now(timezone.utc).isoformat(),
+            status="complete",
+        )
+
+    if db is None:
+        raise HTTPException(status_code=500, detail="DATABASE_URL not configured")
+
     """Run the full UX analysis pipeline on a URL and persist the session."""
     # Create a pending session immediately so the client can poll
     session = UXLabSessionModel(
@@ -83,11 +127,20 @@ async def analyze(req: AnalyzeRequest, db: AsyncSession = Depends(get_db)):
     session_id = session.id
 
     try:
-        result = await run_analysis(req.url, req.page, req.competitor_urls)
+        result = await run_analysis(
+            req.url,
+            req.page,
+            req.competitor_urls,
+            analysis_only=req.analysis_only,
+        )
 
         # Upload screenshots to S3
         before_key = upload_screenshot(str(session_id), req.page, "before", result["before_b64"])
-        after_key = upload_screenshot(str(session_id), req.page, "after", result["after_b64"])
+        after_key = (
+            upload_screenshot(str(session_id), req.page, "after", result["after_b64"])
+            if result.get("after_b64")
+            else None
+        )
 
         session.before_screenshot_key = before_key
         session.after_screenshot_key = after_key
@@ -100,7 +153,10 @@ async def analyze(req: AnalyzeRequest, db: AsyncSession = Depends(get_db)):
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
 
-    return _session_to_out(session)
+    return _session_to_out(
+        session,
+        after_preview_message_override=result.get("after_message"),
+    )
 
 
 @router.get("/sessions", response_model=list[SessionOut])

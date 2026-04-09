@@ -344,8 +344,13 @@ a {
 
 .panel-screenshot {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: #0d0c16;
 }
 
 .improvement-label {
@@ -694,21 +699,21 @@ a {
 
 .triage-row[data-animating="true"] {
   opacity: 0;
-  transform: translate3d(0, 14px, 0) scale(0.985);
+  transform: translate3d(0, 6px, 0) scale(0.992);
   transform-origin: center bottom;
   will-change: transform, opacity;
   backface-visibility: hidden;
-  animation: triageRowIn 320ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  animation: triageRowBounceIn 340ms cubic-bezier(0.22, 0.7, 0.22, 1) forwards;
 }
 
-@keyframes triageRowIn {
+@keyframes triageRowBounceIn {
   0% {
     opacity: 0;
-    transform: translate3d(0, 14px, 0) scale(0.985);
+    transform: translate3d(0, 6px, 0) scale(0.992);
   }
-  70% {
+  68% {
     opacity: 1;
-    transform: translate3d(0, -1px, 0) scale(1.002);
+    transform: translate3d(0, -1px, 0) scale(1.001);
   }
   100% {
     opacity: 1;

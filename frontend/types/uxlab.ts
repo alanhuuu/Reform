@@ -30,6 +30,7 @@ export interface UXLabSession {
   page: string;
   beforeScreenshotUrl: string;
   afterScreenshotUrl: string;
+  afterPreviewMessage?: string;
   findings: Finding[];
   createdAt: string;
   status: 'pending' | 'complete' | 'error';

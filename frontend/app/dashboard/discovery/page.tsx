@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { useProgress } from '@/components/dashboard/ProgressContext'
 import { apiUrl } from '@/lib/api'
 
@@ -62,6 +63,7 @@ function DiscoveryPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const repo = searchParams.get('repo')
+  const { data: session } = useSession()
   const { startProgress, updateProgress, finishProgress } = useProgress()
 
   useEffect(() => {
@@ -189,6 +191,43 @@ function DiscoveryPageInner() {
   }
 
   // ── COMPLETED ──
+  function handleViewReport() {
+    const repoUrl = sessionStorage.getItem('refineui_repo') || ''
+    const analysisRaw = sessionStorage.getItem('refineui_analysis')
+    const analysis = analysisRaw ? JSON.parse(analysisRaw) : null
+    const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
+
+    if (match) {
+      const fullName = match[1].replace(/\.git$/, '')
+      const promise = fetch(apiUrl('/transform-repo-v2'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          github_url: `https://github.com/${fullName}`,
+          branch: 'main',
+          access_token: (session as { accessToken?: string } | null)?.accessToken || null,
+          design_intelligence: analysis,
+          user_intent: '',
+          max_pages: 5,
+        }),
+      })
+        .then(r => { if (!r.ok) throw new Error('Transform failed'); return r.json() })
+        .then(result => {
+          sessionStorage.setItem('refineui_transform', JSON.stringify({
+            multiPageResult: result,
+            repoName: fullName,
+            branch: 'main',
+          }))
+          return result
+        })
+        .catch(() => null)
+
+      ;(window as Window & { __reformPipelinePromise?: Promise<unknown> }).__reformPipelinePromise = promise
+    }
+
+    router.push('/dashboard/simulation')
+  }
+
   if (completed && discovery) {
     return (
       <div className="flex items-start justify-center px-4 sm:px-6 py-8 sm:py-12">
@@ -276,10 +315,10 @@ function DiscoveryPageInner() {
               </div>
 
               <button
-                onClick={() => router.push('/dashboard/transform')}
+                onClick={handleViewReport}
                 className="btn-primary w-full py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
               >
-                View Transformation →
+                View UI/UX Analysis Report →
               </button>
             </div>
           </div>

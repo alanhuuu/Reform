@@ -1,13 +1,9 @@
 """
 UX Lab analysis pipeline.
 
-Pipeline per session:
-1. Screenshot `url` (before).
-2. Pass 1 Claude: identify findings with annotation coordinates.
-3. For each finding that needs competitor evidence, screenshot competitors.
-4. Pass 2 Claude: generate a CSS patch per finding.
-5. Apply all patches in Playwright, take after screenshot.
-6. Persist session to DB + S3.
+The full workflow is intentionally staged so the product can run either:
+1. analysis-only mode: screenshot + Claude findings
+2. full mode: findings + competitor evidence + CSS patches + after preview
 """
 
 from __future__ import annotations
@@ -106,27 +102,40 @@ def _parse_json_safe(text: str) -> Any:
     return json.loads(stripped)
 
 
-async def run_analysis(
-    url: str,
-    page: str,
-    competitor_urls: list[str],
-) -> dict:
-    """
-    Execute the full UX Lab pipeline.
+def _normalize_findings(raw_findings: list[dict]) -> list[dict]:
+    findings: list[dict] = []
+    for raw_finding in raw_findings:
+        annotation = raw_finding.get("annotation", {})
+        findings.append({
+            "id": raw_finding.get("id") or str(uuid.uuid4()),
+            "type": raw_finding.get("type", "ISSUE"),
+            "severity": raw_finding.get("severity", "minor"),
+            "status": "open",
+            "component": raw_finding.get("component", "unknown"),
+            "title": raw_finding.get("title", "UX Issue"),
+            "description": raw_finding.get("description", ""),
+            "principle": raw_finding.get("principle", ""),
+            "principle_explanation": raw_finding.get("principle_explanation", ""),
+            "recommendation": raw_finding.get("recommendation", ""),
+            "requires_competitor_evidence": raw_finding.get("requires_competitor_evidence", False),
+            "competitor_evidence": [],
+            "annotation": {
+                "xPercent": annotation.get("x_percent", 50),
+                "yPercent": annotation.get("y_percent", 50),
+            },
+            "css_patch": "",
+        })
+    return findings
 
-    Returns a dict with:
-        before_b64, after_b64, findings (list[dict])
-    """
-    from app.services.screenshot import (
-        take_screenshot_b64,
-        take_screenshot_with_css_b64,
-    )
 
-    # ── Step 1: before screenshot ──────────────────────────────────────
+async def capture_before_screenshot(url: str) -> str:
+    from app.services.screenshot import take_screenshot_b64
+
     logger.info("UX Lab: capturing before screenshot for %s", url)
-    before_b64 = await take_screenshot_b64(url)
+    return await take_screenshot_b64(url)
 
-    # ── Step 2: Pass 1 — issue identification ─────────────────────────
+
+async def generate_findings(before_b64: str) -> list[dict]:
     logger.info("UX Lab: running Pass 1 analysis")
     raw_findings_text = await _claude_vision(
         system=_PASS1_SYSTEM,
@@ -140,58 +149,47 @@ async def run_analysis(
         logger.error("UX Lab: failed to parse Pass 1 output: %s\n%s", exc, raw_findings_text)
         raw_findings = []
 
-    # Normalise keys + inject defaults
-    findings: list[dict] = []
-    for i, rf in enumerate(raw_findings):
-        annotation = rf.get("annotation", {})
-        findings.append({
-            "id": rf.get("id") or str(uuid.uuid4()),
-            "type": rf.get("type", "ISSUE"),
-            "severity": rf.get("severity", "minor"),
-            "status": "open",
-            "component": rf.get("component", "unknown"),
-            "title": rf.get("title", "UX Issue"),
-            "description": rf.get("description", ""),
-            "principle": rf.get("principle", ""),
-            "principle_explanation": rf.get("principle_explanation", ""),
-            "recommendation": rf.get("recommendation", ""),
-            "requires_competitor_evidence": rf.get("requires_competitor_evidence", False),
-            "competitor_evidence": [],
-            "annotation": {
-                "xPercent": annotation.get("x_percent", 50),
-                "yPercent": annotation.get("y_percent", 50),
-            },
-            "css_patch": "",
-        })
+    return _normalize_findings(raw_findings)
 
-    # ── Step 3: competitor screenshots (where needed) ─────────────────
-    if competitor_urls:
-        for finding in findings:
-            if not finding["requires_competitor_evidence"]:
-                continue
-            for comp_url in competitor_urls[:3]:  # cap at 3 per finding
-                try:
-                    comp_b64 = await take_screenshot_b64(comp_url)
-                    note_text = await _claude_vision(
-                        system="You are a UX analyst.",
-                        user_text=(
-                            f"In one sentence, describe how this competitor site handles "
-                            f"'{finding['component']}' differently from a typical site "
-                            f"with the issue: {finding['title']}"
-                        ),
-                        b64_image=comp_b64,
-                    )
-                    finding["competitor_evidence"].append({
-                        "url": comp_url,
-                        "screenshot_url": f"data:image/png;base64,{comp_b64}",
-                        "annotation": note_text.strip(),
-                    })
-                except Exception as exc:
-                    logger.warning("UX Lab: competitor screenshot failed for %s: %s", comp_url, exc)
 
-    # ── Step 4: Pass 2 — CSS patches ─────────────────────────────────
+async def enrich_competitor_evidence(findings: list[dict], competitor_urls: list[str]) -> list[dict]:
+    if not competitor_urls:
+        return findings
+
+    from app.services.screenshot import take_screenshot_b64
+
+    logger.info("UX Lab: enriching findings with competitor evidence")
+    for finding in findings:
+        if not finding["requires_competitor_evidence"]:
+            continue
+
+        for comp_url in competitor_urls[:3]:
+            try:
+                comp_b64 = await take_screenshot_b64(comp_url)
+                note_text = await _claude_vision(
+                    system="You are a UX analyst.",
+                    user_text=(
+                        f"In one sentence, describe how this competitor site handles "
+                        f"'{finding['component']}' differently from a typical site "
+                        f"with the issue: {finding['title']}"
+                    ),
+                    b64_image=comp_b64,
+                )
+                finding["competitor_evidence"].append({
+                    "url": comp_url,
+                    "screenshot_url": f"data:image/png;base64,{comp_b64}",
+                    "annotation": note_text.strip(),
+                })
+            except Exception as exc:
+                logger.warning("UX Lab: competitor screenshot failed for %s: %s", comp_url, exc)
+
+    return findings
+
+
+async def generate_css_patches(findings: list[dict]) -> tuple[list[dict], list[str]]:
     logger.info("UX Lab: running Pass 2 CSS patch generation")
     css_patches: list[str] = []
+
     for finding in findings:
         try:
             patch_text = await _claude_text(
@@ -204,27 +202,70 @@ async def run_analysis(
                 ),
             )
             patch_data = _parse_json_safe(patch_text)
-            css = patch_data.get("css_patch", "")
-            finding["css_patch"] = css
-            if css:
-                css_patches.append(css)
+            css_patch = patch_data.get("css_patch", "")
+            finding["css_patch"] = css_patch
+            if css_patch:
+                css_patches.append(css_patch)
         except Exception as exc:
             logger.warning("UX Lab: CSS patch failed for finding %s: %s", finding["id"], exc)
 
-    # ── Step 5: after screenshot with all patches applied ─────────────
+    return findings, css_patches
+
+
+async def render_after_preview(url: str, css_patches: list[str]) -> tuple[str | None, str | None]:
+    from app.services.screenshot import take_screenshot_with_css_b64
+
     combined_css = "\n".join(css_patches)
-    if combined_css.strip():
-        logger.info("UX Lab: capturing after screenshot with %d patches", len(css_patches))
-        try:
-            after_b64 = await take_screenshot_with_css_b64(url, combined_css)
-        except Exception as exc:
-            logger.error("UX Lab: after screenshot failed: %s", exc)
-            after_b64 = before_b64
-    else:
-        after_b64 = before_b64
+    if not combined_css.strip():
+        return None, "We found UX issues for this page, but no visual preview changes were generated for this run."
+
+    logger.info("UX Lab: capturing after screenshot with %d patches", len(css_patches))
+    try:
+        after_b64 = await take_screenshot_with_css_b64(url, combined_css)
+        return after_b64, None
+    except Exception as exc:
+        logger.error("UX Lab: after screenshot failed: %s", exc)
+        return None, "We found UX issues for this page, but couldn't generate a modified preview screenshot for this run."
+
+
+async def run_analysis(
+    url: str,
+    page: str,
+    competitor_urls: list[str],
+    analysis_only: bool = False,
+) -> dict:
+    """
+    Execute the UX Lab workflow.
+
+    analysis_only mode stops after Pass 1 findings generation so Claude analysis
+    can be tested without running competitor enrichment, CSS patching, or after
+    preview rendering.
+    """
+    logger.info(
+        "UX Lab: starting %s run for %s (%s)",
+        "analysis-only" if analysis_only else "full",
+        page,
+        url,
+    )
+
+    before_b64 = await capture_before_screenshot(url)
+    findings = await generate_findings(before_b64)
+
+    if analysis_only:
+        return {
+            "before_b64": before_b64,
+            "after_b64": None,
+            "after_message": "Analysis-only mode generated findings without a modified preview screenshot.",
+            "findings": findings,
+        }
+
+    findings = await enrich_competitor_evidence(findings, competitor_urls)
+    findings, css_patches = await generate_css_patches(findings)
+    after_b64, after_message = await render_after_preview(url, css_patches)
 
     return {
         "before_b64": before_b64,
         "after_b64": after_b64,
+        "after_message": after_message,
         "findings": findings,
     }

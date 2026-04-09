@@ -66,11 +66,20 @@ function clampShelfHeight(height: number, maxHeight: number): number {
   return Math.max(SHELF_COLLAPSED, Math.min(maxHeight, height));
 }
 
+function getComfortExpandedShelfHeight(maxHeight: number): number {
+  const preferredHeight = Math.max(SHELF_EXPANDED, Math.round(maxHeight * 0.82));
+  return clampShelfHeight(preferredHeight, maxHeight);
+}
+
 function readRootPxVar(name: string, fallback: number): number {
   if (typeof window === 'undefined') return fallback;
   const value = getComputedStyle(document.documentElement).getPropertyValue(name);
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getTriageAnimationDelay(index: number): string {
+  return `${35 + index * 28}ms`;
 }
 
 function getMaxShelfHeight(): number {
@@ -186,8 +195,6 @@ function TriageRow({
     onScrollToAnnotation(finding.id);
   };
 
-  const delayMap: Record<number, string> = { 0: '80ms', 1: '120ms', 2: '160ms', 3: '200ms' };
-
   return (
     <div
       ref={rowRef}
@@ -195,7 +202,7 @@ function TriageRow({
       data-active={isActive ? 'true' : 'false'}
       data-status={finding.status}
       data-animating={isAnimating ? 'true' : 'false'}
-      style={isAnimating ? { animationDelay: delayMap[index] ?? '200ms' } : undefined}
+      style={isAnimating ? { animationDelay: getTriageAnimationDelay(index) } : undefined}
       onClick={() => onSelect(finding.id)}
     >
       <div
@@ -324,7 +331,7 @@ export default function FindingsShelf({
   useEffect(() => {
     setShelfHeight((height) => {
       if (!expanded) return height > SHELF_COLLAPSED ? SHELF_COLLAPSED : height;
-      if (height <= SHELF_COLLAPSED) return clampShelfHeight(SHELF_EXPANDED, maxShelfHeight);
+      if (height <= SHELF_COLLAPSED) return getComfortExpandedShelfHeight(maxShelfHeight);
       return clampShelfHeight(height, maxShelfHeight);
     });
   }, [expanded, maxShelfHeight]);
@@ -394,7 +401,7 @@ export default function FindingsShelf({
     if (isResizing) return;
     const next = !expanded;
     setExpanded(next);
-    setShelfHeight(next ? clampShelfHeight(SHELF_EXPANDED, maxShelfHeight) : SHELF_COLLAPSED);
+    setShelfHeight(next ? getComfortExpandedShelfHeight(maxShelfHeight) : SHELF_COLLAPSED);
   }, [expanded, isResizing, maxShelfHeight, setExpanded]);
 
   // ── Pill DnD ──────────────────────────────────────────────────────
@@ -515,7 +522,11 @@ export default function FindingsShelf({
                         key={id}
                         finding={finding}
                         isActive={activeFindingId === id}
-                        onSelect={fid => { handleSelectFinding(fid); setExpanded(true); setShelfHeight(h => clampShelfHeight(Math.max(h, SHELF_EXPANDED), maxShelfHeight)); }}
+                        onSelect={fid => {
+                          handleSelectFinding(fid);
+                          setExpanded(true);
+                          setShelfHeight((height) => clampShelfHeight(Math.max(height, getComfortExpandedShelfHeight(maxShelfHeight)), maxShelfHeight));
+                        }}
                         onDismiss={handleDismissPill}
                       />
                     );
@@ -610,8 +621,13 @@ export default function FindingsShelf({
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {isEmpty ? (
-                placeholderRows.map((label) => (
-                  <div key={label} className="triage-row triage-row-placeholder">
+                placeholderRows.map((label, index) => (
+                  <div
+                    key={label}
+                    className="triage-row triage-row-placeholder"
+                    data-animating={isAnimating ? 'true' : 'false'}
+                    style={isAnimating ? { animationDelay: getTriageAnimationDelay(index) } : undefined}
+                  >
                     <div className="triage-row-placeholder-index" />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="triage-row-placeholder-title ai-shimmer" />

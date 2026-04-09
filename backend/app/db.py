@@ -42,6 +42,21 @@ async def get_db():
             raise
 
 
+async def get_optional_db():
+    """Yield a database session when configured, otherwise yield None."""
+    if not async_session:
+        yield None
+        return
+
+    async with async_session() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
 async def create_tables():
     """Create all tables. Called once on startup."""
     if not engine:
