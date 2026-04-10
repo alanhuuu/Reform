@@ -10,7 +10,7 @@ Metadata, code, and results are stored in Postgres.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, JSON
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -23,6 +23,24 @@ def _utcnow():
 
 def _uuid():
     return uuid.uuid4()
+
+
+class UserSubscription(Base):
+    """Tracks a user's subscription plan, Stripe IDs, and monthly usage."""
+    __tablename__ = "user_subscriptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    github_user_id = Column(String, nullable=False, unique=True, index=True)
+    plan = Column(String, nullable=False, default="free")  # free | pro | max
+    stripe_customer_id = Column(String, nullable=True, unique=True)
+    stripe_subscription_id = Column(String, nullable=True, unique=True)
+    subscription_status = Column(String, nullable=False, default="active")  # active | canceled | past_due | incomplete
+    scans_used_this_month = Column(Integer, nullable=False, default=0)
+    repos_connected = Column(Integer, nullable=False, default=0)
+    current_period_start = Column(DateTime(timezone=True), nullable=True)
+    current_period_end = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
 class Project(Base):

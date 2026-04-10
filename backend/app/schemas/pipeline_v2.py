@@ -13,6 +13,7 @@ class TransformRepoV2Request(BaseModel):
     user_intent: str = ""
     quality_threshold: int = 95
     max_pages: int = 5
+    github_user_id: str
 
 
 # ── Page Discovery ──────────────────────────────────────────────────

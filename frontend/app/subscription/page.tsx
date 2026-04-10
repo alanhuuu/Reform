@@ -1,9 +1,15 @@
 'use client'
 
+import { useRef, useState } from 'react'
+import { useSession } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navbar from '@/components/layout/Navbar'
 import Footer from '@/components/layout/Footer'
 import InteractiveBackground from '@/components/landing/InteractiveBackground'
+import { apiUrl } from '@/lib/api'
+import { useSubscription } from '@/lib/useSubscription'
+import { parseResponseError } from '@/components/dashboard/GateError'
 
 const CHECK_ICON = (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#aab4ff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -20,6 +26,7 @@ interface Plan {
   cta: string
   highlighted?: boolean
   badge?: string
+  stripe_price_id?: string
 }
 
 const plans: Plan[] = [
@@ -54,6 +61,7 @@ const plans: Plan[] = [
     cta: 'Upgrade to Pro',
     highlighted: true,
     badge: 'Most Popular',
+    stripe_price_id: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID,
   },
   {
     name: 'Team',
@@ -71,6 +79,7 @@ const plans: Plan[] = [
       'Dedicated support channel',
     ],
     cta: 'Start Team Plan',
+    stripe_price_id: process.env.NEXT_PUBLIC_STRIPE_MAX_PRICE_ID,
   },
   {
     name: 'Enterprise',
@@ -90,7 +99,9 @@ const plans: Plan[] = [
   },
 ]
 
-function PlanCard({ plan }: { plan: Plan }) {
+function PlanCard({ plan, onCheckout, loading, currentPlan }: { plan: Plan; onCheckout: (priceId: string) => void; loading: boolean; currentPlan: string }) {
+  const planNameMap: Record<string, string> = { 'Free': 'free', 'Pro': 'pro', 'Team': 'max', 'Enterprise': 'enterprise' }
+  const isCurrentPlan = planNameMap[plan.name] === currentPlan
   const isHighlighted = plan.highlighted
 
   return (
@@ -168,16 +179,75 @@ function PlanCard({ plan }: { plan: Plan }) {
 
       <button
         className={`w-full py-3 rounded-2xl text-sm font-semibold transition-all duration-200 ${
-          isHighlighted ? 'btn-primary' : 'btn-ghost'
+          isCurrentPlan ? 'btn-ghost opacity-60 cursor-default' : isHighlighted ? 'btn-primary' : 'btn-ghost'
         }`}
+        disabled={loading || isCurrentPlan}
+        onClick={() => {
+          if (plan.stripe_price_id && !isCurrentPlan) {
+            onCheckout(plan.stripe_price_id)
+          }
+        }}
       >
-        {plan.cta}
+        {isCurrentPlan ? 'Current Plan' : loading ? 'Redirecting...' : plan.cta}
       </button>
     </div>
   )
 }
 
 export default function SubscriptionPage() {
+  const { data: session, status } = useSession()
+  const { subscription } = useSubscription()
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function startCheckout(priceId: string) {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const res = await fetch(apiUrl('/billing/create-checkout-session'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          price_id: priceId,
+          github_user_id: session!.githubId,
+        }),
+      })
+
+      if (!res.ok) {
+        const { message } = await parseResponseError(res)
+        throw new Error(message)
+      }
+
+      const { checkout_url } = await res.json()
+      window.location.href = checkout_url
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+      setLoading(false)
+    }
+  }
+
+  async function handleCheckout(priceId: string) {
+    if (status === 'loading') return
+
+    if (!session?.githubId) {
+      router.push(`/signin?next=${encodeURIComponent(`/subscription?resume=${priceId}`)}`)
+      return
+    }
+
+    startCheckout(priceId)
+  }
+
+  // After sign-in redirect, auto-resume checkout
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const resumePrice = searchParams?.get('resume')
+  const hasResumed = useRef(false)
+  if (resumePrice && session?.githubId && !hasResumed.current) {
+    hasResumed.current = true
+    startCheckout(resumePrice)
+  }
+
   return (
     <main className="app-shell min-h-screen overflow-x-hidden">
       <InteractiveBackground />
@@ -215,9 +285,15 @@ export default function SubscriptionPage() {
               </div>
 
               <div className="p-6 sm:p-8 lg:p-10">
+                {error && (
+                  <div className="mb-5 p-4 rounded-2xl text-sm" style={{ background: 'rgba(255,80,80,0.12)', color: '#ff8080', border: '1px solid rgba(255,80,80,0.2)' }}>
+                    {error}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
                   {plans.map((plan) => (
-                    <PlanCard key={plan.name} plan={plan} />
+                    <PlanCard key={plan.name} plan={plan} onCheckout={handleCheckout} loading={loading} currentPlan={subscription.plan} />
                   ))}
                 </div>
 

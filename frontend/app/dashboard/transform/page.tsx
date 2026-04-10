@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 // Editor import removed — Code Editor tab eliminated in favor of no-code flow
 import { apiUrl } from '@/lib/api'
+import { useSubscription } from '@/lib/useSubscription'
+import UpgradeBanner from '@/components/dashboard/UpgradeBanner'
+import GateErrorBanner, { parseResponseError, type GateErrorData } from '@/components/dashboard/GateError'
 import TransformSummaryHeader from '@/components/dashboard/TransformSummaryHeader'
 import TransformCarousel from '@/components/dashboard/TransformCarousel'
 import RepoWideImprovementsPanel from '@/components/dashboard/RepoWideImprovementsPanel'
@@ -736,10 +739,12 @@ function TransformPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { data: session } = useSession()
+  const { canAutofix, isFree } = useSubscription()
 
   // ── Code Pipeline State ──
   const [pipelineStep, setPipelineStep] = useState<PipelineStep>('idle')
   const [pipelineError, setPipelineError] = useState('')
+  const [gateError, setGateError] = useState<GateErrorData | null>(null)
   const [ingestedFiles, setIngestedFiles] = useState<FileEntry[]>([])
   const [codeAnalysis, setCodeAnalysis] = useState<CodeAnalysis | null>(null)
   const [selectedTarget, setSelectedTarget] = useState('')
@@ -883,7 +888,7 @@ function TransformPage() {
   const filteredRepos = repos.filter(r => r.full_name.toLowerCase().includes(repoSearch.toLowerCase()))
 
   async function runPipeline(repo: GithubRepo) {
-    setPipelineError(''); setRepoName(repo.full_name); setRepoBranch(repo.default_branch || 'main')
+    setPipelineError(''); setGateError(null); setRepoName(repo.full_name); setRepoBranch(repo.default_branch || 'main')
     const branch = repo.default_branch || 'main'
 
     // ── Fetch current HEAD SHA from GitHub so we can look up a cached run.
@@ -952,9 +957,14 @@ function TransformPage() {
           design_intelligence: analysis || null,
           user_intent: userIntent,
           max_pages: 5,
+          github_user_id: session?.githubId,
         }),
       })
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Transform failed') }
+      if (!res.ok) {
+        const { gate, message } = await parseResponseError(res)
+        if (gate) { setGateError(gate); setPipelineStep('idle'); return }
+        throw new Error(message || 'Transform failed')
+      }
       const result = await res.json()
 
       setMultiPageResult(result)
@@ -1028,9 +1038,14 @@ function TransformPage() {
               summary_text: multiPageResult?.global_summary?.[0] || null,
             },
             access_token: session.accessToken,
+            github_user_id: session.githubId,
           }),
         })
-        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Publish failed') }
+        if (!res.ok) {
+          const { gate, message } = await parseResponseError(res)
+          if (gate) { setGateError(gate); setPublishLoading(false); return }
+          throw new Error(message || 'Publish failed')
+        }
         const data = await res.json()
         setPublishResult({ branch_name: data.branch_name, branch_url: data.branch_url, files_changed: data.files_changed })
       } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Failed to publish changes'); setPublishLoading(false); return }
@@ -1239,7 +1254,15 @@ function TransformPage() {
                 {!session && <div className="px-5 py-8 text-center"><p className="text-[13px]" style={{ color: 'rgba(255,255,255,0.35)' }}>Sign in with GitHub to see your repositories</p></div>}
               </div>
             </div>
-            {pipelineError && <div className="mt-3 px-4 py-2.5 rounded-lg text-[12px]" style={{ background: 'rgba(239,68,68,0.08)', color: 'rgba(239,68,68,0.7)', border: '1px solid rgba(239,68,68,0.1)' }}>{pipelineError}</div>}
+            {(gateError || pipelineError) && (
+              <div className="mt-3">
+                <GateErrorBanner
+                  error={gateError}
+                  fallbackMessage={pipelineError}
+                  onDismiss={() => { setGateError(null); setPipelineError('') }}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -1287,6 +1310,9 @@ function TransformPage() {
                 <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.25)' }}>Review Changes</span>
               </div>
               <div className="flex items-center gap-1.5">
+                {!canAutofix ? (
+                <UpgradeBanner message="Upgrade to Pro to publish fixes to GitHub" compact />
+              ) : (
                 <button
                   onClick={handleAccept}
                   disabled={publishLoading}
@@ -1299,6 +1325,7 @@ function TransformPage() {
                     <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>Publish to GitHub</>
                   )}
                 </button>
+              )}
                 <button
                   onClick={handleReject}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-medium transition-all hover:bg-red-500/[0.06] active:scale-[0.97]"

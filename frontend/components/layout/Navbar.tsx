@@ -2,8 +2,23 @@
 
 import Link from 'next/link'
 import Image from 'next/image'
+import { usePathname } from 'next/navigation'
+import { useSession } from 'next-auth/react'
+import AccountMenu from '@/components/layout/AccountMenu'
+
+function Separator() {
+  return (
+    <div
+      className="w-px h-4 flex-shrink-0"
+      style={{ background: 'rgba(255,255,255,0.10)' }}
+    />
+  )
+}
 
 export default function Navbar() {
+  const { data: session, status } = useSession()
+  const pathname = usePathname()
+
   return (
     <nav
       className="fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-2xl"
@@ -26,25 +41,56 @@ export default function Navbar() {
           </div>
         </Link>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <Link
             href="/subscription"
-            className="btn-ghost text-[13px] px-4 py-2 rounded-xl flex items-center gap-2"
+            className="text-[13px] px-3 py-1.5 rounded-lg transition-colors duration-150"
+            style={{ color: 'rgba(255,255,255,0.55)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.85)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)')}
           >
-            <span className="hidden sm:inline">Pricing</span>
-            <svg className="sm:hidden" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 1.75l3 6.08 6.71.98-4.86 4.74 1.15 6.7L12 17.05l-6 3.18 1.15-6.7-4.86-4.74 6.71-.98 3-6.08z" />
-            </svg>
+            Pricing
           </Link>
+
+          <Separator />
+
           <Link
             href="/new"
-            className="btn-primary text-[13px] px-5 py-2 rounded-xl font-semibold inline-flex items-center gap-1.5"
+            className="text-[13px] px-3 py-1.5 rounded-lg transition-colors duration-150"
+            style={{ color: 'rgba(255,255,255,0.55)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.85)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)')}
           >
             Get Started
-            <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-              <path d="M3 7h8M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
           </Link>
+
+          <Separator />
+
+          {status === 'loading' ? (
+            <div className="w-8 h-8 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }} />
+          ) : session?.user ? (
+            <AccountMenu />
+          ) : (
+            <Link
+              href={`/signin?next=${encodeURIComponent(pathname)}`}
+              className="text-[13px] px-4 py-1.5 rounded-xl font-medium transition-all duration-150"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                color: 'rgba(255,255,255,0.7)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.10)'
+                e.currentTarget.style.color = 'rgba(255,255,255,0.9)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
+                e.currentTarget.style.color = 'rgba(255,255,255,0.7)'
+              }}
+            >
+              Sign In
+            </Link>
+          )}
         </div>
       </div>
     </nav>

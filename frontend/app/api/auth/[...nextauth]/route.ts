@@ -6,12 +6,15 @@ const handler = NextAuth({
     GithubProvider({
       clientId: process.env.GITHUB_CLIENT_ID ?? '',
       clientSecret: process.env.GITHUB_CLIENT_SECRET ?? '',
+      // GitHub now returns an `iss` param in OAuth callbacks (RFC 9207).
+      // openid-client validates it against this value.
+      issuer: 'https://github.com/login/oauth',
       authorization: {
         params: {
           scope: 'read:user user:email repo',
         },
       },
-    }),
+    } as any),
   ],
   callbacks: {
     async jwt({ token, account, profile }) {
@@ -32,7 +35,7 @@ const handler = NextAuth({
     },
   },
   pages: {
-    signIn: '/new',
+    signIn: '/signin',
   },
 })
 
