@@ -17,7 +17,10 @@ from app.services.ui_evaluator import evaluate_all_pages
 from app.services.transformation_planner import plan_transformations
 from app.services.transform_validator import validate_transformation
 from app.services.multi_page_renderer import render_multi_page_previews
-from app.prompts.structural_transform_prompt import build_structural_transform_prompt
+from app.prompts.structural_transform_prompt import (
+    build_structural_transform_prompt,
+    build_transform_system_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +121,7 @@ async def _transform_single_page(
 
     supporting_text = _build_supporting_context(page_path, files, dependency_map)
     client = anthropic.Anthropic(api_key=api_key)
+    system_prompt = build_transform_system_prompt()
 
     last_error = ""
     retries_used = 0
@@ -153,6 +157,7 @@ async def _transform_single_page(
             lambda: client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=16384,
+                system=system_prompt,
                 messages=[{"role": "user", "content": prompt}],
             ),
         )

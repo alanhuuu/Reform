@@ -116,14 +116,13 @@ def validate_transformation(original_code: str, transformed_code: str) -> dict:
     # Test 3: Count meaningful line changes (beyond className/style)
     meaningful_changes = _count_meaningful_line_changes(original_code, transformed_code)
 
-    # Scale thresholds with original page size — a 50-line page can't have
-    # 30 tag changes, but a 500-line page should easily exceed it.
+    # Scale thresholds with original page size. A rebuild should change at
+    # least 35% of the tag structure and 50% of non-style lines. These are
+    # high bars — that's intentional. The prompt tells the model to rebuild
+    # from scratch, so anything less than this is a failed rebuild.
     orig_tag_count = max(len(orig_tags), 1)
-    # Require restructuring of at least ~25% of the original tag count, with
-    # an absolute floor of 12 tag changes for tiny pages and a ceiling check
-    # so very large pages still need substantive change.
-    required_tag_changes = max(12, int(orig_tag_count * 0.25))
-    required_line_changes = max(20, int(orig_tag_count * 0.4))
+    required_tag_changes = max(15, int(orig_tag_count * 0.35))
+    required_line_changes = max(25, int(orig_tag_count * 0.5))
 
     # Decision logic
     if skeletons_identical and tags_identical:
