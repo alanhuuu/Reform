@@ -1,9 +1,50 @@
 """
-Transformation prompt that enforces DRAMATIC, VISIBLE structural changes.
-The before/after must be obviously different at a glance.
+Transformation prompt — REBUILD mode.
+The model must treat every page as a layout rebuild from scratch,
+not an edit of the existing structure.
 """
 
 import json
+
+
+def _compute_weakest_dimensions(breakdown: dict) -> list[tuple[str, int]]:
+    """Return dimensions sorted by score ascending."""
+    if not breakdown:
+        return []
+    items = [(k, v) for k, v in breakdown.items() if isinstance(v, (int, float))]
+    items.sort(key=lambda x: x[1])
+    return items
+
+
+def build_transform_system_prompt() -> str:
+    """System prompt that sets REBUILD mode. Short, absolute, non-negotiable."""
+    return """You are a UI rebuild engine. You do NOT edit UIs — you REBUILD them from scratch.
+
+CORE RULE: Ignore the original JSX layout structure entirely. Extract the data (props, state, variables, content) and the actions (handlers, callbacks, navigation), then build a completely new layout using modern best practices.
+
+The original layout is WRONG. Do not preserve it. Do not slightly modify it. Build a new one.
+
+REBUILD PROCESS:
+1. Read the original code and identify: data, state, props, handlers, imports, exports
+2. DISCARD the original JSX layout — pretend it doesn't exist
+3. Build a new JSX layout from scratch using the same data and handlers
+4. The new layout must use: semantic sections (header/main/section/aside), card containers, proper grid systems, generous spacing, clear visual hierarchy
+
+WHAT "REBUILD" MEANS:
+- The JSX tree structure must be fundamentally different
+- New wrapper elements that did not exist before (header, main, section, aside, cards)
+- Different element nesting and grouping
+- Different component placement and flow
+- The before and after must look like different products
+
+HARD CONSTRAINTS:
+- Keep ALL imports, exports, hooks, state, handlers, props, types — do not change logic
+- Same component name and file export
+- No new npm dependencies
+- Use Tailwind CSS classes
+- Return the COMPLETE file — not a snippet
+
+OUTPUT: Return ONLY valid JSON, no markdown fences."""
 
 
 def build_structural_transform_prompt(
@@ -14,235 +55,182 @@ def build_structural_transform_prompt(
     design_intelligence: dict,
     user_intent: str = "",
     is_retry: bool = False,
+    attempt_number: int = 1,
 ) -> str:
+    """User-message prompt with the code, evaluation, and rebuild directives."""
     score = evaluation.get("score", 50)
     issues = evaluation.get("issues", [])
     reasoning = evaluation.get("reasoning", "")
     breakdown = evaluation.get("breakdown", {})
 
+    # Score-driven: identify weakest dimensions
+    weakest = _compute_weakest_dimensions(breakdown)
+    weak_dims = [(n, s) for n, s in weakest if s < 95]
+
+    weak_section = ""
+    if weak_dims:
+        lines = []
+        for name, sc in weak_dims[:4]:
+            n = name.replace("_", " ").title()
+            lines.append(f"- {n}: {sc}/100 — REBUILD this dimension aggressively")
+        weak_section = "WEAKEST DIMENSIONS (target these hardest):\n" + "\n".join(lines)
+
     issues_text = ""
     if issues:
-        issue_lines = []
-        for issue in issues:
-            sev = issue.get("severity", "medium").upper()
-            area = issue.get("area", "Unknown")
-            desc = issue.get("description", "")
-            issue_lines.append(f"  - [{sev}] {area}: {desc}")
-        issues_text = "\n".join(issue_lines)
-    else:
-        issues_text = "  No specific issues identified — apply aggressive general improvements."
+        issue_lines = [
+            f"- [{i.get('severity','medium').upper()}] {i.get('area','')}: {i.get('description','')}"
+            for i in issues[:6]
+        ]
+        issues_text = "ISSUES TO FIX:\n" + "\n".join(issue_lines)
 
-    breakdown_text = ""
-    if breakdown:
-        breakdown_text = "\n".join(
-            f"  - {k.replace('_', ' ').title()}: {v}/100"
-            for k, v in breakdown.items()
-        )
-
+    # Design intelligence — keep brief
     di = design_intelligence or {}
-    design_tokens = di.get("design_tokens", {})
-    global_patterns = di.get("global_patterns", {})
-    components = di.get("components", {})
-    recommendations = di.get("recommendations", [])
-    avoid = di.get("avoid", [])
+    di_text = ""
+    if di.get("design_tokens") or di.get("recommendations"):
+        di_parts = []
+        if di.get("design_tokens"):
+            di_parts.append(f"Design tokens: {json.dumps(di['design_tokens'], indent=2)[:1500]}")
+        if di.get("recommendations"):
+            di_parts.append(f"Recommendations: {json.dumps(di['recommendations'])[:500]}")
+        di_text = "\n".join(di_parts)
 
-    intent_line = ""
-    if user_intent:
-        intent_line = f"\n## USER INTENT\n{user_intent}\n"
+    intent_line = f"\nUSER INTENT: {user_intent}" if user_intent else ""
 
-    retry_warning = ""
+    retry_block = ""
     if is_retry:
-        retry_warning = """
-## CRITICAL RETRY WARNING
+        retry_block = f"""
+⚠️ ATTEMPT {attempt_number} — PREVIOUS ATTEMPT REJECTED
 
-Your PREVIOUS attempt was REJECTED because the before and after looked too similar.
-The user could not see a meaningful difference.
+Your previous output was REJECTED because the before/after looked too similar.
+The layout structure was too close to the original.
 
-This time you MUST make DRAMATIC changes:
-- Completely reorganize the page layout
-- Introduce new section groupings, cards, grids
-- Change the spatial composition of the entire page
-- Make the difference visible in a THUMBNAIL
-
-If you play it safe again → this will be REJECTED again.
+This time: DO NOT reference the original layout AT ALL.
+Start from a blank page. Place elements in a completely new arrangement.
+The result must pass this test: "Does this look like a different product?"
+If no → you will be rejected again.
 """
 
-    return f"""{retry_warning}You are a senior UI engineer performing an AGGRESSIVE UI transformation.
+    return f"""{retry_block}REBUILD this page. Score: {score}/100.
 
-YOUR #1 GOAL: The before and after must look DRAMATICALLY different.
-If a user cannot instantly see the improvement in under 1 second, you have FAILED.
+{weak_section}
 
-## QUALITY EVALUATION (this page scored {score}/100)
-
-### Overall Assessment
-{reasoning}
-
-### Score Breakdown
-{breakdown_text}
-
-### Specific Issues to Fix
 {issues_text}
 
----
+Assessment: {reasoning}
 
-## TARGET FILE: {target_path}
+{intent_line}
+
+## ORIGINAL CODE — extract data and handlers, then DISCARD the layout
+File: {target_path}
 ```tsx
 {target_code}
 ```
 
-## SUPPORTING FILES (for context — do NOT modify these)
+## SUPPORTING FILES (read-only context)
 {supporting_files}
 
-## DESIGN INTELLIGENCE
+{f"## DESIGN INTELLIGENCE{chr(10)}{di_text}" if di_text else ""}
 
-### Design Tokens
-{json.dumps(design_tokens, indent=2) if design_tokens else "No design tokens available."}
+## REBUILD REQUIREMENTS
 
-### Global Patterns to Apply
-{json.dumps(global_patterns, indent=2) if global_patterns else "No global patterns available."}
+1. LAYOUT: Create a new page structure with semantic wrappers (header, main, section).
+   Use a max-width container (max-w-7xl mx-auto). Group content into card panels.
+   If the original is single-column, make it multi-column or grid-based.
 
-### Component Patterns
-{json.dumps(components, indent=2) if components else "No component patterns available."}
+2. SPACING: Generous spacing throughout. Section gaps: space-y-10 or larger.
+   Card padding: p-6 minimum (p-8 preferred). Grid gaps: gap-6 minimum.
+   NO cramped layouts. Double whatever the original had.
 
-### Recommendations
-{json.dumps(recommendations, indent=2) if recommendations else "No specific recommendations."}
+3. HIERARCHY: ONE primary heading per section (text-2xl+ font-bold).
+   Clear typographic scale: title > section heading > body > caption.
+   ONE dominant CTA per page — large, colored, prominent position.
+   All other actions demoted to text or outlined buttons.
 
-### Anti-Patterns to AVOID
-{json.dumps(avoid, indent=2) if avoid else "No specific anti-patterns listed."}
-{intent_line}
----
+4. COMPONENTS: Stats → card grid with large bold numbers + tiny uppercase labels.
+   Lists → card-wrapped sections with divide-y rows + metadata.
+   Forms → grouped sections with proper labels and spacing.
+   Buttons → properly sized (px-6 py-3) with hover states.
 
-## TRANSFORMATION PHILOSOPHY
+5. CLUTTER: Remove visual noise. Simplify dense areas. Every element earns its space.
 
-You are NOT polishing. You are REBUILDING the UI.
+## EXAMPLE — this is the level of change required
 
-Think of this as: "the same app, redesigned by a world-class design team."
-The logic stays. The UI gets a complete makeover.
+BEFORE (flat, cramped, multi-CTA):
+```tsx
+<div className="p-4">
+  <h1>Dashboard</h1>
+  <div>Users: {{users}}</div>
+  <div>Revenue: ${{revenue}}</div>
+  <button onClick={{refresh}}>Refresh</button>
+  <button onClick={{exportData}}>Export</button>
+  <button onClick={{addUser}}>Add User</button>
+  <ul>{{items.map(i => <li key={{i.id}}>{{i.name}} - {{i.status}}</li>)}}</ul>
+</div>
+```
 
-The user is paying for a transformation they can SEE. Subtle changes are worthless.
+AFTER (structured, spacious, single primary CTA):
+```tsx
+<div className="min-h-screen bg-slate-50">
+  <header className="border-b bg-white px-8 py-6">
+    <div className="max-w-7xl mx-auto flex items-center justify-between">
+      <div>
+        <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
+        <p className="text-sm text-slate-500 mt-1">Overview</p>
+      </div>
+      <button onClick={{addUser}} className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700">
+        + Add User
+      </button>
+    </div>
+  </header>
+  <main className="max-w-7xl mx-auto px-8 py-10 space-y-10">
+    <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="bg-white rounded-2xl border p-8">
+        <p className="text-xs font-medium uppercase tracking-wider text-slate-400">Users</p>
+        <p className="text-4xl font-bold text-slate-900 mt-2">{{users}}</p>
+      </div>
+      <div className="bg-white rounded-2xl border p-8">
+        <p className="text-xs font-medium uppercase tracking-wider text-slate-400">Revenue</p>
+        <p className="text-4xl font-bold text-slate-900 mt-2">${{revenue}}</p>
+      </div>
+    </section>
+    <section className="bg-white rounded-2xl border overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-5 border-b">
+        <h2 className="text-lg font-semibold">Activity</h2>
+        <div className="flex gap-2">
+          <button onClick={{refresh}} className="text-sm text-slate-500 hover:text-slate-900">Refresh</button>
+          <button onClick={{exportData}} className="text-sm text-slate-500 hover:text-slate-900">Export</button>
+        </div>
+      </div>
+      <ul className="divide-y">
+        {{items.map(i => (
+          <li key={{i.id}} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50">
+            <span className="font-medium text-slate-900">{{i.name}}</span>
+            <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-600">{{i.status}}</span>
+          </li>
+        ))}}
+      </ul>
+    </section>
+  </main>
+</div>
+```
 
-## MANDATORY CHANGES (you MUST do ALL of these)
+Note: COMPLETELY different JSX tree. New header/main/section wrappers. Stats in card grid. List in card with header. One primary CTA. Same data + handlers.
 
-### 1. LAYOUT OVERHAUL (most important)
-- Restructure the entire page layout — do NOT preserve the original grid/flex structure
-- If content is in a single column, make it multi-column or card-based
-- If content is cramped, add generous whitespace and section breaks
-- Introduce clear visual sections: hero/header area, content area, sidebar, footer
-- Add wrapper cards/panels to group related content with borders and backgrounds
-- Use modern patterns: dashboard grids, bento layouts, split panels
-
-### 2. VISUAL HIERARCHY REDESIGN
-- Make the primary action 3x more prominent (bigger, bolder, better placed)
-- Add clear section headings with proper typographic scale
-- Create obvious visual weight differences between primary, secondary, tertiary content
-- Remove visual noise — if something isn't essential, dim it or remove it
-- Add visual anchors: icons, status badges, colored accents on key elements
-
-### 3. COMPONENT UPGRADES
-- Replace basic buttons with properly sized, styled, prominent buttons
-- Turn flat lists into card grids with padding, borders, and hover states
-- Add proper input styling with labels, focus states, and spacing
-- Upgrade nav elements with active states, icons, and clear hierarchy
-- Add empty states, loading states, or placeholder content where appropriate
-
-### 4. SPACING REVOLUTION
-- Double the padding inside containers (if it was p-4, make it p-8)
-- Add generous gaps between sections (minimum gap-6 between major sections)
-- Ensure consistent spacing scale throughout (4, 8, 12, 16, 24, 32, 48)
-- Add breathing room — the #1 sign of amateur UI is cramped layouts
-
-### 5. VISUAL POLISH
-- Apply a consistent color system from the design tokens
-- Add subtle borders (1px, low opacity) to separate sections
-- Use background color variations to create depth (surface vs background)
-- Add rounded corners consistently (rounded-lg or rounded-xl)
-- Apply subtle shadows on elevated elements (cards, modals, dropdowns)
-
-## HANDLING DIFFERENT FRONTEND TYPES
-
-Adapt your transformation strategy to the type of UI:
-
-### Image-heavy / media UIs (games, creative tools, media players)
-- The background image/video is NOT yours to change — focus on the OVERLAY components
-- Make overlay cards/panels LARGER, more prominent, with stronger backgrounds (higher opacity)
-- Increase the contrast between overlay elements and the background
-- Restructure the layout of overlays — reposition them, group them into panels
-- Add glassmorphism with stronger blur/opacity so UI elements stand out
-- Make buttons and controls significantly bigger and more visible
-- If controls are scattered, consolidate them into a unified control panel
-
-### Dashboards / admin panels
-- Reorganize into clear grid sections with cards
-- Add a proper sidebar if one doesn't exist
-- Create stat cards with large numbers and labels
-- Add visual hierarchy between primary metrics and secondary data
-
-### Landing pages / marketing sites
-- Restructure into clear full-width sections
-- Make the hero dramatically bigger with prominent CTA
-- Add proper spacing between sections (64px+)
-- Upgrade feature sections from lists to card grids
-
-### Forms / data entry
-- Add proper labels, spacing, and grouping
-- Split long forms into logical sections with headers
-- Make submit buttons prominent and properly placed
-- Add visual feedback states
-
-### Single-page apps (SPAs)
-- Add proper navigation structure
-- Create clear content areas with boundaries
-- Add breadcrumbs or progress indicators where appropriate
-
-## WHAT "DRAMATICALLY DIFFERENT" MEANS
-
-GOOD transformation (visible at a glance):
-- Single column list → card grid layout
-- Flat page → sectioned dashboard with sidebar
-- Basic form → multi-step wizard with progress
-- Plain text list → rich cards with icons and metadata
-- Cramped layout → spacious layout with clear sections
-- Small scattered overlays → consolidated prominent panels
-- Tiny controls on image → large glassmorphic control panel
-
-BAD transformation (too subtle):
-- Only changed colors/fonts
-- Only adjusted padding by a few pixels
-- Only added shadows or borders
-- Layout structure stayed the same
-- User would struggle to spot the difference
-
-## CONSTRAINTS
-- PRESERVE all imports, exports, hooks, state, event handlers, and business logic
-- DO NOT remove any functionality
-- DO NOT rename props or state variables
-- DO NOT add new npm dependencies
-- KEEP the same component names and file exports
-- Return the COMPLETE updated file — not a partial snippet
-- Use Tailwind classes
+YOUR OUTPUT must show this level of structural difference.
 
 ## OUTPUT FORMAT
 
-Return a JSON object with this exact structure:
+Return ONLY this JSON:
 {{
-  "updated_code": "the complete transformed file content",
-  "diff_summary": "1 sentence describing the visible change",
+  "updated_code": "the COMPLETE rebuilt file",
+  "diff_summary": "1 sentence: what the user sees differently (no code terms)",
   "change_annotations": [
     {{
-      "region": "section name (e.g. 'Header area', 'Main content')",
-      "change_type": "flow|layout|spacing|component|visual",
-      "description": "What changed visually",
-      "ux_impact": "Why it's better for the user"
+      "region": "section name",
+      "change_type": "layout|hierarchy|spacing|cta|component|clutter",
+      "description": "visible change (no code terms)",
+      "ux_impact": "why it's better"
     }}
   ],
-  "change_summary": [
-    "Plain English description of a visible improvement"
-  ]
-}}
-
-LANGUAGE RULES for all text fields:
-- Write for a product manager, not a developer
-- NEVER mention: className, div, span, CSS, px, rem, Tailwind, utility
-- Focus on WHAT THE USER SEES
-
-Return ONLY valid JSON — no markdown fences, no explanation."""
+  "change_summary": ["visible improvement in plain English"]
+}}"""

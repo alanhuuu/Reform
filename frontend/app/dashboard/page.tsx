@@ -4,6 +4,9 @@ import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { apiUrl } from '@/lib/api'
+import { useSubscription } from '@/lib/useSubscription'
+import CheckoutResult from '@/components/dashboard/CheckoutResult'
+import UpgradeBanner from '@/components/dashboard/UpgradeBanner'
 
 interface ProjectData {
   id: string
@@ -21,6 +24,7 @@ function DashboardContent() {
   const searchParams = useSearchParams()
   const repo = searchParams.get('repo')
   const { data: session } = useSession()
+  const { subscription, canScan, canAddRepo, isFree, loading: subLoading } = useSubscription()
   const [projects, setProjects] = useState<ProjectData[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -45,7 +49,8 @@ function DashboardContent() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-      <div className="flex items-center justify-between mb-8">
+      <CheckoutResult />
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-white">Your Projects</h1>
           <p className="text-[13px] mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>
@@ -54,12 +59,62 @@ function DashboardContent() {
         </div>
         <button
           onClick={() => router.push('/dashboard/discovery')}
-          className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-[0.98]"
-          style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', boxShadow: '0 0 30px rgba(124,58,237,0.2)' }}
+          disabled={!canScan}
+          className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', boxShadow: canScan ? '0 0 30px rgba(124,58,237,0.2)' : 'none' }}
         >
           New Analysis
         </button>
       </div>
+
+      {/* Usage stats */}
+      {!subLoading && (
+        <div className="mb-8 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.25)' }}>Scans</span>
+            <div className="w-24 h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${Math.min(100, (subscription.scans_used / subscription.scans_limit) * 100)}%`,
+                  background: subscription.scans_used >= subscription.scans_limit ? '#ef4444' : 'linear-gradient(90deg, #7c3aed, #a855f7)',
+                }}
+              />
+            </div>
+            <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              {subscription.scans_used}/{subscription.scans_limit}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.25)' }}>Repos</span>
+            <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              {subscription.repos_connected}/{subscription.repos_limit === -1 ? '\u221e' : subscription.repos_limit}
+            </span>
+          </div>
+          <span
+            className="text-[10px] font-semibold uppercase tracking-widest px-2 py-0.5 rounded-full"
+            style={{
+              background: isFree ? 'rgba(255,255,255,0.04)' : 'rgba(124,58,237,0.1)',
+              color: isFree ? 'rgba(255,255,255,0.3)' : 'rgba(168,85,247,0.7)',
+              border: isFree ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(124,58,237,0.2)',
+            }}
+          >
+            {subscription.plan}
+          </span>
+        </div>
+      )}
+
+      {/* Upgrade prompt when limits are hit */}
+      {!subLoading && !canScan && (
+        <div className="mb-6">
+          <UpgradeBanner message={`You've used all ${subscription.scans_limit} scans this month. Upgrade for more.`} />
+        </div>
+      )}
+      {!subLoading && !canAddRepo && canScan && (
+        <div className="mb-6">
+          <UpgradeBanner message={`You've reached your ${subscription.repos_limit} repo limit. Upgrade to connect more.`} />
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

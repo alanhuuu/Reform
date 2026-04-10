@@ -83,8 +83,12 @@ Most real-world pages score 50-80. A score of 90+ should be rare and reserved fo
 
 ### Verdict Rules
 
-- If overall score >= 85 → verdict = "high_quality"
-- If overall score < 85 → verdict = "needs_improvement"
+- If overall score >= 95 → verdict = "high_quality" (genuinely polished, no transformation needed)
+- If overall score < 95 → verdict = "needs_improvement"
+
+The 95 threshold is intentionally high. A page must be visibly excellent — not merely
+"good enough" — to be left untouched. Pages scoring 85-94 still have room to improve and
+should be transformed.
 
 ### Issue Identification
 

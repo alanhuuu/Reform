@@ -1,20 +1,35 @@
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import get_db
 from app.schemas.github_publish import PublishBranchRequest, PublishBranchResponse
 from app.services.github_publisher import publish_approved_branch
+from app.services.subscription import (
+    check_feature,
+    check_subscription_active,
+    get_or_create_subscription,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.post("/github/publish-approved-branch", response_model=PublishBranchResponse)
-async def publish_approved_branch_endpoint(req: PublishBranchRequest):
+async def publish_approved_branch_endpoint(
+    req: PublishBranchRequest,
+    db: AsyncSession = Depends(get_db),
+):
     if not req.access_token:
         raise HTTPException(status_code=401, detail="GitHub token is required")
     if not req.approved_files:
         raise HTTPException(status_code=400, detail="No approved files provided")
+
+    # ── Feature gating ──────────────────────────────────────────────
+    sub = await get_or_create_subscription(db, req.github_user_id)
+    check_subscription_active(sub)
+    check_feature(sub, "pr_autofix")
 
     try:
         result = await publish_approved_branch(

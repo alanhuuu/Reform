@@ -7,12 +7,30 @@ export interface ChangeAnnotation {
   ux_impact: string
 }
 
+export interface ScoreBreakdown {
+  layout_structure: number
+  visual_hierarchy: number
+  spacing_consistency: number
+  cta_clarity: number
+  component_quality: number
+  information_density: number
+}
+
+export interface PageIssue {
+  area: string
+  severity: 'high' | 'medium' | 'low' | string
+  description: string
+}
+
 export interface TransformedPageData {
   page_path: string
   page_name: string
   route: string
-  status: 'transformed' | 'high_quality' | 'error'
+  status: 'transformed' | 'weak' | 'high_quality' | 'skipped_overflow' | 'error'
   score: number
+  breakdown?: ScoreBreakdown | null
+  reasoning?: string
+  issues?: PageIssue[]
   original_code?: string
   updated_code?: string
   diff_summary?: string

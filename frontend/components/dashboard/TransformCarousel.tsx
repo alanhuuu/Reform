@@ -9,15 +9,26 @@ import StructuralChangesPanel from './StructuralChangesPanel'
 export default function TransformCarousel({
   pages,
   result,
+  onSelectedPathChange,
+  afterPulse = false,
 }: {
   pages: TransformedPageData[]
   result: MultiPageTransformResult
+  onSelectedPathChange?: (path: string) => void
+  afterPulse?: boolean
 }) {
-  // Include transformed AND errored pages so users can see failures.
-  // High-quality (skipped) pages aren't shown here — they live in their own panel.
-  const visible = pages.filter(p => p.status === 'transformed' || p.status === 'error')
+  // Include transformed, weak, AND errored pages so users can see everything.
+  // High-quality and overflow pages aren't shown here — they live in their own panel.
+  const visible = pages.filter(p => p.status === 'transformed' || p.status === 'weak' || p.status === 'error')
   const transformed = visible
   const [currentIndex, setCurrentIndex] = useState(0)
+
+  // Notify parent of the initially-selected page on mount and whenever the
+  // index changes — so the Refine Further modal edits the right page.
+  useEffect(() => {
+    const current = transformed[currentIndex]
+    if (current && onSelectedPathChange) onSelectedPathChange(current.page_path)
+  }, [currentIndex, transformed, onSelectedPathChange])
 
   const goTo = useCallback((idx: number) => {
     setCurrentIndex(Math.max(0, Math.min(idx, transformed.length - 1)))
@@ -58,68 +69,28 @@ export default function TransformCarousel({
       {/* Carousel navigation header — large, prominent tabs */}
       <div className="flex items-start justify-between gap-4 mb-6">
         {/* Page selector tabs */}
-        <div className="flex items-stretch gap-2.5 overflow-x-auto pb-2 flex-1 min-w-0">
+        <div className="flex items-center gap-1 overflow-x-auto pb-2 flex-1 min-w-0">
           {transformed.map((page, i) => {
             const isActive = i === currentIndex
-            const isError = page.status === 'error'
-            const accent = isError ? '239,68,68' : '168,85,247'
-            const textActive = isError ? '#fca5a5' : '#d8b4fe'
-            const badgeActive = isError ? '#f87171' : '#c084fc'
             return (
               <button
                 key={page.page_path}
                 onClick={() => goTo(i)}
-                className="group flex items-center gap-3 px-5 py-3.5 rounded-xl transition-all flex-shrink-0 text-left"
+                className="px-4 py-2.5 rounded-xl text-[13px] font-medium transition-all flex-shrink-0"
                 style={isActive
                   ? {
-                      background: `rgba(${accent},0.10)`,
-                      border: `1px solid rgba(${accent},0.35)`,
-                      boxShadow: `0 0 0 3px rgba(${accent},0.06), 0 4px 20px rgba(${accent},0.08)`,
+                      background: 'rgba(168,85,247,0.10)',
+                      border: '1px solid rgba(168,85,247,0.25)',
+                      color: '#d8b4fe',
                     }
                   : {
                       background: 'rgba(255,255,255,0.02)',
                       border: '1px solid rgba(255,255,255,0.06)',
+                      color: 'rgba(255,255,255,0.6)',
                     }
                 }
               >
-                <span
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold flex-shrink-0 transition-all"
-                  style={{
-                    background: isActive ? `rgba(${accent},0.18)` : 'rgba(255,255,255,0.04)',
-                    color: isActive ? badgeActive : 'rgba(255,255,255,0.35)',
-                    border: isActive ? `1px solid rgba(${accent},0.25)` : '1px solid transparent',
-                  }}
-                >
-                  {i + 1}
-                </span>
-                <div className="flex flex-col min-w-0">
-                  <span
-                    className="text-[14px] font-semibold leading-tight truncate max-w-[180px]"
-                    style={{ color: isActive ? textActive : 'rgba(255,255,255,0.85)' }}
-                  >
-                    {page.page_name}
-                  </span>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ background: isError ? '#ef4444' : '#a855f7' }}
-                    />
-                    <span
-                      className="text-[11px] font-medium"
-                      style={{ color: isActive ? `rgba(${accent},0.75)` : 'rgba(255,255,255,0.4)' }}
-                    >
-                      {isError ? 'Failed' : 'Improved'}
-                    </span>
-                    {page.score > 0 && (
-                      <>
-                        <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>·</span>
-                        <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                          {page.score}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
+                {page.page_name}
               </button>
             )
           })}
@@ -190,19 +161,23 @@ export default function TransformCarousel({
               <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.25)' }}>{current.route}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {current.score > 0 && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <span className="text-[9px] font-medium uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.25)' }}>Score</span>
-                <span className="text-[13px] font-bold" style={{ color: '#d8b4fe' }}>{current.score}</span>
-              </div>
-            )}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.18)' }}>
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a855f7', boxShadow: '0 0 6px rgba(168,85,247,0.6)' }} />
-              <span className="text-[11px] font-medium" style={{ color: 'rgba(216,180,254,0.95)' }}>Improved</span>
+          {/* Clean header — no badges */}
+        </div>
+
+        {/* Weak transformation banner */}
+        {current.status === 'weak' && (
+          <div className="mx-8 mt-2 mb-4 rounded-xl px-5 py-3.5 flex items-start gap-3" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}>
+            <svg className="flex-shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <div>
+              <p className="text-[12px] font-semibold" style={{ color: '#fbbf24' }}>Weak transformation</p>
+              <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                The transformation engine could not produce a dramatically different result for this page. The change may be subtle. Try using &quot;Refine Further&quot; to push it further.
+              </p>
             </div>
           </div>
-        </div>
+        )}
 
         {/* HERO: Before/After — full-width, oversized */}
         {isPagePreviewAvailable(current) && (
@@ -212,6 +187,7 @@ export default function TransformCarousel({
               afterScreenshot={current.after_screenshot}
               pageName={current.page_name}
               previewAvailable={true}
+              afterPulse={afterPulse}
             />
           </div>
         )}

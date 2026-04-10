@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { ProgressProvider, useProgress } from '@/components/dashboard/ProgressContext'
 import InteractiveBackground from '@/components/landing/InteractiveBackground'
 import ProjectsDrawer from '@/components/layout/ProjectsDrawer'
+import AccountMenu from '@/components/layout/AccountMenu'
 
 const NAV_ITEMS = [
   { href: '/dashboard/discovery', label: 'Project Discovery' },
@@ -62,6 +64,24 @@ function GlobalProgressBar() {
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const { status } = useSession()
+  const pathname = usePathname()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.replace(`/signin?next=${encodeURIComponent(pathname)}`)
+    }
+  }, [status, pathname, router])
+
+  if (status !== 'authenticated') {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#05070c' }}>
+        <div className="w-5 h-5 rounded-full animate-spin" style={{ border: '2px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7' }} />
+      </div>
+    )
+  }
+
   return (
     <ProgressProvider>
       <DashboardLayoutInner>{children}</DashboardLayoutInner>
@@ -128,6 +148,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
             >
               New Analysis
             </button>
+            <AccountMenu />
           </div>
         </div>
       </header>

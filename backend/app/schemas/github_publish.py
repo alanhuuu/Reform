@@ -20,6 +20,7 @@ class PublishBranchRequest(BaseModel):
     approved_files: list[ApprovedFile]
     transform_summary: TransformSummary
     access_token: str
+    github_user_id: str
 
 
 class PublishBranchResponse(BaseModel):

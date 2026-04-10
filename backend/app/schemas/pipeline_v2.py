@@ -13,6 +13,7 @@ class TransformRepoV2Request(BaseModel):
     user_intent: str = ""
     quality_threshold: int = 95
     max_pages: int = 5
+    github_user_id: str
 
 
 # ── Page Discovery ──────────────────────────────────────────────────
@@ -57,8 +58,11 @@ class PageTransformResult(BaseModel):
     page_path: str
     page_name: str
     route: str
-    status: str          # "transformed" | "high_quality" | "error"
+    status: str          # "transformed" | "weak" | "high_quality" | "skipped_overflow" | "error"
     score: int
+    breakdown: ScoreBreakdown | None = None
+    reasoning: str = ""
+    issues: list[PageIssue] = []
     original_code: str = ""
     updated_code: str = ""
     diff_summary: str = ""

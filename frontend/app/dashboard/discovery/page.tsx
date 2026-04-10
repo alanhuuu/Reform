@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useProgress } from '@/components/dashboard/ProgressContext'
 import { apiUrl } from '@/lib/api'
+import GateErrorBanner, { type GateErrorData } from '@/components/dashboard/GateError'
 
 // Set to true to skip API calls and use mock data for local testing
 const MOCK_MODE = false
@@ -528,8 +529,12 @@ function DiscoveryPageInner() {
         )}
 
         {error && (
-          <div className="mt-4 px-4 py-3 rounded-lg text-[12px]" style={{ background: 'rgba(239,68,68,0.06)', color: 'rgba(239,68,68,0.6)', border: '1px solid rgba(239,68,68,0.08)' }}>
-            {error}
+          <div className="mt-4">
+            <GateErrorBanner
+              error={null}
+              fallbackMessage={error}
+              onDismiss={() => setError('')}
+            />
           </div>
         )}
       </div>

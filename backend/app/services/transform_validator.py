@@ -116,49 +116,71 @@ def validate_transformation(original_code: str, transformed_code: str) -> dict:
     # Test 3: Count meaningful line changes (beyond className/style)
     meaningful_changes = _count_meaningful_line_changes(original_code, transformed_code)
 
+    # Scale thresholds with original page size. A rebuild should change at
+    # least 35% of the tag structure and 50% of non-style lines. These are
+    # high bars — that's intentional. The prompt tells the model to rebuild
+    # from scratch, so anything less than this is a failed rebuild.
+    orig_tag_count = max(len(orig_tags), 1)
+    required_tag_changes = max(15, int(orig_tag_count * 0.35))
+    required_line_changes = max(25, int(orig_tag_count * 0.5))
+
     # Decision logic
     if skeletons_identical and tags_identical:
         return {
             "is_structural": False,
-            "confidence": 0.95,
+            "confidence": 0.98,
             "reasoning": (
                 f"After removing all styling attributes, the code structure is identical. "
                 f"Tag sequence unchanged. Only {meaningful_changes} non-style lines differ. "
-                f"This is a cosmetic-only change."
+                f"This is a cosmetic-only change — the transformation engine produced "
+                f"className tweaks instead of structural improvements."
             ),
         }
 
-    if tag_changes < 8 and meaningful_changes < 15:
+    if tag_changes < required_tag_changes // 2 and meaningful_changes < required_line_changes // 2:
         return {
             "is_structural": False,
-            "confidence": 0.8,
+            "confidence": 0.9,
             "reasoning": (
-                f"Insufficient structural changes: {tag_changes} tag changes, "
-                f"{meaningful_changes} meaningful line changes. "
-                f"The before and after would look too similar."
+                f"Severely insufficient structural changes: {tag_changes} tag changes "
+                f"vs {required_tag_changes} required, {meaningful_changes} meaningful "
+                f"line changes vs {required_line_changes} required. "
+                f"The before and after would look nearly identical."
             ),
         }
 
-    if tag_changes >= 15 or meaningful_changes >= 25:
+    if tag_changes >= required_tag_changes and meaningful_changes >= required_line_changes:
         return {
             "is_structural": True,
-            "confidence": 0.9,
+            "confidence": 0.95,
             "reasoning": (
-                f"Dramatic structural changes: {tag_changes} tag changes, "
-                f"{meaningful_changes} meaningful line changes, "
+                f"Strong structural transformation: {tag_changes} tag changes "
+                f"(required {required_tag_changes}), {meaningful_changes} meaningful "
+                f"line changes (required {required_line_changes}), "
                 f"{new_tags} new tags, {removed_tags} removed tags."
             ),
         }
 
-    # Moderate changes — treat as not structural enough. The pipeline will
-    # reclassify this page as "already great" so the UI doesn't show a
-    # near-identical before/after that looks like a no-op.
+    if tag_changes >= required_tag_changes or meaningful_changes >= required_line_changes:
+        return {
+            "is_structural": True,
+            "confidence": 0.75,
+            "reasoning": (
+                f"Moderate structural transformation: {tag_changes} tag changes, "
+                f"{meaningful_changes} meaningful line changes "
+                f"(required {required_tag_changes}/{required_line_changes}). "
+                f"Visible difference but could be more aggressive."
+            ),
+        }
+
+    # Below the bar — not dramatic enough.
     return {
         "is_structural": False,
-        "confidence": 0.7,
+        "confidence": 0.8,
         "reasoning": (
-            f"Only moderate changes: {tag_changes} tag changes, "
-            f"{meaningful_changes} meaningful line changes. Not dramatic "
-            f"enough to show as a transformation — the UI is already good."
+            f"Insufficient transformation: {tag_changes} tag changes, "
+            f"{meaningful_changes} meaningful line changes "
+            f"(required {required_tag_changes} tags AND {required_line_changes} lines). "
+            f"The before/after would not be visibly different at a glance."
         ),
     }

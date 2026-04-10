@@ -17,6 +17,11 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.models import Project, RepoSnapshot, TransformRun, PageResult
 from app.services.s3_client import download_screenshot, upload_snapshot, upload_screenshot
+from app.services.subscription import (
+    check_subscription_active,
+    get_or_create_subscription,
+    increment_repo_count,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -112,6 +117,10 @@ class SaveRunRequest(BaseModel):
 @router.post("", response_model=ProjectResponse)
 async def create_project(req: CreateProjectRequest, db: AsyncSession = Depends(get_db)):
     """Create a new project or return existing one for this repo."""
+    # ── Feature gating ──────────────────────────────────────────────
+    sub = await get_or_create_subscription(db, req.github_user_id)
+    check_subscription_active(sub)
+
     # Check if project already exists for this user + repo
     result = await db.execute(
         select(Project).where(
@@ -125,6 +134,8 @@ async def create_project(req: CreateProjectRequest, db: AsyncSession = Depends(g
         project.updated_at = datetime.now(timezone.utc)
         project.branch = req.branch
     else:
+        # Only count against repo limit for truly new projects
+        await increment_repo_count(db, sub)
         project = Project(
             github_user_id=req.github_user_id,
             github_username=req.github_username,
