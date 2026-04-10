@@ -16,12 +16,14 @@ interface Annotation {
   zone: { x: number; y: number; w: number; h: number }
 }
 
-const DEFAULT_SCREENS = [
-  { label: 'Home', route: '/' },
-  { label: 'Dashboard', route: '/dashboard' },
-  { label: 'Settings', route: '/settings' },
-  { label: 'Pricing', route: '/pricing' },
-  { label: 'Onboarding', route: '/onboarding' },
+
+const ANALYSIS_STAGES: { message: string; duration: number }[] = [
+  { message: 'Capturing screenshot',       duration: 5_000  },
+  { message: 'Analyzing layout patterns',  duration: 12_000 },
+  { message: 'Identifying UX issues',      duration: 10_000 },
+  { message: 'Generating recommendations', duration: 10_000 },
+  { message: 'Rendering preview',          duration: 10_000 },
+  { message: 'Finalizing...',              duration: Infinity },
 ]
 
 const ANNOTATION_COLORS = {
@@ -76,7 +78,7 @@ function buildAnnotationsFromFindings(
   return findings.map((finding, index) => ({
     id: buildAnnotationId(prefix, route, finding.id, index),
     label: finding.title,
-    detail: finding.description,
+    detail: finding.recommendation,
     type: findingToAnnotationType(finding.type),
     principle: finding.principle,
     confidence: severityToConfidence(finding.severity),
@@ -89,15 +91,28 @@ function toImageSrc(image: string) {
   return image.startsWith('data:') ? image : `data:image/png;base64,${image}`
 }
 
-async function analyzeUxLab(url: string, page: string): Promise<UXLabSession> {
+function getCompetitorUrls(): string[] {
+  try {
+    const raw = sessionStorage.getItem('refineui_discovery')
+    if (!raw) return []
+    const data = JSON.parse(raw)
+    return Array.isArray(data?.selected_for_analysis) ? data.selected_for_analysis.slice(0, 3) : []
+  } catch {
+    return []
+  }
+}
+
+async function analyzeUxLab(url: string, page: string, signal?: AbortSignal): Promise<UXLabSession> {
   const response = await fetch(apiUrl('/api/ux-lab/analyze'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       url,
       page,
-      competitor_urls: [],
+      competitor_urls: getCompetitorUrls(),
       workspace_id: 'local',
+      analysis_only: true,
     }),
   })
 
@@ -193,29 +208,70 @@ function PreviewPlaceholder({
   )
 }
 
-function PreviewLoadingState({ title }: { title: string }) {
+const SKELETON_COLOR = 'rgba(255,255,255,0.06)'
+const SKELETON_GRADIENT = 'linear-gradient(90deg, rgba(255,255,255,0.04), rgba(167,139,250,0.12), rgba(255,255,255,0.04))'
+
+function SkeletonBlock({ width = '100%', height, delay = 0 }: { width?: string; height: string; delay?: number }) {
   return (
-    <div className="flex h-full min-h-[280px] items-center justify-center px-6 text-center">
-      <div className="space-y-3">
-        <div
-          style={{
-            width: '28px',
-            height: '28px',
-            margin: '0 auto',
-            border: '2px solid rgba(74,68,85,0.3)',
-            borderTop: '2px solid #d2bbff',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-          }}
-        />
-        <div className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.32)' }}>
-          {title}
+    <div
+      className="ai-shimmer"
+      style={{
+        width,
+        height,
+        borderRadius: '4px',
+        background: SKELETON_GRADIENT,
+        backgroundSize: '200% 100%',
+        animationDelay: `${delay}ms`,
+      }}
+    />
+  )
+}
+
+function PreviewLoadingState({ stage }: { title: string; stage?: string; progress?: number }) {
+  return (
+    <div style={{ width: '100%', height: '100%', minHeight: '280px', padding: '0', display: 'flex', flexDirection: 'column', background: '#0d0c16' }}>
+      {/* Nav bar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: `1px solid ${SKELETON_COLOR}` }}>
+        <SkeletonBlock width="72px" height="12px" />
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <SkeletonBlock width="40px" height="8px" delay={80} />
+          <SkeletonBlock width="40px" height="8px" delay={140} />
+          <SkeletonBlock width="40px" height="8px" delay={200} />
         </div>
-        <div className="text-sm" style={{ color: 'rgba(204,195,216,0.5)' }}>
-          Running UX analysis...
-        </div>
-        <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
+        <SkeletonBlock width="56px" height="24px" delay={100} />
       </div>
+
+      {/* Hero */}
+      <div style={{ padding: '28px 20px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+        <SkeletonBlock width="55%" height="22px" delay={60} />
+        <SkeletonBlock width="40%" height="14px" delay={120} />
+        <SkeletonBlock width="30%" height="14px" delay={180} />
+        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+          <SkeletonBlock width="80px" height="28px" delay={240} />
+          <SkeletonBlock width="80px" height="28px" delay={300} />
+        </div>
+      </div>
+
+      {/* Content rows */}
+      <div style={{ flex: 1, padding: '4px 20px 20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <SkeletonBlock width="100%" height="72px" delay={100} />
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <SkeletonBlock width="50%" height="52px" delay={150} />
+          <SkeletonBlock width="50%" height="52px" delay={200} />
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <SkeletonBlock width="33%" height="40px" delay={180} />
+          <SkeletonBlock width="33%" height="40px" delay={230} />
+          <SkeletonBlock width="33%" height="40px" delay={280} />
+        </div>
+      </div>
+
+      {/* Stage label */}
+      {stage && (
+        <div style={{ padding: '8px 20px 12px', textAlign: 'center', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(204,195,216,0.28)' }}>
+          {stage}
+        </div>
+      )}
     </div>
   )
 }
@@ -434,12 +490,16 @@ function AnnotatedPreview({
 
 export default function SimulationPage() {
   const router = useRouter()
-  const [screens, setScreens] = useState<{ label: string; route: string }[]>(DEFAULT_SCREENS)
+  const [screens, setScreens] = useState<{ label: string; route: string }[]>([])
   const [selectedScreen, setSelectedScreen] = useState<{ label: string; route: string } | null>(null)
   const [loadingScreens, setLoadingScreens] = useState(true)
+  const [screensError, setScreensError] = useState<string | null>(null)
   const [analysis, setAnalysis] = useState<UXLabSession | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [loadingStage, setLoadingStage] = useState('')
+  const [loadingProgress, setLoadingProgress] = useState(0)
+  const stageTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   const [showAnnotations, setShowAnnotations] = useState(true)
   const [activeFindingId, setActiveFindingId] = useState<string | null>(null)
   const [shelfExpanded, setShelfExpanded] = useState(false)
@@ -455,6 +515,40 @@ export default function SimulationPage() {
       }
     })(),
   )
+
+  useEffect(() => {
+    stageTimers.current.forEach(clearTimeout)
+    stageTimers.current = []
+
+    if (!loadingAnalysis) {
+      if (loadingProgress > 0) {
+        setLoadingProgress(100)
+        const t = setTimeout(() => {
+          setLoadingStage('')
+          setLoadingProgress(0)
+        }, 400)
+        stageTimers.current.push(t)
+      }
+      return
+    }
+
+    const totalFinite = ANALYSIS_STAGES.reduce((sum, s) => sum + (isFinite(s.duration) ? s.duration : 0), 0)
+    let elapsed = 0
+
+    ANALYSIS_STAGES.forEach((stage, index) => {
+      const t = setTimeout(() => {
+        setLoadingStage(stage.message)
+        setLoadingProgress(Math.min(90, Math.round((elapsed / totalFinite) * 90)))
+      }, elapsed)
+      stageTimers.current.push(t)
+      if (isFinite(stage.duration)) elapsed += stage.duration
+    })
+
+    return () => {
+      stageTimers.current.forEach(clearTimeout)
+      stageTimers.current = []
+    }
+  }, [loadingAnalysis]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const storedTransform = sessionStorage.getItem('refineui_transform')
@@ -480,43 +574,54 @@ export default function SimulationPage() {
     }
 
     const repoUrl = sessionStorage.getItem('refineui_repo')
-    if (repoUrl) {
-      setLoadingScreens(true)
-      fetch(`${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}`)
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          return res.json()
-        })
-        .then((data: { pages: { label: string; route: string }[] }) => {
+    const pagesEndpoint = repoUrl
+      ? `${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}`
+      : '/api/local-pages'
+
+    setLoadingScreens(true)
+    setScreensError(null)
+    fetch(pagesEndpoint)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then((data: { pages: { label: string; route: string }[] }) => {
+        if (!data.pages.length) {
+          setScreensError('No pages found.')
+          setScreens([])
+          setSelectedScreen(null)
+        } else {
           setScreens(data.pages)
-          setSelectedScreen(data.pages[0] ?? null)
-        })
-        .catch(() => {
-          setScreens(DEFAULT_SCREENS)
-          setSelectedScreen(DEFAULT_SCREENS[0] ?? null)
-        })
-        .finally(() => {
-          setLoadingScreens(false)
-        })
-    } else {
-      setScreens(DEFAULT_SCREENS)
-      setSelectedScreen(DEFAULT_SCREENS[0] ?? null)
-      setLoadingScreens(false)
-    }
+          setSelectedScreen(data.pages[0])
+        }
+      })
+      .catch(() => {
+        setScreensError('Could not load pages.')
+        setScreens([])
+        setSelectedScreen(null)
+      })
+      .finally(() => {
+        setLoadingScreens(false)
+      })
   }, [])
 
   useEffect(() => {
     if (!selectedScreen) return
 
+    // Reset stale state from previous page before any async work.
+    // React 18 batches these with the subsequent setAnalysis call, so
+    // cached pages never flash a null state.
+    setAnalysis(null)
+    setAnalysisError(null)
+    setLoadingAnalysis(false)
+
     const cacheKey = selectedScreen.route
     if (analysisCache.current[cacheKey]) {
-      setAnalysisError(null)
       setAnalysis(analysisCache.current[cacheKey])
       return
     }
 
     setLoadingAnalysis(true)
-    setAnalysisError(null)
 
     const repoUrl = sessionStorage.getItem('refineui_repo') || ''
     const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
@@ -526,7 +631,9 @@ export default function SimulationPage() {
     const targetBase = deployedBase || localBase
     const targetUrl = `${targetBase}${selectedScreen.route}`
 
-    analyzeUxLab(targetUrl, selectedScreen.route)
+    const controller = new AbortController()
+
+    analyzeUxLab(targetUrl, selectedScreen.route, controller.signal)
       .then((result) => {
         analysisCache.current[cacheKey] = result
         try {
@@ -537,13 +644,16 @@ export default function SimulationPage() {
         setAnalysis(result)
       })
       .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
         console.error('Analysis failed:', error)
         setAnalysis(null)
         setAnalysisError(error instanceof Error ? error.message : 'Analysis failed for this screen.')
       })
       .finally(() => {
-        setLoadingAnalysis(false)
+        if (!controller.signal.aborted) setLoadingAnalysis(false)
       })
+
+    return () => { controller.abort() }
   }, [selectedScreen])
 
   const beforeAnnotations = useMemo(
@@ -656,7 +766,7 @@ export default function SimulationPage() {
 
   return (
     <div
-      className="flex min-h-[calc(100vh-124px)] flex-col gap-1.5 px-4 py-2 sm:min-h-[calc(100vh-88px)] sm:px-8"
+      className="flex h-[calc(100vh-124px)] flex-col gap-1.5 px-4 py-2 sm:h-[calc(100vh-88px)] sm:px-8"
       style={
         {
           '--topbar-height': '88px',
@@ -695,20 +805,24 @@ export default function SimulationPage() {
               </span>
               <select
                 value={selectedScreen?.label ?? ''}
-                onChange={(event) => setSelectedScreen(screens.find((screen) => screen.label === event.target.value) ?? screens[0] ?? null)}
-                disabled={loadingScreens}
+                onChange={(event) => setSelectedScreen(screens.find((screen) => screen.label === event.target.value) ?? null)}
+                disabled={loadingScreens || !!screensError || !screens.length}
                 className="rounded-xl px-3 py-1.5 text-xs font-medium outline-none"
                 style={{
                   background: '#1c1a25',
-                  border: '1px solid rgba(74,68,85,0.3)',
-                  color: loadingScreens ? 'rgba(230,224,240,0.35)' : 'rgba(230,224,240,0.85)',
+                  border: `1px solid ${screensError ? 'rgba(239,68,68,0.4)' : 'rgba(74,68,85,0.3)'}`,
+                  color: loadingScreens || screensError
+                    ? 'rgba(230,224,240,0.35)'
+                    : 'rgba(230,224,240,0.85)',
                 }}
               >
                 {loadingScreens
                   ? <option value="">Loading pages...</option>
-                  : screens.map((screen) => (
-                      <option key={screen.label} value={screen.label}>{screen.label}</option>
-                    ))
+                  : screensError
+                    ? <option value="">{screensError}</option>
+                    : screens.map((screen) => (
+                        <option key={screen.label} value={screen.label}>{screen.label}</option>
+                      ))
                 }
               </select>
             </div>
@@ -753,7 +867,7 @@ export default function SimulationPage() {
 
             <div id="before-panel" className="panel-screenshot">
               {loadingAnalysis ? (
-                <PreviewLoadingState title="Before" />
+                <PreviewLoadingState title="Before" stage={loadingStage} progress={loadingProgress} />
               ) : analysis ? (
                 <AnnotatedPreview
                   screenshotB64={analysis.beforeScreenshotUrl}
@@ -788,7 +902,7 @@ export default function SimulationPage() {
 
             <div className="panel-screenshot">
               {loadingAnalysis ? (
-                <PreviewLoadingState title="After" />
+                <PreviewLoadingState title="After" stage={loadingStage} progress={loadingProgress} />
               ) : analysis && analysis.afterScreenshotUrl ? (
                 <AnnotatedPreview
                   screenshotB64={analysis.afterScreenshotUrl}

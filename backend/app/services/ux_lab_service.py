@@ -20,23 +20,28 @@ logger = logging.getLogger(__name__)
 _anthropic = anthropic.AsyncAnthropic()
 _MODEL = "claude-sonnet-4-20250514"
 
-_PASS1_SYSTEM = """You are a senior UX researcher analyzing a website screenshot.
-Identify specific UX issues grounded in established design principles.
+_PASS1_SYSTEM = """You are a senior UX researcher and conversion specialist with 15+ years of experience auditing high-traffic SaaS and consumer products. You identify UX failures with surgical precision — every finding is traceable to a specific visible element, a specific established principle, and a specific user impact.
 
-Return a JSON array of findings. Maximum 6. Prioritize issues that most impact conversion.
-Every issue must be traceable to a specific element and a specific principle.
+Analyze the screenshot and return a JSON array of findings. Maximum 6. Prioritize by conversion impact.
 
-Each finding:
+Field requirements — be thorough, not terse:
+
+- "description": 3–4 sentences. Name the element and where it appears on screen. Describe the specific failure observable in the screenshot. Explain the user-facing consequence (e.g. increased cognitive load, reduced click confidence, higher bounce likelihood). Quantify impact where possible.
+- "principle": The single most applicable UX/design principle (e.g. Fitts' Law, Hick's Law, Visual Hierarchy, Cognitive Load, Gestalt Proximity, Affordance Theory, Progressive Disclosure, F-pattern, WCAG Contrast).
+- "principle_explanation": 2–3 sentences. Explain how the principle applies specifically to this element as observed in the screenshot — not a generic definition. Tie the principle directly to the failure you described.
+- "recommendation": 2–3 sentences. Provide a concrete, actionable fix — specific enough for a developer to implement. State the expected measurable outcome (e.g. "reducing decision time", "improving tap accuracy", "increasing CTA visibility").
+
+Schema:
 {
   "id": string,
   "type": "ISSUE" | "WARNING" | "POSITIVE",
   "severity": "critical" | "major" | "minor",
   "component": string,
-  "title": string,
-  "description": string,
+  "title": string (max 8 words),
+  "description": string (3–4 sentences),
   "principle": string,
-  "principle_explanation": string,
-  "recommendation": string,
+  "principle_explanation": string (2–3 sentences),
+  "recommendation": string (2–3 sentences),
   "requires_competitor_evidence": boolean,
   "annotation": { "x_percent": number, "y_percent": number }
 }
@@ -56,11 +61,11 @@ Return JSON:
 Return only the JSON object. No preamble. No markdown fences."""
 
 
-async def _claude_vision(system: str, user_text: str, b64_image: str) -> str:
+async def _claude_vision(system: str, user_text: str, b64_image: str, media_type: str = "image/png") -> str:
     """Send a vision message to Claude and return the text response."""
     response = await _anthropic.messages.create(
         model=_MODEL,
-        max_tokens=4096,
+        max_tokens=8192,
         system=system,
         messages=[
             {
@@ -70,7 +75,7 @@ async def _claude_vision(system: str, user_text: str, b64_image: str) -> str:
                         "type": "image",
                         "source": {
                             "type": "base64",
-                            "media_type": "image/png",
+                            "media_type": media_type,
                             "data": b64_image,
                         },
                     },
@@ -156,28 +161,26 @@ async def enrich_competitor_evidence(findings: list[dict], competitor_urls: list
     if not competitor_urls:
         return findings
 
-    from app.services.screenshot import take_screenshot_b64
+    from app.services.screenshot import take_competitor_screenshot_b64
 
     logger.info("UX Lab: enriching findings with competitor evidence")
     for finding in findings:
-        if not finding["requires_competitor_evidence"]:
-            continue
-
         for comp_url in competitor_urls[:3]:
             try:
-                comp_b64 = await take_screenshot_b64(comp_url)
+                comp_b64 = await take_competitor_screenshot_b64(comp_url)
                 note_text = await _claude_vision(
-                    system="You are a UX analyst.",
+                    system="You are a senior UX analyst comparing design patterns across products.",
                     user_text=(
-                        f"In one sentence, describe how this competitor site handles "
-                        f"'{finding['component']}' differently from a typical site "
-                        f"with the issue: {finding['title']}"
+                        f"Look at this competitor screenshot and describe in 2-3 sentences how they handle '{finding['component']}'. "
+                        f"The issue we identified is: {finding['title']}. "
+                        f"Explain specifically what this competitor does differently, why it works better, and what design decision makes it effective."
                     ),
                     b64_image=comp_b64,
+                    media_type="image/jpeg",
                 )
                 finding["competitor_evidence"].append({
                     "url": comp_url,
-                    "screenshot_url": f"data:image/png;base64,{comp_b64}",
+                    "screenshot_url": f"data:image/jpeg;base64,{comp_b64}",
                     "annotation": note_text.strip(),
                 })
             except Exception as exc:
@@ -250,16 +253,15 @@ async def run_analysis(
 
     before_b64 = await capture_before_screenshot(url)
     findings = await generate_findings(before_b64)
+    findings = await enrich_competitor_evidence(findings, competitor_urls)
 
     if analysis_only:
         return {
             "before_b64": before_b64,
             "after_b64": None,
-            "after_message": "Analysis-only mode generated findings without a modified preview screenshot.",
+            "after_message": None,
             "findings": findings,
         }
-
-    findings = await enrich_competitor_evidence(findings, competitor_urls)
     findings, css_patches = await generate_css_patches(findings)
     after_b64, after_message = await render_after_preview(url, css_patches)
 

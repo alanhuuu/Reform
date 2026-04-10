@@ -28,14 +28,6 @@ import type { Finding } from '@/types/uxlab';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function severityColor(severity: string): string {
-  switch (severity) {
-    case 'critical': return 'var(--severity-critical)';
-    case 'major':    return 'var(--severity-major)';
-    case 'minor':    return 'var(--severity-minor)';
-    default:         return 'var(--reform-text-muted)';
-  }
-}
 
 function typeLabel(type: string): string {
   switch (type) {
@@ -48,9 +40,9 @@ function typeLabel(type: string): string {
 
 function typeColor(type: string): string {
   switch (type) {
-    case 'ISSUE':    return 'var(--severity-critical)';
-    case 'WARNING':  return 'var(--severity-major)';
-    case 'POSITIVE': return 'var(--severity-positive)';
+    case 'ISSUE':    return '#ff5555';
+    case 'WARNING':  return '#fbbf24';
+    case 'POSITIVE': return '#4ade80';
     default:         return 'var(--reform-text-muted)';
   }
 }
@@ -58,45 +50,17 @@ function typeColor(type: string): string {
 const SHELF_COLLAPSED = 44;
 const SHELF_EXPANDED  = 300;
 const SNAP_THRESHOLD  = 120; // px — below this snaps to collapsed
-const PREVIEW_ASPECT_RATIO = 1440 / 900;
-const PREVIEW_MIN_VISIBLE_RATIO = 0.94;
-const PANEL_HEADER_HEIGHT = 32;
 
 function clampShelfHeight(height: number, maxHeight: number): number {
   return Math.max(SHELF_COLLAPSED, Math.min(maxHeight, height));
 }
 
 function getComfortExpandedShelfHeight(maxHeight: number): number {
-  const preferredHeight = Math.max(SHELF_EXPANDED, Math.round(maxHeight * 0.82));
-  return clampShelfHeight(preferredHeight, maxHeight);
-}
-
-function readRootPxVar(name: string, fallback: number): number {
-  if (typeof window === 'undefined') return fallback;
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name);
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return clampShelfHeight(Math.max(SHELF_EXPANDED, maxHeight), maxHeight);
 }
 
 function getTriageAnimationDelay(index: number): string {
   return `${35 + index * 28}ms`;
-}
-
-function getMaxShelfHeight(): number {
-  if (typeof window === 'undefined') return SHELF_EXPANDED;
-
-  const topbarHeight = readRootPxVar('--topbar-height', 56);
-  const toolbarHeight = readRootPxVar('--toolbar-height', 40);
-  const canvasHeight = window.innerHeight - topbarHeight - toolbarHeight;
-  const panelWidth =
-    document.getElementById('before-panel')?.getBoundingClientRect().width ||
-    window.innerWidth / 2;
-
-  const minPreviewHeight = (panelWidth / PREVIEW_ASPECT_RATIO) * PREVIEW_MIN_VISIBLE_RATIO;
-  return Math.max(
-    SHELF_COLLAPSED,
-    Math.floor(canvasHeight - PANEL_HEADER_HEIGHT - minPreviewHeight)
-  );
 }
 
 // ─── SortablePill ─────────────────────────────────────────────────────────────
@@ -144,7 +108,7 @@ function SortablePill({ finding, isActive, onSelect, onDismiss }: PillProps) {
     >
       <span
         className="finding-pill-dot"
-        style={{ background: severityColor(finding.severity) }}
+        style={{ background: typeColor(finding.type) }}
       />
       <span className="finding-pill-label">{finding.title}</span>
       {/* X dismiss button */}
@@ -208,7 +172,7 @@ function TriageRow({
       <div
         style={{
           width: 18, height: 18, borderRadius: '50%',
-          background: severityColor(finding.severity),
+          background: typeColor(finding.type),
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0, fontSize: 8, fontWeight: 700, color: '#fff',
         }}
@@ -304,6 +268,7 @@ export default function FindingsShelf({
   const [maxShelfHeight, setMaxShelfHeight] = useState(SHELF_EXPANDED);
   const [isResizing, setIsResizing]       = useState(false);
   const pillRowRef  = useRef<HTMLDivElement>(null);
+  const shelfRef    = useRef<HTMLDivElement>(null);
   const wasExpanded = useRef(false);
   const didResizeDrag = useRef(false);
   const dragStartY  = useRef(0);
@@ -314,17 +279,26 @@ export default function FindingsShelf({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   );
 
-  // Keep the shelf from consuming the screenshot preview's natural viewport ratio.
+  // Derive max shelf height from the actual parent container so the shelf
+  // can expand as far as the layout allows without guessing CSS variable values.
   useEffect(() => {
     const updateMaxShelfHeight = () => {
-      const nextMax = getMaxShelfHeight();
+      const parent = shelfRef.current?.parentElement;
+      const nextMax = parent
+        ? Math.max(SHELF_COLLAPSED, Math.floor(parent.clientHeight * 0.45))
+        : Math.max(SHELF_COLLAPSED, Math.floor(window.innerHeight * 0.5));
       setMaxShelfHeight(nextMax);
       setShelfHeight((height) => clampShelfHeight(height, nextMax));
     };
 
     updateMaxShelfHeight();
+    const ro = new ResizeObserver(updateMaxShelfHeight);
+    if (shelfRef.current?.parentElement) ro.observe(shelfRef.current.parentElement);
     window.addEventListener('resize', updateMaxShelfHeight);
-    return () => window.removeEventListener('resize', updateMaxShelfHeight);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateMaxShelfHeight);
+    };
   }, []);
 
   // Sync shelfHeight ↔ expanded prop
@@ -465,6 +439,7 @@ export default function FindingsShelf({
 
   return (
     <div
+        ref={shelfRef}
         className="shelf"
         data-expanded={expanded ? 'true' : 'false'}
         style={{
@@ -544,7 +519,7 @@ export default function FindingsShelf({
                       data-active={activeDragId === activeFindingId ? 'true' : 'false'}
                       style={{ transform: 'scale(1.06)', boxShadow: '0 8px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(123,92,224,0.3)', cursor: 'grabbing', opacity: 1 }}
                     >
-                      <span className="finding-pill-dot" style={{ background: severityColor(f.severity) }} />
+                      <span className="finding-pill-dot" style={{ background: typeColor(f.type) }} />
                       <span className="finding-pill-label">{f.title}</span>
                     </div>
                   );
@@ -596,6 +571,36 @@ export default function FindingsShelf({
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--reform-text-primary)', lineHeight: 1.6 }}>{activeFinding.recommendation}</div>
                 </div>
+
+                {activeFinding.competitorEvidence && activeFinding.competitorEvidence.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--reform-text-muted)', marginBottom: 8 }}>
+                      Competitor Comparisons
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {activeFinding.competitorEvidence.map((evidence, i) => (
+                        <div key={i} style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.03)' }}>
+                          {evidence.screenshotUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={evidence.screenshotUrl}
+                              alt={`Competitor screenshot ${i + 1}`}
+                              style={{ width: '100%', display: 'block', maxHeight: 120, objectFit: 'cover', objectPosition: 'top' }}
+                            />
+                          )}
+                          <div style={{ padding: '8px 10px' }}>
+                            <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(167,139,250,0.7)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {evidence.url}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--reform-text-secondary)', lineHeight: 1.55 }}>
+                              {evidence.annotation}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <div className="shelf-empty-detail">
