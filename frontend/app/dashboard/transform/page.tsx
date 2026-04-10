@@ -1277,7 +1277,7 @@ function TransformPage() {
           </div>
         )}
         {/* ── TOOLBAR — only show when pipeline is complete ── */}
-        {pipelineStep === 'complete' && <div className="rounded-lg max-w-5xl mx-auto overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+        {pipelineStep === 'complete' && <div className="rounded-xl max-w-5xl mx-auto overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.2)' }}>
           {changeStatus === 'pending' ? (
             <div className="flex items-center justify-between px-5 py-4">
               <div className="flex items-center gap-2.5">
@@ -1475,71 +1475,100 @@ function TransformPage() {
 
       {/* ── SUGGEST EDIT MODAL ── */}
       {showSuggestModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
-          <div className="rounded-lg w-full max-w-xl mx-4 overflow-hidden" style={{ background: '#141414', border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(12px)' }}>
+          <div className="rounded-2xl w-full max-w-3xl mx-4 overflow-hidden animate-in fade-in zoom-in duration-200" style={{ background: 'linear-gradient(180deg, rgba(30,27,46,1) 0%, rgba(19,17,28,1) 100%)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 24px 80px rgba(0,0,0,0.6), 0 0 60px rgba(124,58,237,0.1)' }}>
+            {/* Accent top bar */}
+            <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #7c3aed, #a855f7, rgba(168,85,247,0.2), transparent)' }} />
+
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-              <h2 className="text-white font-semibold text-[14px]">Refine Further</h2>
-              <button onClick={() => setShowSuggestModal(false)} className="w-7 h-7 rounded-md flex items-center justify-center transition-colors duration-150 hover:bg-white/5" style={{ color: 'rgba(255,255,255,0.4)' }}>
+            <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.15)' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                </div>
+                <div>
+                  <h2 className="text-white font-semibold text-[15px]">Suggest an Edit</h2>
+                  <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>Choose how you&apos;d like to describe your change</p>
+                </div>
+              </div>
+              <button onClick={() => setShowSuggestModal(false)} className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-white/[0.05]" style={{ color: 'rgba(255,255,255,0.3)' }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </button>
             </div>
 
             {/* Tabs */}
-            <div className="flex px-5 pt-3 gap-1">
+            <div className="flex px-6 pt-4 gap-1">
               {([
-                { key: 'text' as const, label: 'Text' },
-                { key: 'voice' as const, label: 'Voice' },
+                { key: 'text' as const, label: 'Text Prompt', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg> },
+                { key: 'voice' as const, label: 'Voice Prompt', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg> },
               ]).map(tab => (
                 <button
                   key={tab.key}
                   onClick={() => setSuggestTab(tab.key)}
-                  className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors duration-150"
-                  style={suggestTab === tab.key
-                    ? { background: 'rgba(255,255,255,0.06)', color: 'white' }
-                    : { color: 'rgba(255,255,255,0.35)' }
-                  }
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-[11px] font-medium transition-all duration-200"
+                  style={suggestTab === tab.key ? {
+                    background: 'rgba(168,85,247,0.06)',
+                    color: 'white',
+                    borderTop: '2px solid #a855f7',
+                    borderLeft: '1px solid rgba(255,255,255,0.06)',
+                    borderRight: '1px solid rgba(255,255,255,0.06)',
+                    boxShadow: '0 -4px 12px rgba(168,85,247,0.06)',
+                  } : {
+                    color: 'rgba(255,255,255,0.35)',
+                    border: '1px solid transparent',
+                  }}
                 >
+                  {tab.icon}
                   {tab.label}
                 </button>
               ))}
             </div>
 
-            {/* Content */}
-            <div className="p-5">
-              {suggestTab === 'text' && (
-                <div>
-                  <textarea
-                    autoFocus
-                    value={suggestion}
-                    onChange={e => setSuggestion(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) handleSuggestSubmit() }}
-                    placeholder="Describe what you'd like to change..."
-                    className="w-full bg-transparent text-[13px] text-white outline-none resize-none placeholder:text-white/20 rounded-md p-3"
-                    style={{ minHeight: '120px', lineHeight: '1.6', border: '1px solid rgba(255,255,255,0.08)' }}
-                  />
-                  <div className="flex items-center justify-between mt-3">
-                    <span className="text-[10px] flex items-center gap-1" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                      <kbd className="px-1 py-0.5 rounded text-[9px] font-mono" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>&#8984;Enter</kbd>
-                    </span>
-                    <button
-                      onClick={() => handleSuggestSubmit()}
-                      disabled={!suggestion.trim()}
-                      className="px-4 py-2 rounded-md text-[12px] font-medium transition-colors duration-150"
-                      style={{
-                        background: suggestion.trim() ? '#8B5CF6' : 'rgba(255,255,255,0.04)',
-                        color: suggestion.trim() ? 'white' : 'rgba(255,255,255,0.2)',
-                      }}
-                    >
-                      Send
-                    </button>
-                  </div>
-                </div>
-              )}
+            {/* Tab Content */}
+            <div className="px-6 pb-6">
+              <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
 
-              {suggestTab === 'voice' && <VoiceOrb onFinalPrompt={(prompt) => {
-                handleSuggestSubmit(prompt)
-              }} />}
+                {/* TEXT PROMPT TAB */}
+                {suggestTab === 'text' && (
+                  <div className="p-5">
+                    <textarea
+                      autoFocus
+                      value={suggestion}
+                      onChange={e => setSuggestion(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) handleSuggestSubmit() }}
+                      placeholder="Describe what you'd like to change... (e.g., 'Make the sidebar collapsible', 'Change the accent color to blue')"
+                      className="w-full bg-transparent text-[13px] text-white outline-none resize-none placeholder:text-white/20"
+                      style={{ minHeight: '140px', lineHeight: '1.7' }}
+                    />
+                    <div className="flex items-center justify-between mt-4 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                      <span className="text-[10px] flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.15)' }}>
+                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>&#8984;</kbd>
+                        <span>+</span>
+                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>Enter</kbd>
+                        <span className="ml-1">to submit</span>
+                      </span>
+                      <button
+                        onClick={() => handleSuggestSubmit()}
+                        disabled={!suggestion.trim()}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[11px] font-semibold transition-all active:scale-[0.97]"
+                        style={{
+                          background: suggestion.trim() ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'rgba(255,255,255,0.04)',
+                          color: suggestion.trim() ? 'white' : 'rgba(255,255,255,0.2)',
+                          boxShadow: suggestion.trim() ? '0 0 25px rgba(124,58,237,0.25)' : 'none',
+                        }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                        Send to AI
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* VOICE PROMPT TAB */}
+                {suggestTab === 'voice' && <VoiceOrb onFinalPrompt={(prompt) => {
+                  handleSuggestSubmit(prompt)
+                }} />}
+              </div>
             </div>
           </div>
         </div>
@@ -1636,27 +1665,87 @@ function TransformPage() {
 
       {/* ── REFINEMENT STATUS CARD — floating bottom-right ── */}
       {refineStatus && (
-        <div className="fixed bottom-5 right-5 z-[250]" style={{ maxWidth: '300px', width: '100%' }}>
-          <div className="rounded-md overflow-hidden" style={{ background: '#141414', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <div className="flex items-start gap-3 px-3.5 py-3">
+        <div
+          className="fixed bottom-6 right-6 z-[250] animate-in slide-in-from-bottom-4 fade-in duration-300"
+          style={{ maxWidth: '320px', width: '100%' }}
+        >
+          <div
+            className="rounded-xl overflow-hidden"
+            style={{
+              background: 'linear-gradient(180deg, rgba(30,27,46,0.98) 0%, rgba(19,17,28,0.98) 100%)',
+              border: `1px solid ${
+                refineStatus.status === 'success' ? 'rgba(34,197,94,0.2)'
+                : refineStatus.status === 'error' ? 'rgba(239,68,68,0.2)'
+                : 'rgba(168,85,247,0.2)'
+              }`,
+              boxShadow: '0 8px 40px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.1)',
+              backdropFilter: 'blur(20px)',
+            }}
+          >
+            {/* Accent top line */}
+            <div className="h-[2px]" style={{
+              background: refineStatus.status === 'success'
+                ? 'linear-gradient(90deg, #22c55e, rgba(34,197,94,0.2), transparent)'
+                : refineStatus.status === 'error'
+                ? 'linear-gradient(90deg, #ef4444, rgba(239,68,68,0.2), transparent)'
+                : 'linear-gradient(90deg, #a855f7, rgba(168,85,247,0.2), transparent)',
+            }} />
+
+            <div className="flex items-start gap-3 px-4 py-3.5">
+              {/* Status icon */}
               <div className="flex-shrink-0 mt-0.5">
-                {refineStatus.status === 'pending' && <div className="w-2 h-2 rounded-full mt-1" style={{ background: '#8B5CF6' }} />}
-                {refineStatus.status === 'processing' && <div className="w-4 h-4 rounded-full animate-spin" style={{ border: '1.5px solid rgba(139,92,246,0.2)', borderTopColor: '#8B5CF6' }} />}
-                {refineStatus.status === 'success' && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
-                {refineStatus.status === 'error' && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>}
+                {refineStatus.status === 'pending' && (
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(168,85,247,0.1)' }}>
+                    <div className="w-2 h-2 rounded-full" style={{ background: '#a855f7', boxShadow: '0 0 6px rgba(168,85,247,0.5)' }} />
+                  </div>
+                )}
+                {refineStatus.status === 'processing' && (
+                  <div className="w-5 h-5 rounded-full animate-spin" style={{ border: '2px solid rgba(168,85,247,0.15)', borderTopColor: '#a855f7' }} />
+                )}
+                {refineStatus.status === 'success' && (
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(34,197,94,0.1)' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                  </div>
+                )}
+                {refineStatus.status === 'error' && (
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(239,68,68,0.1)' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  </div>
+                )}
               </div>
+
+              {/* Content */}
               <div className="flex-1 min-w-0">
-                <p className="text-[12px] font-medium text-white">
-                  {refineStatus.status === 'pending' && 'Pending'}
-                  {refineStatus.status === 'processing' && 'Applying changes...'}
-                  {refineStatus.status === 'success' && 'Done'}
-                  {refineStatus.status === 'error' && 'Failed'}
+                <p className="text-[12px] font-semibold text-white leading-tight">
+                  {refineStatus.status === 'pending' && 'Change pending'}
+                  {refineStatus.status === 'processing' && 'Applying changes'}
+                  {refineStatus.status === 'success' && 'Changes applied'}
+                  {refineStatus.status === 'error' && 'Change failed'}
                 </p>
-                <p className="text-[11px] mt-0.5 truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                  {refineStatus.status === 'error' ? (refineStatus.error || 'Something went wrong') : refineStatus.summary}
+                <p className="text-[11px] mt-0.5 truncate" style={{
+                  color: refineStatus.status === 'error'
+                    ? 'rgba(252,165,165,0.7)'
+                    : refineStatus.status === 'success'
+                    ? 'rgba(134,239,172,0.7)'
+                    : 'rgba(255,255,255,0.4)',
+                }}>
+                  {refineStatus.status === 'error'
+                    ? (refineStatus.error || 'Something went wrong')
+                    : refineStatus.status === 'success'
+                    ? 'Your updated UI is ready'
+                    : refineStatus.status === 'processing'
+                    ? 'Refining the selected page...'
+                    : refineStatus.summary
+                  }
                 </p>
               </div>
-              <button onClick={() => setRefineStatus(null)} className="flex-shrink-0 transition-colors duration-150 hover:bg-white/5 rounded p-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
+
+              {/* Dismiss */}
+              <button
+                onClick={() => setRefineStatus(null)}
+                className="flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors hover:bg-white/[0.05]"
+                style={{ color: 'rgba(255,255,255,0.25)' }}
+              >
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </button>
             </div>
