@@ -21,8 +21,10 @@ from app.prompts.structural_transform_prompt import build_structural_transform_p
 
 logger = logging.getLogger(__name__)
 
-# Maximum retries when a transform is detected as cosmetic-only
-MAX_TRANSFORM_RETRIES = 1
+# Maximum retries when a transform is detected as cosmetic-only.
+# Total attempts = 1 + MAX_TRANSFORM_RETRIES. Each retry escalates the
+# pressure on the model (see structural_transform_prompt.is_retry).
+MAX_TRANSFORM_RETRIES = 2
 
 
 def _extract_json(text: str) -> dict:
@@ -119,6 +121,11 @@ async def _transform_single_page(
 
     last_error = ""
     retries_used = 0
+    # Track the best attempt across all retries so we never throw away a
+    # genuine improvement just because the model couldn't beat the validator
+    # on the last try.
+    best_attempt: dict | None = None
+    best_score = -1.0
 
     for attempt in range(1 + MAX_TRANSFORM_RETRIES):
         is_retry = attempt > 0
@@ -131,6 +138,7 @@ async def _transform_single_page(
             design_intelligence=design_intelligence,
             user_intent=user_intent,
             is_retry=is_retry,
+            attempt_number=attempt + 1,
         )
 
         logger.info(
@@ -166,51 +174,74 @@ async def _transform_single_page(
             validation["confidence"], validation["reasoning"],
         )
 
-        if not validation["is_structural"] and attempt < MAX_TRANSFORM_RETRIES:
+        # Track the best attempt by confidence so we can fall back to it
+        # if no attempt fully passes validation. Structural attempts always
+        # beat non-structural ones, then break ties by confidence.
+        attempt_score = (1.0 if validation["is_structural"] else 0.0) + validation["confidence"]
+        if attempt_score > best_score:
+            best_score = attempt_score
+            best_attempt = {
+                "updated_code": updated_code,
+                "diff_summary": result.get("diff_summary", "UI layout and structure improved."),
+                "change_annotations": result.get("change_annotations", []),
+                "change_summary": result.get("change_summary", []),
+                "validation": validation,
+            }
+
+        # Accept immediately if validation passes
+        if validation["is_structural"]:
+            return {
+                "updated_code": updated_code,
+                "diff_summary": result.get("diff_summary", "UI layout and structure improved."),
+                "change_annotations": result.get("change_annotations", []),
+                "change_summary": result.get("change_summary", []),
+                "retries_used": retries_used,
+                "error": "",
+            }
+
+        # Validation failed — retry if we have budget left
+        if attempt < MAX_TRANSFORM_RETRIES:
             logger.warning(
-                "Transform of %s was cosmetic-only (confidence=%.2f), retrying",
+                "Transform of %s was insufficient (confidence=%.2f), retrying with escalation",
                 page_path, validation["confidence"],
             )
             retries_used = attempt + 1
             continue
 
-        # Final attempt still cosmetic-only → the UI is already good. Mark
-        # as no_changes_needed so the frontend says "UI is perfect" instead
-        # of rendering identical before/after screenshots.
-        if not validation["is_structural"]:
-            logger.info(
-                "Transform of %s produced no structural changes after all "
-                "retries — marking as no_changes_needed",
-                page_path,
-            )
-            return {
-                "updated_code": "",
-                "diff_summary": "",
-                "change_annotations": [],
-                "change_summary": [],
-                "retries_used": retries_used,
-                "error": "",
-                "no_changes_needed": True,
-            }
-
-        # Accept the transformation (structural change detected)
+    # All retries exhausted. Two cases:
+    #   (a) We have a best_attempt that didn't fully pass — RETURN IT ANYWAY
+    #       with an error flag, so the user sees the partial result instead
+    #       of having the page silently disappear into "high quality".
+    #   (b) Every attempt returned empty code — surface a real error.
+    if best_attempt is not None:
+        v = best_attempt["validation"]
+        logger.warning(
+            "Transform of %s never fully passed validation after %d attempts — "
+            "returning best attempt anyway (confidence=%.2f). User will see a "
+            "weak-transformation banner.",
+            page_path, 1 + MAX_TRANSFORM_RETRIES, v["confidence"],
+        )
         return {
-            "updated_code": updated_code,
-            "diff_summary": result.get("diff_summary", "UI layout and structure improved."),
-            "change_annotations": result.get("change_annotations", []),
-            "change_summary": result.get("change_summary", []),
-            "retries_used": retries_used,
-            "error": "",
+            "updated_code": best_attempt["updated_code"],
+            "diff_summary": best_attempt["diff_summary"],
+            "change_annotations": best_attempt["change_annotations"],
+            "change_summary": best_attempt["change_summary"],
+            "retries_used": MAX_TRANSFORM_RETRIES,
+            "error": (
+                f"Transformation engine could not produce a dramatically different "
+                f"result after {1 + MAX_TRANSFORM_RETRIES} attempts. Showing the best "
+                f"attempt — but the change may be subtle. ({v['reasoning']})"
+            ),
+            "weak_transformation": True,
         }
 
-    # All attempts exhausted
     return {
         "updated_code": "",
         "diff_summary": "",
         "change_annotations": [],
         "change_summary": [],
         "retries_used": retries_used,
-        "error": last_error or "All transform attempts produced cosmetic-only changes.",
+        "error": last_error or "All transform attempts returned empty code.",
     }
 
 
@@ -220,7 +251,7 @@ async def run_pipeline_v2(
     access_token: str | None = None,
     design_intelligence: dict | None = None,
     user_intent: str = "",
-    quality_threshold: int = 85,
+    quality_threshold: int = 95,
     max_pages: int = 5,
 ) -> dict:
     """
@@ -276,13 +307,13 @@ async def run_pipeline_v2(
         )
 
     # ── Step 4: Plan transformations ────────────────────────────────
-    to_transform, skipped = plan_transformations(
+    to_transform, high_quality, overflow = plan_transformations(
         evaluations, threshold=quality_threshold, max_pages=max_pages,
     )
 
     logger.info(
-        "Pipeline v2: %d pages to transform, %d skipped",
-        len(to_transform), len(skipped),
+        "Pipeline v2: %d pages to transform, %d high-quality, %d overflow",
+        len(to_transform), len(high_quality), len(overflow),
     )
 
     # ── Step 5: Transform selected pages (in parallel) ──────────────
@@ -350,14 +381,14 @@ async def run_pipeline_v2(
         try:
             logger.info(
                 "Pipeline v2: Rendering screenshots for %d pages",
-                min(len(screenshot_transforms), 2),
+                len(screenshot_transforms),
             )
             screenshot_results = await render_multi_page_previews(
                 repo_clone_url=repo_clone_url,
                 branch=branch,
                 transforms=screenshot_transforms,
                 access_token=access_token or "",
-                max_screenshots=2,
+                max_screenshots=len(screenshot_transforms),
             )
         except Exception as e:
             logger.error("Screenshot rendering failed: %s", e, exc_info=True)
@@ -380,12 +411,15 @@ async def run_pipeline_v2(
         page = page_lookup.get(ev.page_path)
 
         has_code = bool(result.get("updated_code"))
-        no_changes = result.get("no_changes_needed", False)
+        is_weak = result.get("weak_transformation", False)
 
-        if has_code:
+        if has_code and is_weak:
+            # Weak transformation: still has code, but the engine warns the
+            # change isn't dramatic. Show it to the user with a banner — never
+            # silently demote to "high_quality".
+            status = "weak"
+        elif has_code:
             status = "transformed"
-        elif no_changes:
-            status = "high_quality"
         else:
             status = "error"
 
@@ -395,12 +429,12 @@ async def run_pipeline_v2(
             "route": page.route if page else "/",
             "status": status,
             "score": ev.score,
+            "breakdown": ev.breakdown.model_dump() if ev.breakdown else {},
+            "reasoning": ev.reasoning,
+            "issues": [i.model_dump() for i in ev.issues],
             "original_code": content_lookup.get(ev.page_path, ""),
             "updated_code": result.get("updated_code", ""),
-            "diff_summary": (
-                "The UI is already well-designed — we don't recommend any changes."
-                if no_changes else result.get("diff_summary", "")
-            ),
+            "diff_summary": result.get("diff_summary", ""),
             "change_annotations": result.get("change_annotations", []),
             "change_summary": result.get("change_summary", []),
             "before_screenshot": screenshots.get("before_screenshot", ""),
@@ -409,8 +443,8 @@ async def run_pipeline_v2(
             "retries_used": result.get("retries_used", 0),
         })
 
-    # Add skipped (high-quality) pages
-    for ev in skipped:
+    # Add high-quality (genuinely good) pages
+    for ev in high_quality:
         page = page_lookup.get(ev.page_path)
         page_results.append({
             "page_path": ev.page_path,
@@ -418,15 +452,47 @@ async def run_pipeline_v2(
             "route": page.route if page else "/",
             "status": "high_quality",
             "score": ev.score,
+            "breakdown": ev.breakdown.model_dump() if ev.breakdown else {},
+            "reasoning": ev.reasoning,
+            "issues": [i.model_dump() for i in ev.issues],
             "diff_summary": f"Page scored {ev.score}/100 — no transformation needed.",
         })
 
-    # Sort results: transformed first (worst score first), then skipped
-    page_results.sort(key=lambda p: (0 if p["status"] == "transformed" else 1, p["score"]))
+    # Add overflow pages — below threshold but skipped due to max_pages cap
+    for ev in overflow:
+        page = page_lookup.get(ev.page_path)
+        page_results.append({
+            "page_path": ev.page_path,
+            "page_name": ev.page_name,
+            "route": page.route if page else "/",
+            "status": "skipped_overflow",
+            "score": ev.score,
+            "breakdown": ev.breakdown.model_dump() if ev.breakdown else {},
+            "reasoning": ev.reasoning,
+            "issues": [i.model_dump() for i in ev.issues],
+            "diff_summary": (
+                f"Page scored {ev.score}/100 — needs work but skipped because "
+                f"the per-run page cap was reached. Re-run to process it."
+            ),
+        })
+
+    # Sort results: transformed first, then weak, then errors, then high-quality, then overflow
+    def _sort_key(p):
+        bucket = {
+            "transformed": 0,
+            "weak": 0,
+            "error": 0,
+            "high_quality": 1,
+            "skipped_overflow": 2,
+        }.get(p["status"], 3)
+        return (bucket, p["score"])
+    page_results.sort(key=_sort_key)
 
     # Build global summary
     total_transformed = sum(1 for p in page_results if p["status"] == "transformed")
+    total_weak = sum(1 for p in page_results if p["status"] == "weak")
     total_skipped = sum(1 for p in page_results if p["status"] == "high_quality")
+    total_overflow = sum(1 for p in page_results if p["status"] == "skipped_overflow")
     total_errors = sum(1 for p in page_results if p["status"] == "error")
 
     global_summary = [
@@ -435,6 +501,15 @@ async def run_pipeline_v2(
         f"skipped {total_skipped} high-quality page(s).",
     ]
 
+    if total_weak:
+        global_summary.append(
+            f"{total_weak} page(s) received only a weak transformation — "
+            f"the engine could not produce a dramatic restructure. Re-running may help."
+        )
+    if total_overflow:
+        global_summary.append(
+            f"{total_overflow} page(s) need work but were deferred — re-run to process them."
+        )
     if total_errors:
         global_summary.append(f"{total_errors} page(s) encountered errors during transformation.")
 

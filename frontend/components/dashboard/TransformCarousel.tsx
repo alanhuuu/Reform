@@ -9,15 +9,24 @@ import StructuralChangesPanel from './StructuralChangesPanel'
 export default function TransformCarousel({
   pages,
   result,
+  onSelectedPathChange,
 }: {
   pages: TransformedPageData[]
   result: MultiPageTransformResult
+  onSelectedPathChange?: (path: string) => void
 }) {
-  // Include transformed AND errored pages so users can see failures.
-  // High-quality (skipped) pages aren't shown here — they live in their own panel.
-  const visible = pages.filter(p => p.status === 'transformed' || p.status === 'error')
+  // Include transformed, weak, AND errored pages so users can see everything.
+  // High-quality and overflow pages aren't shown here — they live in their own panel.
+  const visible = pages.filter(p => p.status === 'transformed' || p.status === 'weak' || p.status === 'error')
   const transformed = visible
   const [currentIndex, setCurrentIndex] = useState(0)
+
+  // Notify parent of the initially-selected page on mount and whenever the
+  // index changes — so the Refine Further modal edits the right page.
+  useEffect(() => {
+    const current = transformed[currentIndex]
+    if (current && onSelectedPathChange) onSelectedPathChange(current.page_path)
+  }, [currentIndex, transformed, onSelectedPathChange])
 
   const goTo = useCallback((idx: number) => {
     setCurrentIndex(Math.max(0, Math.min(idx, transformed.length - 1)))
@@ -62,9 +71,10 @@ export default function TransformCarousel({
           {transformed.map((page, i) => {
             const isActive = i === currentIndex
             const isError = page.status === 'error'
-            const accent = isError ? '239,68,68' : '168,85,247'
-            const textActive = isError ? '#fca5a5' : '#d8b4fe'
-            const badgeActive = isError ? '#f87171' : '#c084fc'
+            const isWeak = page.status === 'weak'
+            const accent = isError ? '239,68,68' : isWeak ? '245,158,11' : '168,85,247'
+            const textActive = isError ? '#fca5a5' : isWeak ? '#fde68a' : '#d8b4fe'
+            const badgeActive = isError ? '#f87171' : isWeak ? '#fbbf24' : '#c084fc'
             return (
               <button
                 key={page.page_path}
@@ -102,13 +112,13 @@ export default function TransformCarousel({
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span
                       className="w-1.5 h-1.5 rounded-full"
-                      style={{ background: isError ? '#ef4444' : '#a855f7' }}
+                      style={{ background: isError ? '#ef4444' : isWeak ? '#f59e0b' : '#a855f7' }}
                     />
                     <span
                       className="text-[11px] font-medium"
                       style={{ color: isActive ? `rgba(${accent},0.75)` : 'rgba(255,255,255,0.4)' }}
                     >
-                      {isError ? 'Failed' : 'Improved'}
+                      {isError ? 'Failed' : isWeak ? 'Weak' : 'Improved'}
                     </span>
                     {page.score > 0 && (
                       <>
@@ -197,12 +207,39 @@ export default function TransformCarousel({
                 <span className="text-[13px] font-bold" style={{ color: '#d8b4fe' }}>{current.score}</span>
               </div>
             )}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.18)' }}>
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a855f7', boxShadow: '0 0 6px rgba(168,85,247,0.6)' }} />
-              <span className="text-[11px] font-medium" style={{ color: 'rgba(216,180,254,0.95)' }}>Improved</span>
-            </div>
+            {current.status === 'weak' ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)' }}>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#f59e0b', boxShadow: '0 0 6px rgba(245,158,11,0.6)' }} />
+                <span className="text-[11px] font-medium" style={{ color: 'rgba(253,224,71,0.95)' }}>Weak</span>
+              </div>
+            ) : current.status === 'error' ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)' }}>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#ef4444', boxShadow: '0 0 6px rgba(239,68,68,0.6)' }} />
+                <span className="text-[11px] font-medium" style={{ color: 'rgba(252,165,165,0.95)' }}>Failed</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.18)' }}>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a855f7', boxShadow: '0 0 6px rgba(168,85,247,0.6)' }} />
+                <span className="text-[11px] font-medium" style={{ color: 'rgba(216,180,254,0.95)' }}>Improved</span>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Weak transformation banner */}
+        {current.status === 'weak' && (
+          <div className="mx-8 mt-2 mb-4 rounded-xl px-5 py-3.5 flex items-start gap-3" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}>
+            <svg className="flex-shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <div>
+              <p className="text-[12px] font-semibold" style={{ color: '#fbbf24' }}>Weak transformation</p>
+              <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                The transformation engine could not produce a dramatically different result for this page. The change may be subtle. Try using &quot;Refine Further&quot; to push it further.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* HERO: Before/After — full-width, oversized */}
         {isPagePreviewAvailable(current) && (

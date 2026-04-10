@@ -963,7 +963,7 @@ function TransformPage() {
 
   async function handleAccept() {
     // Collect all transformed pages with updated code
-    const pages = multiPageResult?.pages.filter(p => p.status === 'transformed' && p.updated_code) || []
+    const pages = multiPageResult?.pages.filter(p => (p.status === 'transformed' || p.status === 'weak') && p.updated_code) || []
     const hasGitHub = session?.accessToken && repoName && pages.length > 0
 
     if (hasGitHub) {
@@ -1027,7 +1027,10 @@ function TransformPage() {
     setSuggestLoading(true)
 
     try {
-      const currentCode = sessionStorage.getItem('refineui_analysis') || ''
+      // Pull the current page's transformed code from the multi-page result
+      // (NOT the stale single-file demo sessionStorage). Falls back to original.
+      const currentPage = multiPageResult?.pages.find(p => p.page_path === selectedTarget)
+      const currentCode = currentPage?.updated_code || currentPage?.original_code || ''
       const res = await fetch(apiUrl('/suggest-edit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1051,6 +1054,18 @@ function TransformPage() {
       }
       setCommits(prev => [newCommit, ...prev])
       setChangeStatus('pending')
+
+      // Persist the new code into the multi-page result so subsequent edits
+      // chain off the latest version (and the code editor reloads with it).
+      if (data.revised_code && multiPageResult && selectedTarget) {
+        const updatedPages = multiPageResult.pages.map(p =>
+          p.page_path === selectedTarget
+            ? { ...p, updated_code: data.revised_code }
+            : p
+        )
+        setMultiPageResult({ ...multiPageResult, pages: updatedPages })
+      }
+
       setShowSuggestModal(false)
       setSuggestion('')
       setScOpen(true)
@@ -1111,8 +1126,10 @@ function TransformPage() {
     }
   }
 
-  function handleCodeSubmit() {
-    if (!codeEdit.trim()) return
+  async function handleCodeSubmit() {
+    if (!codeEdit.trim() || !multiPageResult || !selectedTarget) return
+    setSuggestLoading(true)
+
     const newCommit: CommitEntry = {
       hash: Math.random().toString(16).slice(2, 8),
       msg: 'edit: manual code change',
@@ -1122,17 +1139,65 @@ function TransformPage() {
       suggestion: 'Manual code edit via IDE',
     }
     setCommits(prev => [newCommit, ...prev])
+    setChangeStatus('pending')
+
+    // Persist the manually-edited code into the multi-page result.
+    const updatedPages = multiPageResult.pages.map(p =>
+      p.page_path === selectedTarget ? { ...p, updated_code: codeEdit } : p
+    )
+    setMultiPageResult({ ...multiPageResult, pages: updatedPages })
+
     setShowSuggestModal(false)
-    setCodeEdit('')
     setScOpen(true)
+
+    // Re-render screenshots with the manually edited code.
+    if (repoName && selectedTarget) {
+      setReRendering(true)
+      setReRenderStatus('Cloning repository...')
+      try {
+        const timer1 = setTimeout(() => setReRenderStatus('Installing dependencies...'), 8000)
+        const timer2 = setTimeout(() => setReRenderStatus('Starting dev server...'), 20000)
+        const timer3 = setTimeout(() => setReRenderStatus('Capturing screenshots...'), 40000)
+
+        const renderRes = await fetch(apiUrl('/re-render'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            repo_clone_url: `https://github.com/${repoName}.git`,
+            branch: repoBranch,
+            target_file: selectedTarget,
+            updated_code: codeEdit,
+            access_token: session?.accessToken || '',
+          }),
+        })
+
+        clearTimeout(timer1); clearTimeout(timer2); clearTimeout(timer3)
+
+        if (renderRes.ok) {
+          const renderData = await renderRes.json()
+          if (renderData.after_screenshot) {
+            const refreshed = updatedPages.map(p =>
+              p.page_path === selectedTarget
+                ? { ...p, after_screenshot: renderData.after_screenshot, before_screenshot: renderData.before_screenshot || p.before_screenshot }
+                : p
+            )
+            setMultiPageResult({ ...multiPageResult, pages: refreshed })
+          }
+        }
+      } catch { /* re-render is best-effort */ }
+      setReRendering(false)
+      setReRenderStatus('')
+    }
+
+    setSuggestLoading(false)
   }
 
   function openSuggestModal() {
-    // Pre-populate the code editor with existing generated code if available
-    const storedAnalysis = sessionStorage.getItem('refineui_analysis')
-    if (storedAnalysis && !codeEdit) {
-      setCodeEdit(`export default function Dashboard() {\n  return (\n    <div className="flex gap-6 p-8">\n      <Sidebar />\n      <MainContent />\n    </div>\n  )\n}`)
-    }
+    // Load the actual current code of the selected page into Monaco.
+    // Prefer the latest transformed code; fall back to original.
+    const currentPage = multiPageResult?.pages.find(p => p.page_path === selectedTarget)
+    const liveCode = currentPage?.updated_code || currentPage?.original_code || ''
+    setCodeEdit(liveCode)
     setSuggestTab('text')
     setShowSuggestModal(true)
   }
@@ -1236,8 +1301,12 @@ function TransformPage() {
         {/* ── MULTI-PAGE TRANSFORMATION SHOWCASE ── */}
         {pipelineStep === 'complete' && multiPageResult && (
           <div>
-            <TransformCarousel pages={multiPageResult.pages} result={multiPageResult} />
             <RepoWideImprovementsPanel result={multiPageResult} />
+            <TransformCarousel
+              pages={multiPageResult.pages}
+              result={multiPageResult}
+              onSelectedPathChange={setSelectedTarget}
+            />
           </div>
         )}
         {/* ── TOOLBAR — only show when pipeline is complete ── */}
@@ -1552,7 +1621,7 @@ function TransformPage() {
                     <div className="flex items-center justify-between px-4 py-2.5" style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                       <div className="flex items-center gap-2.5">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
-                        <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>Dashboard.tsx</span>
+                        <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{selectedTarget || 'page.tsx'}</span>
                       </div>
                       <span className="text-[9px] font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ background: 'rgba(34,197,94,0.08)', color: '#86efac', border: '1px solid rgba(34,197,94,0.12)' }}>
                         <div className="w-1 h-1 rounded-full" style={{ background: '#22c55e' }} />

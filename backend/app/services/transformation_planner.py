@@ -14,14 +14,15 @@ def plan_transformations(
     evaluations: list[PageEvaluation],
     threshold: int = 95,
     max_pages: int = 5,
-) -> tuple[list[PageEvaluation], list[PageEvaluation]]:
+) -> tuple[list[PageEvaluation], list[PageEvaluation], list[PageEvaluation]]:
     """
     Decide which pages need transformation.
 
     Returns:
-        (pages_to_transform, pages_skipped)
-        pages_to_transform is sorted worst-first and capped at max_pages.
-        pages_skipped are those scoring >= threshold.
+        (pages_to_transform, pages_high_quality, pages_overflow)
+        - pages_to_transform: below threshold AND within max_pages cap, sorted worst-first
+        - pages_high_quality: scored >= threshold (genuinely good)
+        - pages_overflow: below threshold but beyond max_pages cap (we gave up on them)
     """
     needs_work: list[PageEvaluation] = []
     high_quality: list[PageEvaluation] = []
@@ -44,7 +45,4 @@ def plan_transformations(
         len(needs_work), len(to_transform), len(high_quality), len(overflow),
     )
 
-    # Overflow pages are effectively skipped too
-    skipped = high_quality + overflow
-
-    return to_transform, skipped
+    return to_transform, high_quality, overflow

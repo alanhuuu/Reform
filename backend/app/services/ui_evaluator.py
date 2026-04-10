@@ -99,7 +99,7 @@ def _parse_evaluation(raw: dict, page_path: str, page_name: str) -> PageEvaluati
         ))
 
     score = raw.get("score", 50)
-    verdict = raw.get("verdict", "needs_improvement" if score < 85 else "high_quality")
+    verdict = raw.get("verdict", "needs_improvement" if score < 95 else "high_quality")
 
     return PageEvaluation(
         page_path=page_path,
