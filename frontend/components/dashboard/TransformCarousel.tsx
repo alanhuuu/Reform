@@ -10,10 +10,12 @@ export default function TransformCarousel({
   pages,
   result,
   onSelectedPathChange,
+  afterPulse = false,
 }: {
   pages: TransformedPageData[]
   result: MultiPageTransformResult
   onSelectedPathChange?: (path: string) => void
+  afterPulse?: boolean
 }) {
   // Include transformed, weak, AND errored pages so users can see everything.
   // High-quality and overflow pages aren't shown here — they live in their own panel.
@@ -249,6 +251,7 @@ export default function TransformCarousel({
               afterScreenshot={current.after_screenshot}
               pageName={current.page_name}
               previewAvailable={true}
+              afterPulse={afterPulse}
             />
           </div>
         )}

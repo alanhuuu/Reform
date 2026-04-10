@@ -9,12 +9,14 @@ export default function BeforeAfterShowcase({
   pageName,
   previewAvailable = true,
   previewUnavailableReason = '',
+  afterPulse = false,
 }: {
   beforeScreenshot?: string
   afterScreenshot?: string
   pageName: string
   previewAvailable?: boolean
   previewUnavailableReason?: string
+  afterPulse?: boolean
 }) {
   const [view, setView] = useState<'split' | 'before' | 'after'>('split')
   const [fitWidth, setFitWidth] = useState(true)
@@ -112,10 +114,12 @@ export default function BeforeAfterShowcase({
           </div>
         </div>
         <div
-          className="rounded-2xl overflow-hidden flex flex-col"
+          className={`rounded-2xl overflow-hidden flex flex-col transition-shadow duration-500${accent && afterPulse ? ' ring-2 ring-green-400/40' : ''}`}
           style={{
             border: accent ? '1px solid rgba(168,85,247,0.35)' : '1px solid rgba(255,255,255,0.08)',
-            boxShadow: accent
+            boxShadow: accent && afterPulse
+              ? '0 0 40px rgba(34,197,94,0.25), 0 0 80px rgba(34,197,94,0.1), 0 20px 60px rgba(0,0,0,0.5)'
+              : accent
               ? '0 0 60px rgba(124,58,237,0.18), 0 20px 60px rgba(0,0,0,0.5)'
               : '0 20px 60px rgba(0,0,0,0.5)',
           }}

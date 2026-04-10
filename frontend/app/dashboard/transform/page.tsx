@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import Editor from '@monaco-editor/react'
+// Editor import removed — Code Editor tab eliminated in favor of no-code flow
 import { apiUrl } from '@/lib/api'
 import TransformSummaryHeader from '@/components/dashboard/TransformSummaryHeader'
 import TransformCarousel from '@/components/dashboard/TransformCarousel'
@@ -143,7 +143,7 @@ function BrowserFrame({ children, label, accent = false }: { children: React.Rea
   )
 }
 
-type Phase = 'idle' | 'listening' | 'thinking' | 'responding'
+type Phase = 'idle' | 'listening' | 'thinking' | 'responding' | 'ready'
 
 function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }) {
   const [phase, setPhase] = useState<Phase>('idle')
@@ -154,6 +154,8 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
   const [displayText, setDisplayText] = useState('')
   const [error, setError] = useState('')
   const [history, setHistory] = useState<{ role: string; content: string }[]>([])
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
+  const [interpretedIntent, setInterpretedIntent] = useState('')
   const typewriterRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const stoppedRef = useRef(false)
 
@@ -404,12 +406,16 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
 
     if (stoppedRef.current) return
 
-    // If AI generated a final prompt, send it to the pipeline and close
+    // If AI generated a final prompt, show interpreted intent for user confirmation
     if (finalPrompt) {
+      setPendingPrompt(finalPrompt)
+      // Extract a short intent summary from the AI response or prompt
+      const intentSummary = finalPrompt.length > 80 ? finalPrompt.slice(0, 77) + '...' : finalPrompt
+      setInterpretedIntent(intentSummary)
       typewrite(aiText, async () => {
         if (stoppedRef.current) return
         await playTTS(aiText)
-        if (mountedRef.current && !stoppedRef.current) onFinalPrompt(finalPrompt!)
+        if (mountedRef.current && !stoppedRef.current) setPhase('ready')
       })
       return
     }
@@ -521,6 +527,7 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
     listening: 'Listening...',
     thinking: 'Thinking...',
     responding: 'Responding...',
+    ready: 'Ready to send',
   }[phase]
 
   const phaseSub = {
@@ -528,6 +535,7 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
     listening: 'Speak now \u2014 I\u2019ll respond when you pause',
     thinking: 'Processing your input...',
     responding: 'Reform AI is speaking',
+    ready: 'Review your request below',
   }[phase]
 
   return (
@@ -618,48 +626,82 @@ function VoiceOrb({ onFinalPrompt }: { onFinalPrompt: (prompt: string) => void }
         <p className="text-[10px] mt-1 relative" style={{ color: 'rgba(239,68,68,0.5)' }}>{error}</p>
       )}
 
-      {/* Action button */}
-      <button
-        onClick={handleButtonClick}
-        className="flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold transition-all active:scale-95 mt-1"
-        style={phase === 'listening' || phase === 'responding' ? {
-          background: 'rgba(239,68,68,0.1)',
-          color: 'rgba(239,68,68,0.8)',
-          border: '1px solid rgba(239,68,68,0.2)',
-          boxShadow: '0 0 15px rgba(239,68,68,0.1)',
-        } : phase === 'thinking' ? {
-          background: 'rgba(168,85,247,0.05)',
-          color: 'rgba(168,85,247,0.4)',
-          border: '1px solid rgba(168,85,247,0.1)',
-        } : {
-          background: 'rgba(168,85,247,0.1)',
-          color: 'rgba(168,85,247,0.8)',
-          border: '1px solid rgba(168,85,247,0.2)',
-          boxShadow: '0 0 15px rgba(124,58,237,0.1)',
-        }}
-      >
-        {phase === 'listening' || phase === 'responding' ? (
-          <>
-            <div className="w-2.5 h-2.5 rounded-sm" style={{ background: 'rgba(239,68,68,0.8)' }} />
-            Stop
-          </>
-        ) : phase === 'thinking' ? (
-          <>
-            <div className="w-3 h-3 rounded-full animate-spin" style={{ border: '2px solid rgba(168,85,247,0.15)', borderTopColor: 'rgba(168,85,247,0.5)' }} />
-            Processing...
-          </>
-        ) : (
-          <>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {/* Interpreted intent card — shown in ready phase */}
+      {phase === 'ready' && interpretedIntent && (
+        <div className="relative mt-2 mb-3 w-full max-w-sm">
+          <div className="rounded-xl px-4 py-3" style={{ background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.15)' }}>
+            <p className="text-[9px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'rgba(168,85,247,0.6)' }}>Interpreted intent</p>
+            <p className="text-[12px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>{interpretedIntent}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {phase === 'ready' ? (
+        <div className="flex items-center gap-2 relative">
+          <button
+            onClick={() => { setPendingPrompt(null); setInterpretedIntent(''); setPhase('idle'); startListening() }}
+            className="flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-medium transition-all active:scale-95"
+            style={{ color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-              <line x1="12" y1="19" x2="12" y2="23" />
-              <line x1="8" y1="23" x2="16" y2="23" />
             </svg>
-            Start Listening
-          </>
-        )}
-      </button>
+            Re-record
+          </button>
+          <button
+            onClick={() => { if (pendingPrompt) onFinalPrompt(pendingPrompt) }}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full text-[11px] font-semibold transition-all active:scale-95"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: 'white', boxShadow: '0 0 25px rgba(124,58,237,0.25)' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+            Send to AI
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={handleButtonClick}
+          className="flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold transition-all active:scale-95 mt-1"
+          style={phase === 'listening' || phase === 'responding' ? {
+            background: 'rgba(239,68,68,0.1)',
+            color: 'rgba(239,68,68,0.8)',
+            border: '1px solid rgba(239,68,68,0.2)',
+            boxShadow: '0 0 15px rgba(239,68,68,0.1)',
+          } : phase === 'thinking' ? {
+            background: 'rgba(168,85,247,0.05)',
+            color: 'rgba(168,85,247,0.4)',
+            border: '1px solid rgba(168,85,247,0.1)',
+          } : {
+            background: 'rgba(168,85,247,0.1)',
+            color: 'rgba(168,85,247,0.8)',
+            border: '1px solid rgba(168,85,247,0.2)',
+            boxShadow: '0 0 15px rgba(124,58,237,0.1)',
+          }}
+        >
+          {phase === 'listening' || phase === 'responding' ? (
+            <>
+              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: 'rgba(239,68,68,0.8)' }} />
+              Stop
+            </>
+          ) : phase === 'thinking' ? (
+            <>
+              <div className="w-3 h-3 rounded-full animate-spin" style={{ border: '2px solid rgba(168,85,247,0.15)', borderTopColor: 'rgba(168,85,247,0.5)' }} />
+              Processing...
+            </>
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+              Start Listening
+            </>
+          )}
+        </button>
+      )}
     </div>
   )
 }
@@ -681,10 +723,15 @@ function TransformPage() {
   const [commits, setCommits] = useState<CommitEntry[]>(INITIAL_COMMITS)
   const [changeStatus, setChangeStatus] = useState<'pending' | 'accepted' | 'rejected'>('pending')
   const [showSuggestModal, setShowSuggestModal] = useState(false)
-  const [suggestTab, setSuggestTab] = useState<'text' | 'voice' | 'code'>('text')
+  const [suggestTab, setSuggestTab] = useState<'text' | 'voice'>('text')
   const [suggestion, setSuggestion] = useState('')
-  const [codeEdit, setCodeEdit] = useState('')
-  const [suggestLoading, setSuggestLoading] = useState(false)
+  // Refinement status card state — floating bottom-right feedback
+  const [refineStatus, setRefineStatus] = useState<{
+    status: 'pending' | 'processing' | 'success' | 'error'
+    summary: string
+    error?: string
+  } | null>(null)
+  const [afterPulse, setAfterPulse] = useState(false)
   const [selectedCommit, setSelectedCommit] = useState<CommitEntry | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -1024,11 +1071,16 @@ function TransformPage() {
   async function handleSuggestSubmit(directPrompt?: string) {
     const promptText = (directPrompt || suggestion).trim()
     if (!promptText) return
-    setSuggestLoading(true)
+
+    // Close modal and clear input immediately — never make the user wait inside a modal
+    const summaryText = promptText.length > 60 ? promptText.slice(0, 57) + '...' : promptText
+    setShowSuggestModal(false)
+    setSuggestion('')
+    setRefineStatus({ status: 'pending', summary: summaryText })
 
     try {
-      // Pull the current page's transformed code from the multi-page result
-      // (NOT the stale single-file demo sessionStorage). Falls back to original.
+      setRefineStatus({ status: 'processing', summary: summaryText })
+
       const currentPage = multiPageResult?.pages.find(p => p.page_path === selectedTarget)
       const currentCode = currentPage?.updated_code || currentPage?.original_code || ''
       const res = await fetch(apiUrl('/suggest-edit'), {
@@ -1055,31 +1107,19 @@ function TransformPage() {
       setCommits(prev => [newCommit, ...prev])
       setChangeStatus('pending')
 
-      // Persist the new code into the multi-page result so subsequent edits
-      // chain off the latest version (and the code editor reloads with it).
+      // Persist the new code into the multi-page result so subsequent edits chain
       if (data.revised_code && multiPageResult && selectedTarget) {
         const updatedPages = multiPageResult.pages.map(p =>
-          p.page_path === selectedTarget
-            ? { ...p, updated_code: data.revised_code }
-            : p
+          p.page_path === selectedTarget ? { ...p, updated_code: data.revised_code } : p
         )
         setMultiPageResult({ ...multiPageResult, pages: updatedPages })
       }
 
-      setShowSuggestModal(false)
-      setSuggestion('')
-      setScOpen(true)
-      setSuggestLoading(false)
-
-      // Re-render screenshots with the new code
+      // Re-render screenshots in the background
       if (data.revised_code && repoName && selectedTarget) {
         setReRendering(true)
-        setReRenderStatus('Cloning repository...')
+        setReRenderStatus('Rendering preview...')
         try {
-          const timer1 = setTimeout(() => setReRenderStatus('Installing dependencies...'), 8000)
-          const timer2 = setTimeout(() => setReRenderStatus('Starting dev server...'), 20000)
-          const timer3 = setTimeout(() => setReRenderStatus('Capturing screenshots...'), 40000)
-
           const renderRes = await fetch(apiUrl('/re-render'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1091,8 +1131,6 @@ function TransformPage() {
               access_token: session?.accessToken || '',
             }),
           })
-
-          clearTimeout(timer1); clearTimeout(timer2); clearTimeout(timer3)
 
           if (renderRes.ok) {
             const renderData = await renderRes.json()
@@ -1109,95 +1147,23 @@ function TransformPage() {
         setReRendering(false)
         setReRenderStatus('')
       }
-    } catch {
-      const newCommit: CommitEntry = {
-        hash: Math.random().toString(16).slice(2, 8),
-        msg: `edit: ${promptText.slice(0, 40)}`,
-        color: '#f59e0b',
-        status: 'pending',
-        suggestion: promptText,
-      }
-      setCommits(prev => [newCommit, ...prev])
-      setShowSuggestModal(false)
-      setSuggestion('')
-      setScOpen(true)
-    } finally {
-      setSuggestLoading(false)
+
+      // Success — pulse the after panel and show success status
+      setRefineStatus({ status: 'success', summary: summaryText })
+      setAfterPulse(true)
+      setTimeout(() => setAfterPulse(false), 2000)
+      setTimeout(() => setRefineStatus(null), 4000)
+    } catch (err) {
+      setRefineStatus({
+        status: 'error',
+        summary: summaryText,
+        error: err instanceof Error ? err.message : 'Something went wrong',
+      })
+      setTimeout(() => setRefineStatus(null), 6000)
     }
-  }
-
-  async function handleCodeSubmit() {
-    if (!codeEdit.trim() || !multiPageResult || !selectedTarget) return
-    setSuggestLoading(true)
-
-    const newCommit: CommitEntry = {
-      hash: Math.random().toString(16).slice(2, 8),
-      msg: 'edit: manual code change',
-      color: '#f59e0b',
-      status: 'pending',
-      code: codeEdit,
-      suggestion: 'Manual code edit via IDE',
-    }
-    setCommits(prev => [newCommit, ...prev])
-    setChangeStatus('pending')
-
-    // Persist the manually-edited code into the multi-page result.
-    const updatedPages = multiPageResult.pages.map(p =>
-      p.page_path === selectedTarget ? { ...p, updated_code: codeEdit } : p
-    )
-    setMultiPageResult({ ...multiPageResult, pages: updatedPages })
-
-    setShowSuggestModal(false)
-    setScOpen(true)
-
-    // Re-render screenshots with the manually edited code.
-    if (repoName && selectedTarget) {
-      setReRendering(true)
-      setReRenderStatus('Cloning repository...')
-      try {
-        const timer1 = setTimeout(() => setReRenderStatus('Installing dependencies...'), 8000)
-        const timer2 = setTimeout(() => setReRenderStatus('Starting dev server...'), 20000)
-        const timer3 = setTimeout(() => setReRenderStatus('Capturing screenshots...'), 40000)
-
-        const renderRes = await fetch(apiUrl('/re-render'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            repo_clone_url: `https://github.com/${repoName}.git`,
-            branch: repoBranch,
-            target_file: selectedTarget,
-            updated_code: codeEdit,
-            access_token: session?.accessToken || '',
-          }),
-        })
-
-        clearTimeout(timer1); clearTimeout(timer2); clearTimeout(timer3)
-
-        if (renderRes.ok) {
-          const renderData = await renderRes.json()
-          if (renderData.after_screenshot) {
-            const refreshed = updatedPages.map(p =>
-              p.page_path === selectedTarget
-                ? { ...p, after_screenshot: renderData.after_screenshot, before_screenshot: renderData.before_screenshot || p.before_screenshot }
-                : p
-            )
-            setMultiPageResult({ ...multiPageResult, pages: refreshed })
-          }
-        }
-      } catch { /* re-render is best-effort */ }
-      setReRendering(false)
-      setReRenderStatus('')
-    }
-
-    setSuggestLoading(false)
   }
 
   function openSuggestModal() {
-    // Load the actual current code of the selected page into Monaco.
-    // Prefer the latest transformed code; fall back to original.
-    const currentPage = multiPageResult?.pages.find(p => p.page_path === selectedTarget)
-    const liveCode = currentPage?.updated_code || currentPage?.original_code || ''
-    setCodeEdit(liveCode)
     setSuggestTab('text')
     setShowSuggestModal(true)
   }
@@ -1306,6 +1272,7 @@ function TransformPage() {
               pages={multiPageResult.pages}
               result={multiPageResult}
               onSelectedPathChange={setSelectedTarget}
+              afterPulse={afterPulse}
             />
           </div>
         )}
@@ -1534,7 +1501,6 @@ function TransformPage() {
               {([
                 { key: 'text' as const, label: 'Text Prompt', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg> },
                 { key: 'voice' as const, label: 'Voice Prompt', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg> },
-                { key: 'code' as const, label: 'Code Editor', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg> },
               ]).map(tab => (
                 <button
                   key={tab.key}
@@ -1573,7 +1539,6 @@ function TransformPage() {
                       placeholder="Describe what you'd like to change... (e.g., 'Make the sidebar collapsible', 'Change the accent color to blue')"
                       className="w-full bg-transparent text-[13px] text-white outline-none resize-none placeholder:text-white/20"
                       style={{ minHeight: '140px', lineHeight: '1.7' }}
-                      disabled={suggestLoading}
                     />
                     <div className="flex items-center justify-between mt-4 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
                       <span className="text-[10px] flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.15)' }}>
@@ -1584,7 +1549,7 @@ function TransformPage() {
                       </span>
                       <button
                         onClick={() => handleSuggestSubmit()}
-                        disabled={suggestLoading || !suggestion.trim()}
+                        disabled={!suggestion.trim()}
                         className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[11px] font-semibold transition-all active:scale-[0.97]"
                         style={{
                           background: suggestion.trim() ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'rgba(255,255,255,0.04)',
@@ -1592,17 +1557,8 @@ function TransformPage() {
                           boxShadow: suggestion.trim() ? '0 0 25px rgba(124,58,237,0.25)' : 'none',
                         }}
                       >
-                        {suggestLoading ? (
-                          <>
-                            <div className="w-3.5 h-3.5 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.2)', borderTopColor: 'white' }} />
-                            Processing...
-                          </>
-                        ) : (
-                          <>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-                            Send to AI
-                          </>
-                        )}
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                        Send to AI
                       </button>
                     </div>
                   </div>
@@ -1610,67 +1566,8 @@ function TransformPage() {
 
                 {/* VOICE PROMPT TAB */}
                 {suggestTab === 'voice' && <VoiceOrb onFinalPrompt={(prompt) => {
-                  setShowSuggestModal(false)
                   handleSuggestSubmit(prompt)
                 }} />}
-
-                {/* CODE EDITOR TAB */}
-                {suggestTab === 'code' && (
-                  <div className="flex flex-col">
-                    {/* Editor toolbar */}
-                    <div className="flex items-center justify-between px-4 py-2.5" style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                      <div className="flex items-center gap-2.5">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
-                        <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{selectedTarget || 'page.tsx'}</span>
-                      </div>
-                      <span className="text-[9px] font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ background: 'rgba(34,197,94,0.08)', color: '#86efac', border: '1px solid rgba(34,197,94,0.12)' }}>
-                        <div className="w-1 h-1 rounded-full" style={{ background: '#22c55e' }} />
-                        Editable
-                      </span>
-                    </div>
-                    {/* Monaco Editor */}
-                    <div style={{ height: '340px' }}>
-                      <Editor
-                        height="100%"
-                        defaultLanguage="typescript"
-                        value={codeEdit}
-                        onChange={(val) => setCodeEdit(val || '')}
-                        theme="vs-dark"
-                        options={{
-                          minimap: { enabled: false },
-                          fontSize: 13,
-                          lineHeight: 22,
-                          padding: { top: 12, bottom: 12 },
-                          scrollBeyondLastLine: false,
-                          wordWrap: 'on',
-                          tabSize: 2,
-                          renderLineHighlight: 'gutter',
-                          scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
-                          overviewRulerLanes: 0,
-                          hideCursorInOverviewRuler: true,
-                          overviewRulerBorder: false,
-                        }}
-                      />
-                    </div>
-                    {/* Submit bar */}
-                    <div className="flex items-center justify-between px-4 py-3.5" style={{ borderTop: '1px solid rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.01)' }}>
-                      <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.15)' }}>Edit the code directly, then submit</span>
-                      <button
-                        onClick={handleCodeSubmit}
-                        disabled={!codeEdit.trim()}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[11px] font-semibold transition-all active:scale-[0.97]"
-                        style={{
-                          background: codeEdit.trim() ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'rgba(255,255,255,0.04)',
-                          color: codeEdit.trim() ? 'white' : 'rgba(255,255,255,0.2)',
-                          boxShadow: codeEdit.trim() ? '0 0 25px rgba(124,58,237,0.25)' : 'none',
-                        }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                        Submit Code
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -1760,6 +1657,96 @@ function TransformPage() {
                 style={{ color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── REFINEMENT STATUS CARD — floating bottom-right ── */}
+      {refineStatus && (
+        <div
+          className="fixed bottom-6 right-6 z-[250] animate-in slide-in-from-bottom-4 fade-in duration-300"
+          style={{ maxWidth: '320px', width: '100%' }}
+        >
+          <div
+            className="rounded-xl overflow-hidden"
+            style={{
+              background: 'linear-gradient(180deg, rgba(30,27,46,0.98) 0%, rgba(19,17,28,0.98) 100%)',
+              border: `1px solid ${
+                refineStatus.status === 'success' ? 'rgba(34,197,94,0.2)'
+                : refineStatus.status === 'error' ? 'rgba(239,68,68,0.2)'
+                : 'rgba(168,85,247,0.2)'
+              }`,
+              boxShadow: '0 8px 40px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.1)',
+              backdropFilter: 'blur(20px)',
+            }}
+          >
+            {/* Accent top line */}
+            <div className="h-[2px]" style={{
+              background: refineStatus.status === 'success'
+                ? 'linear-gradient(90deg, #22c55e, rgba(34,197,94,0.2), transparent)'
+                : refineStatus.status === 'error'
+                ? 'linear-gradient(90deg, #ef4444, rgba(239,68,68,0.2), transparent)'
+                : 'linear-gradient(90deg, #a855f7, rgba(168,85,247,0.2), transparent)',
+            }} />
+
+            <div className="flex items-start gap-3 px-4 py-3.5">
+              {/* Status icon */}
+              <div className="flex-shrink-0 mt-0.5">
+                {refineStatus.status === 'pending' && (
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(168,85,247,0.1)' }}>
+                    <div className="w-2 h-2 rounded-full" style={{ background: '#a855f7', boxShadow: '0 0 6px rgba(168,85,247,0.5)' }} />
+                  </div>
+                )}
+                {refineStatus.status === 'processing' && (
+                  <div className="w-5 h-5 rounded-full animate-spin" style={{ border: '2px solid rgba(168,85,247,0.15)', borderTopColor: '#a855f7' }} />
+                )}
+                {refineStatus.status === 'success' && (
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(34,197,94,0.1)' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                  </div>
+                )}
+                {refineStatus.status === 'error' && (
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(239,68,68,0.1)' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  </div>
+                )}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <p className="text-[12px] font-semibold text-white leading-tight">
+                  {refineStatus.status === 'pending' && 'Change pending'}
+                  {refineStatus.status === 'processing' && 'Applying changes'}
+                  {refineStatus.status === 'success' && 'Changes applied'}
+                  {refineStatus.status === 'error' && 'Change failed'}
+                </p>
+                <p className="text-[11px] mt-0.5 truncate" style={{
+                  color: refineStatus.status === 'error'
+                    ? 'rgba(252,165,165,0.7)'
+                    : refineStatus.status === 'success'
+                    ? 'rgba(134,239,172,0.7)'
+                    : 'rgba(255,255,255,0.4)',
+                }}>
+                  {refineStatus.status === 'error'
+                    ? (refineStatus.error || 'Something went wrong')
+                    : refineStatus.status === 'success'
+                    ? 'Your updated UI is ready'
+                    : refineStatus.status === 'processing'
+                    ? 'Refining the selected page...'
+                    : refineStatus.summary
+                  }
+                </p>
+              </div>
+
+              {/* Dismiss */}
+              <button
+                onClick={() => setRefineStatus(null)}
+                className="flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors hover:bg-white/[0.05]"
+                style={{ color: 'rgba(255,255,255,0.25)' }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </button>
             </div>
           </div>
