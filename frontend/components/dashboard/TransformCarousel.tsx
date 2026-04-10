@@ -69,69 +69,28 @@ export default function TransformCarousel({
       {/* Carousel navigation header — large, prominent tabs */}
       <div className="flex items-start justify-between gap-4 mb-6">
         {/* Page selector tabs */}
-        <div className="flex items-stretch gap-2.5 overflow-x-auto pb-2 flex-1 min-w-0">
+        <div className="flex items-center gap-1 overflow-x-auto pb-2 flex-1 min-w-0">
           {transformed.map((page, i) => {
             const isActive = i === currentIndex
-            const isError = page.status === 'error'
-            const isWeak = page.status === 'weak'
-            const accent = isError ? '239,68,68' : isWeak ? '245,158,11' : '168,85,247'
-            const textActive = isError ? '#fca5a5' : isWeak ? '#fde68a' : '#d8b4fe'
-            const badgeActive = isError ? '#f87171' : isWeak ? '#fbbf24' : '#c084fc'
             return (
               <button
                 key={page.page_path}
                 onClick={() => goTo(i)}
-                className="group flex items-center gap-3 px-5 py-3.5 rounded-xl transition-all flex-shrink-0 text-left"
+                className="px-4 py-2.5 rounded-xl text-[13px] font-medium transition-all flex-shrink-0"
                 style={isActive
                   ? {
-                      background: `rgba(${accent},0.10)`,
-                      border: `1px solid rgba(${accent},0.35)`,
-                      boxShadow: `0 0 0 3px rgba(${accent},0.06), 0 4px 20px rgba(${accent},0.08)`,
+                      background: 'rgba(168,85,247,0.10)',
+                      border: '1px solid rgba(168,85,247,0.25)',
+                      color: '#d8b4fe',
                     }
                   : {
                       background: 'rgba(255,255,255,0.02)',
                       border: '1px solid rgba(255,255,255,0.06)',
+                      color: 'rgba(255,255,255,0.6)',
                     }
                 }
               >
-                <span
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold flex-shrink-0 transition-all"
-                  style={{
-                    background: isActive ? `rgba(${accent},0.18)` : 'rgba(255,255,255,0.04)',
-                    color: isActive ? badgeActive : 'rgba(255,255,255,0.35)',
-                    border: isActive ? `1px solid rgba(${accent},0.25)` : '1px solid transparent',
-                  }}
-                >
-                  {i + 1}
-                </span>
-                <div className="flex flex-col min-w-0">
-                  <span
-                    className="text-[14px] font-semibold leading-tight truncate max-w-[180px]"
-                    style={{ color: isActive ? textActive : 'rgba(255,255,255,0.85)' }}
-                  >
-                    {page.page_name}
-                  </span>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ background: isError ? '#ef4444' : isWeak ? '#f59e0b' : '#a855f7' }}
-                    />
-                    <span
-                      className="text-[11px] font-medium"
-                      style={{ color: isActive ? `rgba(${accent},0.75)` : 'rgba(255,255,255,0.4)' }}
-                    >
-                      {isError ? 'Failed' : isWeak ? 'Weak' : 'Improved'}
-                    </span>
-                    {page.score > 0 && (
-                      <>
-                        <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>·</span>
-                        <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                          {page.score}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
+                {page.page_name}
               </button>
             )
           })}
@@ -202,30 +161,7 @@ export default function TransformCarousel({
               <span className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.25)' }}>{current.route}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {current.score > 0 && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <span className="text-[9px] font-medium uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.25)' }}>Score</span>
-                <span className="text-[13px] font-bold" style={{ color: '#d8b4fe' }}>{current.score}</span>
-              </div>
-            )}
-            {current.status === 'weak' ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)' }}>
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#f59e0b', boxShadow: '0 0 6px rgba(245,158,11,0.6)' }} />
-                <span className="text-[11px] font-medium" style={{ color: 'rgba(253,224,71,0.95)' }}>Weak</span>
-              </div>
-            ) : current.status === 'error' ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)' }}>
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#ef4444', boxShadow: '0 0 6px rgba(239,68,68,0.6)' }} />
-                <span className="text-[11px] font-medium" style={{ color: 'rgba(252,165,165,0.95)' }}>Failed</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.18)' }}>
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a855f7', boxShadow: '0 0 6px rgba(168,85,247,0.6)' }} />
-                <span className="text-[11px] font-medium" style={{ color: 'rgba(216,180,254,0.95)' }}>Improved</span>
-              </div>
-            )}
-          </div>
+          {/* Clean header — no badges */}
         </div>
 
         {/* Weak transformation banner */}
