@@ -3,7 +3,7 @@ import re
 import json
 import urllib.request
 import urllib.error
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 
 router = APIRouter()
 
@@ -15,12 +15,12 @@ def _parse_owner_repo(repo_url: str):
     return match.group(1), match.group(2)
 
 
-def _fetch_tree(owner: str, repo: str):
-    url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1"
+def _fetch_tree(owner: str, repo: str, access_token: str | None = None, branch: str = "HEAD"):
+    url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
     req = urllib.request.Request(url)
     req.add_header("Accept", "application/vnd.github.v3+json")
     req.add_header("User-Agent", "RefineUI/1.0")
-    token = os.environ.get("GITHUB_TOKEN")
+    token = access_token or os.environ.get("GITHUB_TOKEN")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
@@ -113,9 +113,16 @@ def _pages_router_label(path: str) -> tuple:
 
 
 @router.get("/repo-pages")
-def get_repo_pages(repo_url: str = Query(..., alias="repo_url")):
+def get_repo_pages(
+    repo_url: str = Query(..., alias="repo_url"),
+    branch: str = Query(default="HEAD"),
+    authorization: str | None = Header(default=None),
+):
+    access_token: str | None = None
+    if authorization and authorization.startswith("Bearer "):
+        access_token = authorization[len("Bearer "):]
     owner, repo = _parse_owner_repo(repo_url)
-    tree_data = _fetch_tree(owner, repo)
+    tree_data = _fetch_tree(owner, repo, access_token, branch)
 
     tree = tree_data.get("tree", [])
     seen_routes = set()

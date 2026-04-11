@@ -64,12 +64,14 @@ function DiscoveryPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const repo = searchParams.get('repo')
+  const branch = searchParams.get('branch')
   const { data: session } = useSession()
   const { startProgress, updateProgress, finishProgress } = useProgress()
 
   useEffect(() => {
     if (repo) sessionStorage.setItem('refineui_repo', repo)
-  }, [repo])
+    if (branch) sessionStorage.setItem('refineui_branch', branch)
+  }, [repo, branch])
 
   useEffect(() => {
     const storedDiscovery = sessionStorage.getItem('refineui_discovery')
@@ -193,39 +195,6 @@ function DiscoveryPageInner() {
 
   // ── COMPLETED ──
   function handleViewReport() {
-    const repoUrl = sessionStorage.getItem('refineui_repo') || ''
-    const analysisRaw = sessionStorage.getItem('refineui_analysis')
-    const analysis = analysisRaw ? JSON.parse(analysisRaw) : null
-    const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
-
-    if (match) {
-      const fullName = match[1].replace(/\.git$/, '')
-      const promise = fetch(apiUrl('/transform-repo-v2'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          github_url: `https://github.com/${fullName}`,
-          branch: 'main',
-          access_token: (session as { accessToken?: string } | null)?.accessToken || null,
-          design_intelligence: analysis,
-          user_intent: '',
-          max_pages: 5,
-        }),
-      })
-        .then(r => { if (!r.ok) throw new Error('Transform failed'); return r.json() })
-        .then(result => {
-          sessionStorage.setItem('refineui_transform', JSON.stringify({
-            multiPageResult: result,
-            repoName: fullName,
-            branch: 'main',
-          }))
-          return result
-        })
-        .catch(() => null)
-
-      ;(window as Window & { __reformPipelinePromise?: Promise<unknown> }).__reformPipelinePromise = promise
-    }
-
     router.push('/dashboard/simulation')
   }
 

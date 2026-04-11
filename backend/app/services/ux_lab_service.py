@@ -30,13 +30,14 @@ Field requirements — be thorough, not terse:
 - "principle": The single most applicable UX/design principle (e.g. Fitts' Law, Hick's Law, Visual Hierarchy, Cognitive Load, Gestalt Proximity, Affordance Theory, Progressive Disclosure, F-pattern, WCAG Contrast).
 - "principle_explanation": 2–3 sentences. Explain how the principle applies specifically to this element as observed in the screenshot — not a generic definition. Tie the principle directly to the failure you described.
 - "recommendation": 2–3 sentences. Provide a concrete, actionable fix — specific enough for a developer to implement. State the expected measurable outcome (e.g. "reducing decision time", "improving tap accuracy", "increasing CTA visibility").
+- "requires_competitor_evidence": Set to true ONLY when the improvement is something a competitor visibly demonstrates in a static screenshot — e.g. better spacing, stronger visual hierarchy, clearer CTA styling, improved layout density, or contrast. Set to false for findings about user flows, multi-step interactions, navigation sequences, onboarding, or any behavior that cannot be seen in a single static image.
 
 Schema:
 {
   "id": string,
   "type": "ISSUE" | "WARNING" | "POSITIVE",
   "severity": "critical" | "major" | "minor",
-  "component": string,
+  "component": string (dot-separated path, e.g. "hero.cta", "nav.primary", "pricing.card"),
   "title": string (max 8 words),
   "description": string (3–4 sentences),
   "principle": string,
@@ -98,6 +99,37 @@ async def _claude_text(system: str, user_text: str) -> str:
     return response.content[0].text
 
 
+def _crop_to_region(b64_image: str, x_percent: float, y_percent: float, padding: float = 0.15) -> tuple[str, str]:
+    """Crop a base64 image to the region around (x_percent, y_percent) with padding.
+
+    Returns (cropped_b64, media_type). Input may be PNG or JPEG; output is always JPEG.
+    The crop window is centered on the annotation point and sized to padding*2 of the image
+    dimensions on each side, clamped to image bounds.
+    """
+    import io
+    from PIL import Image
+
+    raw = base64.b64decode(b64_image)
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+    w, h = img.size
+
+    cx = int(x_percent / 100 * w)
+    cy = int(y_percent / 100 * h)
+    pad_x = int(padding * w)
+    pad_y = int(padding * h)
+
+    left   = max(0, cx - pad_x)
+    top    = max(0, cy - pad_y)
+    right  = min(w, cx + pad_x)
+    bottom = min(h, cy + pad_y)
+
+    cropped = img.crop((left, top, right, bottom))
+
+    buf = io.BytesIO()
+    cropped.save(buf, format="JPEG", quality=85, optimize=True)
+    return base64.b64encode(buf.getvalue()).decode("utf-8"), "image/jpeg"
+
+
 def _parse_json_safe(text: str) -> Any:
     """Strip accidental markdown fences and parse JSON."""
     stripped = text.strip()
@@ -157,7 +189,7 @@ async def generate_findings(before_b64: str) -> list[dict]:
     return _normalize_findings(raw_findings)
 
 
-async def enrich_competitor_evidence(findings: list[dict], competitor_urls: list[str]) -> list[dict]:
+async def enrich_competitor_evidence(findings: list[dict], competitor_urls: list[str], before_b64: str) -> list[dict]:
     if not competitor_urls:
         return findings
 
@@ -165,22 +197,56 @@ async def enrich_competitor_evidence(findings: list[dict], competitor_urls: list
 
     logger.info("UX Lab: enriching findings with competitor evidence")
     for finding in findings:
+        if not finding.get("requires_competitor_evidence"):
+            continue
+
+        annotation = finding.get("annotation", {})
+        x_pct = annotation.get("xPercent", 50)
+        y_pct = annotation.get("yPercent", 50)
+
+        try:
+            our_crop_b64, _ = _crop_to_region(before_b64, x_pct, y_pct)
+        except Exception as exc:
+            logger.warning("UX Lab: failed to crop before screenshot for finding %s: %s", finding["id"], exc)
+            our_crop_b64 = None
+
         for comp_url in competitor_urls[:3]:
             try:
                 comp_b64 = await take_competitor_screenshot_b64(comp_url)
-                note_text = await _claude_vision(
-                    system="You are a senior UX analyst comparing design patterns across products.",
-                    user_text=(
-                        f"Look at this competitor screenshot and describe in 2-3 sentences how they handle '{finding['component']}'. "
-                        f"The issue we identified is: {finding['title']}. "
-                        f"Explain specifically what this competitor does differently, why it works better, and what design decision makes it effective."
+                comp_crop_b64, _ = _crop_to_region(comp_b64, x_pct, y_pct)
+
+                user_content: list[dict] = []
+                if our_crop_b64:
+                    user_content.append({
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/jpeg", "data": our_crop_b64},
+                    })
+                user_content.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": comp_crop_b64},
+                })
+                prefix = "The first image is the current design. The second image is the competitor. " if our_crop_b64 else ""
+                user_content.append({
+                    "type": "text",
+                    "text": (
+                        f"{prefix}Both are cropped to the '{finding['component']}' region. "
+                        f"The issue identified: {finding['title']}. "
+                        f"In 2-3 sentences, describe what the competitor does differently in this specific area, "
+                        f"why it works better visually, and what concrete design decision makes it more effective."
                     ),
-                    b64_image=comp_b64,
-                    media_type="image/jpeg",
+                })
+
+                response = await _anthropic.messages.create(
+                    model=_MODEL,
+                    max_tokens=512,
+                    system="You are a senior UX analyst comparing design patterns across products. Be specific about what you see in the images.",
+                    messages=[{"role": "user", "content": user_content}],
                 )
+                note_text = response.content[0].text
+
                 finding["competitor_evidence"].append({
                     "url": comp_url,
-                    "screenshot_url": f"data:image/jpeg;base64,{comp_b64}",
+                    "screenshot_url": f"data:image/jpeg;base64,{comp_crop_b64}",
                     "annotation": note_text.strip(),
                 })
             except Exception as exc:
@@ -253,7 +319,7 @@ async def run_analysis(
 
     before_b64 = await capture_before_screenshot(url)
     findings = await generate_findings(before_b64)
-    findings = await enrich_competitor_evidence(findings, competitor_urls)
+    findings = await enrich_competitor_evidence(findings, competitor_urls, before_b64)
 
     if analysis_only:
         return {

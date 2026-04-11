@@ -1,6 +1,6 @@
 export type FindingSeverity = 'critical' | 'major' | 'minor';
 export type FindingType    = 'ISSUE' | 'WARNING' | 'POSITIVE';
-export type FindingStatus  = 'open' | 'patched' | 'dismissed';
+export type FindingStatus  = 'open' | 'queued' | 'patched' | 'dismissed';
 
 export interface CompetitorEvidence {
   url: string;
@@ -29,8 +29,6 @@ export interface UXLabSession {
   url: string;
   page: string;
   beforeScreenshotUrl: string;
-  afterScreenshotUrl: string;
-  afterPreviewMessage?: string;
   findings: Finding[];
   createdAt: string;
   status: 'pending' | 'complete' | 'error';

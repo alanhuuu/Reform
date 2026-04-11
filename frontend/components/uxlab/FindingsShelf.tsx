@@ -47,7 +47,7 @@ function typeColor(type: string): string {
   }
 }
 
-const SHELF_COLLAPSED = 44;
+const SHELF_COLLAPSED = 64;
 const SHELF_EXPANDED  = 300;
 const SNAP_THRESHOLD  = 120; // px — below this snaps to collapsed
 
@@ -131,8 +131,10 @@ interface TriageRowProps {
   finding: Finding;
   index: number;
   isActive: boolean;
+  isSelected: boolean;
   onSelect: (id: string) => void;
-  onApply: (id: string) => void;
+  onToggleSelect: (id: string) => void;
+  onRevert: (id: string) => void;
   onScrollToAnnotation: (id: string) => void;
   isAnimating: boolean;
 }
@@ -141,23 +143,25 @@ function TriageRow({
   finding,
   index,
   isActive,
+  isSelected,
   onSelect,
-  onApply,
+  onToggleSelect,
+  onRevert,
   onScrollToAnnotation,
   isAnimating,
 }: TriageRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
 
-  const handleApply = (e: React.MouseEvent) => {
+  const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (rowRef.current) rowRef.current.dataset.status = 'patched';
-    onApply(finding.id);
+    onToggleSelect(finding.id);
   };
 
-  const handleComponentClick = (e: React.MouseEvent) => {
+  const handleRevert = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onScrollToAnnotation(finding.id);
+    onRevert(finding.id);
   };
+
 
   return (
     <div
@@ -188,44 +192,64 @@ function TriageRow({
         }}>
           {finding.title}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
-          <span
-            style={{ fontSize: 10, color: 'var(--reform-text-muted)', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
-            onClick={handleComponentClick}
-          >
-            {finding.component}
-          </span>
-          {finding.requiresCompetitorEvidence && (
-            <>
-              <span style={{ fontSize: 10, color: 'var(--reform-text-muted)' }}>·</span>
-              <span style={{ fontSize: 10, color: 'var(--reform-text-muted)' }}>
-                🔗 {finding.competitorEvidence?.length ?? 0} competitors
-              </span>
-            </>
-          )}
-        </div>
+        {finding.principle && (
+          <div style={{ marginTop: 2 }}>
+            <span style={{ fontSize: 10, color: 'var(--reform-text-muted)' }}>
+              {finding.principle}
+            </span>
+          </div>
+        )}
       </div>
 
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+        {finding.status === 'queued' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ background: 'rgba(168,85,247,0.15)', color: '#c084fc', fontSize: 9, fontWeight: 700, borderRadius: 4, padding: '2px 6px', border: '1px solid rgba(168,85,247,0.25)' }}>
+              Modification Staged
+            </span>
+            <button
+              onClick={handleRevert}
+              aria-label="Undo queue"
+              style={{
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                color: 'rgba(204,195,216,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 14, height: 14, lineHeight: 1, fontSize: 14,
+                transition: 'color 120ms',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'rgba(204,195,216,0.8)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(204,195,216,0.35)')}
+            >
+              ×
+            </button>
+          </div>
+        )}
         {finding.status === 'patched' && (
-          <span className="status-pill" style={{ background: '#052E16', color: '#4ADE80', fontSize: 9, fontWeight: 700, borderRadius: 4, padding: '2px 6px' }}>
+          <span style={{ background: '#052E16', color: '#4ADE80', fontSize: 9, fontWeight: 700, borderRadius: 4, padding: '2px 6px' }}>
             patched
           </span>
         )}
         {finding.status === 'dismissed' && (
-          <span className="status-pill" style={{ background: 'var(--reform-bg-raised)', color: 'var(--reform-text-muted)', fontSize: 9, borderRadius: 4, padding: '2px 6px' }}>
+          <span style={{ background: 'var(--reform-bg-raised)', color: 'var(--reform-text-muted)', fontSize: 9, borderRadius: 4, padding: '2px 6px' }}>
             dismissed
           </span>
         )}
         {finding.status === 'open' && (
-          <button className="apply-btn" onClick={handleApply} aria-label="Apply fix" style={{
-            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-            color: 'var(--reform-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16,
-          }}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.2" />
-              <path d="M5 8l2.5 2.5L11 5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+          <button
+            onClick={handleToggle}
+            aria-label={isSelected ? 'Deselect finding' : 'Select finding'}
+            style={{
+              width: 16, height: 16, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
+              border: isSelected ? 'none' : '1.5px solid rgba(255,255,255,0.18)',
+              background: isSelected ? '#a855f7' : 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 0, transition: 'background 120ms, border 120ms',
+            }}
+          >
+            {isSelected && (
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <path d="M2 5l2.5 2.5L8 3" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
           </button>
         )}
       </div>
@@ -243,8 +267,13 @@ interface FindingsShelfProps {
   setExpanded: (v: boolean) => void;
   pillOrder: string[];
   setPillOrder: React.Dispatch<React.SetStateAction<string[]>>;
-  onApplyFinding: (id: string) => void;
   onScrollToAnnotation: (id: string) => void;
+  selectedFindingIds: Set<string>;
+  onToggleSelection: (id: string) => void;
+  onSelectAll: () => void;
+  onDeselectAll: () => void;
+  onApplySelected: () => void;
+  onRevertFinding: (id: string) => void;
   status?: 'idle' | 'loading' | 'error' | 'ready';
   statusMessage?: string;
 }
@@ -257,8 +286,13 @@ export default function FindingsShelf({
   setExpanded,
   pillOrder,
   setPillOrder,
-  onApplyFinding,
   onScrollToAnnotation,
+  selectedFindingIds,
+  onToggleSelection,
+  onSelectAll,
+  onDeselectAll,
+  onApplySelected,
+  onRevertFinding,
   status = 'ready',
   statusMessage,
 }: FindingsShelfProps) {
@@ -397,6 +431,7 @@ export default function FindingsShelf({
   }, [setActiveFindingId, setPillOrder]);
 
   const activeFinding = findings.find(f => f.id === activeFindingId) ?? findings[0] ?? null;
+  const queuedCount   = findings.filter(f => f.status === 'queued').length;
   const patchedCount  = findings.filter(f => f.status === 'patched').length;
   const isEmpty = findings.length === 0;
 
@@ -423,7 +458,7 @@ export default function FindingsShelf({
         ? 'Analysis failed'
         : isEmpty
           ? 'No findings yet'
-          : `${findings.length} findings · ${patchedCount} patched`;
+          : `${findings.length} findings · ${queuedCount} staged · ${patchedCount} patched`;
 
   const placeholderPills = [
     'Primary friction point',
@@ -548,9 +583,6 @@ export default function FindingsShelf({
                   }}>
                     {typeLabel(activeFinding.type)}
                   </span>
-                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--reform-text-muted)' }}>
-                    {activeFinding.component}
-                  </span>
                 </div>
                 <div style={{
                   fontSize: 18, fontWeight: 600, color: 'var(--reform-text-primary)', lineHeight: 1.3,
@@ -616,14 +648,44 @@ export default function FindingsShelf({
 
           {/* Right triage column */}
           <div style={{ width: 'var(--shelf-right-width)', padding: '10px 12px', overflowY: 'auto', flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--reform-text-muted)' }}>
-                All Findings
-              </span>
-              <span style={{ fontSize: 10, color: 'var(--reform-text-muted)' }}>
-                {headerSummary}
-              </span>
-            </div>
+            {(() => {
+              const anySelected = selectedFindingIds.size > 0;
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--reform-text-muted)' }}>
+                      All Findings
+                    </span>
+                    {!isEmpty && (
+                      <button
+                        onClick={anySelected ? onDeselectAll : onSelectAll}
+                        style={{
+                          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                          fontSize: 10, color: 'rgba(168,85,247,0.7)', textAlign: 'left',
+                          transition: 'color 120ms',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.color = '#c084fc')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'rgba(168,85,247,0.7)')}
+                      >
+                        {anySelected ? 'Deselect All' : 'Select All'}
+                      </button>
+                    )}
+                  </div>
+                  <button
+                onClick={onApplySelected}
+                disabled={selectedFindingIds.size === 0}
+                style={{
+                  fontSize: 10, fontWeight: 600, borderRadius: 6, padding: '3px 8px', cursor: selectedFindingIds.size === 0 ? 'default' : 'pointer',
+                  border: 'none', transition: 'background 120ms, color 120ms',
+                  background: selectedFindingIds.size === 0 ? 'rgba(255,255,255,0.05)' : '#a855f7',
+                  color: selectedFindingIds.size === 0 ? 'rgba(204,195,216,0.3)' : '#fff',
+                }}
+              >
+                {selectedFindingIds.size > 0 ? `Apply Selected (${selectedFindingIds.size})` : 'Apply Selected'}
+              </button>
+                </div>
+              );
+            })()}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {isEmpty ? (
                 placeholderRows.map((label, index) => (
@@ -647,8 +709,10 @@ export default function FindingsShelf({
                     finding={f}
                     index={i}
                     isActive={activeFindingId === f.id}
+                    isSelected={selectedFindingIds.has(f.id)}
                     onSelect={handleSelectFinding}
-                    onApply={onApplyFinding}
+                    onToggleSelect={onToggleSelection}
+                    onRevert={onRevertFinding}
                     onScrollToAnnotation={onScrollToAnnotation}
                     isAnimating={isAnimating}
                   />

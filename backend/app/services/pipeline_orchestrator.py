@@ -110,6 +110,7 @@ async def _transform_single_page(
     design_intelligence: dict,
     user_intent: str,
     api_key: str,
+    ux_lab_findings: list[dict] | None = None,
 ) -> dict:
     """
     Transform a single page with validation and retry logic.
@@ -143,6 +144,7 @@ async def _transform_single_page(
             user_intent=user_intent,
             is_retry=is_retry,
             attempt_number=attempt + 1,
+            ux_lab_findings=ux_lab_findings,
         )
 
         logger.info(
@@ -258,6 +260,7 @@ async def run_pipeline_v2(
     user_intent: str = "",
     quality_threshold: int = 95,
     max_pages: int = 5,
+    ux_lab_findings: list[dict] | None = None,
 ) -> dict:
     """
     Full multi-page transformation pipeline.
@@ -349,6 +352,7 @@ async def run_pipeline_v2(
                 design_intelligence=di,
                 user_intent=user_intent,
                 api_key=api_key,
+                ux_lab_findings=ux_lab_findings,
             )
             return ev.page_path, result
         except Exception as e:

@@ -56,6 +56,7 @@ def build_structural_transform_prompt(
     user_intent: str = "",
     is_retry: bool = False,
     attempt_number: int = 1,
+    ux_lab_findings: list[dict] | None = None,
 ) -> str:
     """User-message prompt with the code, evaluation, and rebuild directives."""
     score = evaluation.get("score", 50)
@@ -96,6 +97,21 @@ def build_structural_transform_prompt(
 
     intent_line = f"\nUSER INTENT: {user_intent}" if user_intent else ""
 
+    ux_findings_text = ""
+    if ux_lab_findings:
+        lines = []
+        for f in ux_lab_findings:
+            severity = f.get("severity", "major").upper()
+            component = f.get("component", "")
+            title = f.get("title", "")
+            recommendation = f.get("recommendation", "")
+            lines.append(f"- [{severity}] {component} — \"{title}\"\n  Fix: {recommendation}")
+        ux_findings_text = (
+            "## UX LAB FINDINGS — MUST FIX (TOP PRIORITY)\n"
+            "These issues were identified by UX analysis and MUST be visibly addressed in the rebuild. Do not skip any.\n\n"
+            + "\n\n".join(lines)
+        )
+
     retry_block = ""
     if is_retry:
         retry_block = f"""
@@ -115,6 +131,8 @@ If no → you will be rejected again.
 {weak_section}
 
 {issues_text}
+
+{ux_findings_text}
 
 Assessment: {reasoning}
 

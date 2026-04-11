@@ -40,6 +40,7 @@ async def transform_repo_v2(
             user_intent=req.user_intent,
             quality_threshold=req.quality_threshold,
             max_pages=req.max_pages,
+            ux_lab_findings=req.ux_lab_findings,
         )
         return TransformRepoV2Response(**result)
     except ValueError as e:

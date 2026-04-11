@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import FindingsShelf from '@/components/uxlab/FindingsShelf'
 import { apiUrl } from '@/lib/api'
 import type { Finding, FindingSeverity, FindingType, UXLabSession } from '@/types/uxlab'
@@ -127,8 +128,6 @@ async function analyzeUxLab(url: string, page: string, signal?: AbortSignal): Pr
     url: data.url,
     page: data.page,
     beforeScreenshotUrl: data.before_screenshot_url ?? '',
-    afterScreenshotUrl: data.after_screenshot_url ?? '',
-    afterPreviewMessage: data.after_preview_message ?? undefined,
     findings: (data.findings ?? []).map((finding: Record<string, unknown>) => ({
       id: String(finding.id ?? ''),
       type: finding.type as FindingType,
@@ -227,7 +226,7 @@ function SkeletonBlock({ width = '100%', height, delay = 0 }: { width?: string; 
   )
 }
 
-function PreviewLoadingState({ stage }: { title: string; stage?: string; progress?: number }) {
+function PreviewLoadingState({ stage, progress }: { title: string; stage?: string; progress?: number }) {
   return (
     <div style={{ width: '100%', height: '100%', minHeight: '280px', padding: '0', display: 'flex', flexDirection: 'column', background: '#0d0c16' }}>
       {/* Nav bar */}
@@ -241,14 +240,21 @@ function PreviewLoadingState({ stage }: { title: string; stage?: string; progres
         <SkeletonBlock width="56px" height="24px" delay={100} />
       </div>
 
-      {/* Hero */}
-      <div style={{ padding: '28px 20px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-        <SkeletonBlock width="55%" height="22px" delay={60} />
-        <SkeletonBlock width="40%" height="14px" delay={120} />
-        <SkeletonBlock width="30%" height="14px" delay={180} />
-        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-          <SkeletonBlock width="80px" height="28px" delay={240} />
-          <SkeletonBlock width="80px" height="28px" delay={300} />
+      {/* Hero — replaced with inline status */}
+      <div style={{ padding: '28px 20px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="status-dot-pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(168,85,247,0.7)', display: 'inline-block', flexShrink: 0 }} />
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(204,195,216,0.55)', letterSpacing: '0.02em' }}>
+            {stage ?? 'Initializing…'}
+          </span>
+        </div>
+        <div style={{ width: '40%', height: 2, borderRadius: 999, background: 'rgba(255,255,255,0.05)' }}>
+          <div style={{
+            height: '100%', borderRadius: 999,
+            background: 'linear-gradient(90deg, rgba(124,58,237,0.6), rgba(168,85,247,0.6))',
+            width: `${progress ?? 0}%`,
+            transition: progress === 100 ? 'width 300ms ease-out' : 'width 150ms linear',
+          }} />
         </div>
       </div>
 
@@ -265,13 +271,6 @@ function PreviewLoadingState({ stage }: { title: string; stage?: string; progres
           <SkeletonBlock width="33%" height="40px" delay={280} />
         </div>
       </div>
-
-      {/* Stage label */}
-      {stage && (
-        <div style={{ padding: '8px 20px 12px', textAlign: 'center', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(204,195,216,0.28)' }}>
-          {stage}
-        </div>
-      )}
     </div>
   )
 }
@@ -281,6 +280,8 @@ function AnnotatedPreview({
   annotations,
   showAnnotations,
   activeId,
+  zoom = 1,
+  onZoomChange,
   onSelect,
   children,
 }: {
@@ -288,6 +289,8 @@ function AnnotatedPreview({
   annotations: Annotation[]
   showAnnotations: boolean
   activeId?: string | null
+  zoom?: number
+  onZoomChange?: (next: number) => void
   onSelect?: (id: string) => void
   children?: React.ReactNode
 }) {
@@ -295,36 +298,21 @@ function AnnotatedPreview({
   const frameRef = useRef<HTMLDivElement>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [cardPos, setCardPos] = useState<{ left: number; top: number } | null>(null)
-  const [imageAspect, setImageAspect] = useState<number | null>(null)
-  const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null)
 
   const hoveredAnn = annotations.find((annotation) => annotation.id === hoveredId) ?? null
 
-  useLayoutEffect(() => {
-    const updateFrameSize = () => {
-      if (!outerRef.current || !imageAspect) return
-      const { width: availableWidth, height: availableHeight } = outerRef.current.getBoundingClientRect()
-      if (!availableWidth || !availableHeight) return
-
-      const availableAspect = availableWidth / availableHeight
-      if (availableAspect > imageAspect) {
-        const height = availableHeight
-        const width = height * imageAspect
-        setFrameSize({ width, height })
-      } else {
-        const width = availableWidth
-        const height = width / imageAspect
-        setFrameSize({ width, height })
-      }
+  // Trackpad pinch-to-zoom: ctrl+wheel fires continuously on macOS
+  useEffect(() => {
+    const el = outerRef.current
+    if (!el || !onZoomChange) return
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      onZoomChange(Math.max(0.25, Math.min(3, zoom - e.deltaY * 0.008)))
     }
-
-    updateFrameSize()
-
-    if (!outerRef.current) return
-    const observer = new ResizeObserver(() => updateFrameSize())
-    observer.observe(outerRef.current)
-    return () => observer.disconnect()
-  }, [imageAspect])
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [zoom, onZoomChange])
 
   const handleEnter = useCallback((annotation: Annotation) => {
     setHoveredId(annotation.id)
@@ -361,40 +349,29 @@ function AnnotatedPreview({
         width: '100%',
         height: '100%',
         background: '#0d0c16',
+        overflow: 'auto',
         display: 'flex',
-        alignItems: 'center',
         justifyContent: 'center',
-        overflow: 'hidden',
+        alignItems: 'flex-start',
       }}
     >
       <div
         ref={frameRef}
         style={{
           position: 'relative',
-          width: frameSize ? `${frameSize.width}px` : '100%',
-          height: frameSize ? `${frameSize.height}px` : '100%',
-          maxWidth: '100%',
-          maxHeight: '100%',
-          overflow: 'hidden',
-          borderRadius: 'inherit',
+          width: `${zoom * 100}%`,
           flexShrink: 0,
+          transition: 'width 80ms ease-out',
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={toImageSrc(screenshotB64)}
           alt="Page screenshot"
-          onLoad={(event) => {
-            const target = event.currentTarget
-            if (target.naturalWidth && target.naturalHeight) {
-              setImageAspect(target.naturalWidth / target.naturalHeight)
-            }
-          }}
           style={{
             width: '100%',
-            height: '100%',
+            height: 'auto',
             display: 'block',
-            objectFit: 'contain',
           }}
         />
 
@@ -490,6 +467,7 @@ function AnnotatedPreview({
 
 export default function SimulationPage() {
   const router = useRouter()
+  const { data: session } = useSession()
   const [screens, setScreens] = useState<{ label: string; route: string }[]>([])
   const [selectedScreen, setSelectedScreen] = useState<{ label: string; route: string } | null>(null)
   const [loadingScreens, setLoadingScreens] = useState(true)
@@ -505,6 +483,12 @@ export default function SimulationPage() {
   const [shelfExpanded, setShelfExpanded] = useState(false)
   const [pillOrder, setPillOrder] = useState<string[]>([])
   const [findings, setFindings] = useState<Finding[]>([])
+  const [selectedFindingIds, setSelectedFindingIds] = useState<Set<string>>(new Set())
+  const [previewZoom, setPreviewZoom] = useState(1)
+
+  const handleZoomChange = useCallback((next: number) => {
+    setPreviewZoom(Math.max(0.25, Math.min(3, next)))
+  }, [])
   const analysisCache = useRef<Record<string, UXLabSession>>(
     (() => {
       try {
@@ -533,20 +517,26 @@ export default function SimulationPage() {
     }
 
     const totalFinite = ANALYSIS_STAGES.reduce((sum, s) => sum + (isFinite(s.duration) ? s.duration : 0), 0)
-    let elapsed = 0
+    const startTime = Date.now()
 
-    ANALYSIS_STAGES.forEach((stage, index) => {
-      const t = setTimeout(() => {
-        setLoadingStage(stage.message)
-        setLoadingProgress(Math.min(90, Math.round((elapsed / totalFinite) * 90)))
-      }, elapsed)
+    // Advance stage labels at their scheduled times
+    let elapsed = 0
+    ANALYSIS_STAGES.forEach((stage) => {
+      const t = setTimeout(() => setLoadingStage(stage.message), elapsed)
       stageTimers.current.push(t)
       if (isFinite(stage.duration)) elapsed += stage.duration
     })
 
+    // Continuously update progress based on real elapsed time
+    const interval = setInterval(() => {
+      const ms = Date.now() - startTime
+      setLoadingProgress(Math.min(90, Math.round((ms / totalFinite) * 90)))
+    }, 100)
+
     return () => {
       stageTimers.current.forEach(clearTimeout)
       stageTimers.current = []
+      clearInterval(interval)
     }
   }, [loadingAnalysis]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -574,13 +564,15 @@ export default function SimulationPage() {
     }
 
     const repoUrl = sessionStorage.getItem('refineui_repo')
+    const repoBranch = sessionStorage.getItem('refineui_branch')
     const pagesEndpoint = repoUrl
-      ? `${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}`
+      ? `${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}${repoBranch ? `&branch=${encodeURIComponent(repoBranch)}` : ''}`
       : '/api/local-pages'
 
     setLoadingScreens(true)
     setScreensError(null)
-    fetch(pagesEndpoint)
+    const accessToken = session?.accessToken
+    fetch(pagesEndpoint, accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()
@@ -614,6 +606,8 @@ export default function SimulationPage() {
     setAnalysis(null)
     setAnalysisError(null)
     setLoadingAnalysis(false)
+    setSelectedFindingIds(new Set())
+    setPreviewZoom(1)
 
     const cacheKey = selectedScreen.route
     if (analysisCache.current[cacheKey]) {
@@ -623,12 +617,7 @@ export default function SimulationPage() {
 
     setLoadingAnalysis(true)
 
-    const repoUrl = sessionStorage.getItem('refineui_repo') || ''
-    const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
-    const repoName = match ? match[1].split('/')[1] : ''
-    const deployedBase = repoName ? `https://${repoName}.vercel.app` : ''
-    const localBase = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
-    const targetBase = deployedBase || localBase
+    const targetBase = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
     const targetUrl = `${targetBase}${selectedScreen.route}`
 
     const controller = new AbortController()
@@ -660,11 +649,15 @@ export default function SimulationPage() {
     () => buildAnnotationsFromFindings(findings, 'before', selectedScreen?.route ?? '/'),
     [findings, selectedScreen?.route],
   )
-  const afterAnnotations = useMemo(
-    () => buildAnnotationsFromFindings(findings, 'after', selectedScreen?.route ?? '/'),
-    [findings, selectedScreen?.route],
-  )
 
+  // Reconstruct the full annotation ID for pin highlighting on the screenshot.
+  // activeFindingId is always the raw finding ID; beforeAnnotations use the prefixed format.
+  const activeAnnotationId = useMemo(
+    () => activeFindingId
+      ? (beforeAnnotations.find((a) => a.id.endsWith(':' + activeFindingId))?.id ?? null)
+      : null,
+    [activeFindingId, beforeAnnotations],
+  )
   useEffect(() => {
     const sessionFindings = analysis?.findings ?? []
     if (!sessionFindings.length) {
@@ -694,10 +687,15 @@ export default function SimulationPage() {
     setActiveFindingId((prev) => (prev && sessionFindings.some((finding) => finding.id === prev) ? prev : sessionFindings[0].id))
   }, [analysis])
 
-  const handleSelectFinding = useCallback((findingId: string) => {
-    setActiveFindingId(findingId)
+  const handleSelectFinding = useCallback((annotationOrFindingId: string) => {
+    // AnnotatedPreview calls back with full annotation IDs ("before:/route:rawId").
+    // Strip the prefix so activeFindingId always holds the raw finding ID,
+    // which is what FindingsShelf uses for triage row highlighting.
+    const parts = annotationOrFindingId.split(':')
+    const rawId = parts.length >= 3 ? parts.slice(2).join(':') : annotationOrFindingId
+    setActiveFindingId(rawId)
     setShelfExpanded(true)
-    setPillOrder((prev) => (prev.includes(findingId) ? prev : [...prev, findingId]))
+    setPillOrder((prev) => (prev.includes(rawId) ? prev : [...prev, rawId]))
   }, [])
 
   const handleApplyFinding = useCallback((findingId: string) => {
@@ -740,6 +738,92 @@ export default function SimulationPage() {
       })
   }, [analysis?.id, selectedScreen])
 
+  const handleToggleSelection = useCallback((id: string) => {
+    setSelectedFindingIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }, [])
+
+  const handleApplySelected = useCallback(() => {
+    const ids = new Set(selectedFindingIds)
+    setFindings((prev) =>
+      prev.map((f) => (ids.has(f.id) ? { ...f, status: 'queued' as const } : f)),
+    )
+    setSelectedFindingIds(new Set())
+  }, [selectedFindingIds])
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedFindingIds(new Set(findings.filter((f) => f.status === 'open').map((f) => f.id)))
+  }, [findings])
+
+  const handleDeselectAll = useCallback(() => {
+    setSelectedFindingIds(new Set())
+  }, [])
+
+  const handleRevertFinding = useCallback((id: string) => {
+    setFindings((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, status: 'open' as const } : f)),
+    )
+  }, [])
+
+  const handleApplyTransformation = useCallback(() => {
+    const repoUrl = sessionStorage.getItem('refineui_repo') ?? ''
+    const branch = sessionStorage.getItem('refineui_branch') ?? 'main'
+    const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
+
+    if (!match) {
+      router.push('/dashboard/transform')
+      return
+    }
+
+    const fullName = match[1].replace(/\.git$/, '')
+    let designIntelligence: unknown = null
+    try {
+      const raw = sessionStorage.getItem('refineui_analysis')
+      if (raw) designIntelligence = JSON.parse(raw)
+    } catch { /* ignore */ }
+
+    const queuedFindings = findings
+      .filter((f) => f.status === 'queued')
+      .map((f) => ({
+        title: f.title,
+        description: f.description,
+        recommendation: f.recommendation,
+        component: f.component,
+        severity: f.severity,
+      }))
+
+    const promise = fetch(apiUrl('/transform-repo-v2'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        github_url: `https://github.com/${fullName}`,
+        branch,
+        access_token: (session as { accessToken?: string } | null)?.accessToken ?? null,
+        design_intelligence: designIntelligence,
+        user_intent: '',
+        max_pages: 5,
+        github_user_id: session?.user?.id ?? '',
+        ux_lab_findings: queuedFindings.length > 0 ? queuedFindings : null,
+      }),
+    })
+      .then((r) => { if (!r.ok) throw new Error(`Transform failed: ${r.status}`); return r.json() })
+      .then((result) => {
+        sessionStorage.setItem('refineui_transform', JSON.stringify({
+          multiPageResult: result,
+          repoName: fullName,
+          branch,
+        }))
+        return result
+      })
+      .catch(() => null)
+
+    ;(window as Window & { __reformPipelinePromise?: Promise<unknown> }).__reformPipelinePromise = promise
+    router.push('/dashboard/transform')
+  }, [findings, session, router])
+
   const handleScrollToAnnotation = useCallback((findingId: string) => {
     const finding = findings.find((entry) => entry.id === findingId)
     if (!finding) return
@@ -751,7 +835,6 @@ export default function SimulationPage() {
     })
   }, [findings])
 
-  const patchedFindings = findings.filter((finding) => finding.status === 'patched')
   const shelfStatus = loadingAnalysis ? 'loading' : analysisError ? 'error' : analysis ? 'ready' : 'idle'
   const shelfStatusMessage =
     loadingAnalysis
@@ -807,13 +890,20 @@ export default function SimulationPage() {
                 value={selectedScreen?.label ?? ''}
                 onChange={(event) => setSelectedScreen(screens.find((screen) => screen.label === event.target.value) ?? null)}
                 disabled={loadingScreens || !!screensError || !screens.length}
-                className="rounded-xl px-3 py-1.5 text-xs font-medium outline-none"
+                className="rounded-xl py-1.5 text-xs font-medium outline-none"
                 style={{
                   background: '#1c1a25',
                   border: `1px solid ${screensError ? 'rgba(239,68,68,0.4)' : 'rgba(74,68,85,0.3)'}`,
                   color: loadingScreens || screensError
                     ? 'rgba(230,224,240,0.35)'
                     : 'rgba(230,224,240,0.85)',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  paddingLeft: '0.75rem',
+                  paddingRight: '2rem',
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(204%2C195%2C216%2C0.45)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 10px center',
                 }}
               >
                 {loadingScreens
@@ -835,17 +925,17 @@ export default function SimulationPage() {
               <Toggle checked={showAnnotations} onChange={setShowAnnotations} />
             </div>
             <button
-              onClick={() => router.push('/dashboard/transform')}
+              onClick={handleApplyTransformation}
               className="btn-primary px-4 py-2 rounded-xl text-xs font-semibold transition-all active:scale-[0.98]"
             >
-              View Transformation →
+              Apply Transformation →
             </button>
           </div>
         </div>
 
         <div className="flex flex-1 min-h-0 flex-col lg:flex-row">
           <div
-            className="canvas-panel border-b lg:border-b-0 lg:border-r"
+            className="canvas-panel"
             style={{
               flex: 1,
               borderColor: 'rgba(255,255,255,0.06)',
@@ -855,10 +945,29 @@ export default function SimulationPage() {
               <div className="flex items-center gap-2">
                 <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.2)' }} />
                 <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.5)' }}>
-                  Before
+                  Preview
                 </span>
               </div>
               <div className="flex items-center gap-2">
+                {analysis && (
+                  <div className="flex items-center" style={{ background: 'rgba(15,13,24,0.7)', border: '1px solid rgba(74,68,85,0.28)', borderRadius: 6, overflow: 'hidden' }}>
+                    <button
+                      onClick={() => handleZoomChange(previewZoom - 0.15)}
+                      style={{ padding: '2px 7px', fontSize: 13, lineHeight: 1, color: 'rgba(204,195,216,0.5)', background: 'none', border: 'none', cursor: 'pointer' }}
+                      title="Zoom out"
+                    >−</button>
+                    <button
+                      onClick={() => setPreviewZoom(1)}
+                      style={{ padding: '2px 4px', fontSize: 9, fontWeight: 700, letterSpacing: '0.04em', color: previewZoom !== 1 ? 'rgba(168,85,247,0.8)' : 'rgba(204,195,216,0.4)', background: 'none', border: 'none', cursor: 'pointer', minWidth: 32, textAlign: 'center' }}
+                      title="Reset zoom"
+                    >{Math.round(previewZoom * 100)}%</button>
+                    <button
+                      onClick={() => handleZoomChange(previewZoom + 0.15)}
+                      style={{ padding: '2px 7px', fontSize: 13, lineHeight: 1, color: 'rgba(204,195,216,0.5)', background: 'none', border: 'none', cursor: 'pointer' }}
+                      title="Zoom in"
+                    >+</button>
+                  </div>
+                )}
                 <span className="rounded-md px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em]" style={{ background: 'rgba(15,13,24,0.7)', color: 'rgba(204,195,216,0.42)', border: '1px solid rgba(74,68,85,0.28)' }}>
                   {selectedScreen?.label ?? 'Screen'}
                 </span>
@@ -866,70 +975,20 @@ export default function SimulationPage() {
             </div>
 
             <div id="before-panel" className="panel-screenshot">
-              {loadingAnalysis ? (
-                <PreviewLoadingState title="Before" stage={loadingStage} progress={loadingProgress} />
+              {loadingAnalysis || loadingProgress > 0 ? (
+                <PreviewLoadingState title="Preview" stage={loadingStage} progress={loadingProgress} />
               ) : analysis ? (
                 <AnnotatedPreview
                   screenshotB64={analysis.beforeScreenshotUrl}
                   annotations={beforeAnnotations}
                   showAnnotations={showAnnotations}
-                  activeId={activeFindingId}
+                  activeId={activeAnnotationId}
+                  zoom={previewZoom}
+                  onZoomChange={handleZoomChange}
                   onSelect={handleSelectFinding}
                 />
               ) : (
-                <PreviewPlaceholder title="Before" message="Select a screen to begin analysis." />
-              )}
-            </div>
-          </div>
-
-          <div
-            className="canvas-panel lg:border-l"
-            style={{
-              flex: 1,
-              borderColor: 'rgba(168,85,247,0.08)',
-            }}
-          >
-            <div className="panel-header">
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: '#a855f7' }} />
-                <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: '#d2bbff' }}>
-                  After
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-              </div>
-            </div>
-
-            <div className="panel-screenshot">
-              {loadingAnalysis ? (
-                <PreviewLoadingState title="After" stage={loadingStage} progress={loadingProgress} />
-              ) : analysis && analysis.afterScreenshotUrl ? (
-                <AnnotatedPreview
-                  screenshotB64={analysis.afterScreenshotUrl}
-                  annotations={afterAnnotations}
-                  showAnnotations={showAnnotations}
-                >
-                  {patchedFindings.map((finding) => (
-                    <div
-                      key={finding.id}
-                      className="improvement-label"
-                      style={{
-                        left: `${finding.annotation.xPercent}%`,
-                        top: `${finding.annotation.yPercent}%`,
-                        transform: 'translate(-50%, -120%)',
-                      }}
-                    >
-                      + {finding.title.toLowerCase()}
-                    </div>
-                  ))}
-                </AnnotatedPreview>
-              ) : analysis ? (
-                <PreviewPlaceholder
-                  title="After"
-                  message={analysis.afterPreviewMessage ?? 'No modified preview screenshot is available for this run.'}
-                />
-              ) : (
-                <PreviewPlaceholder title="After" message="Run an analysis to compare the predicted transformed experience." />
+                <PreviewPlaceholder title="Preview" message="Select a screen to begin analysis." />
               )}
             </div>
           </div>
@@ -943,8 +1002,13 @@ export default function SimulationPage() {
           setExpanded={setShelfExpanded}
           pillOrder={pillOrder}
           setPillOrder={setPillOrder}
-          onApplyFinding={handleApplyFinding}
           onScrollToAnnotation={handleScrollToAnnotation}
+          selectedFindingIds={selectedFindingIds}
+          onToggleSelection={handleToggleSelection}
+          onSelectAll={handleSelectAll}
+          onDeselectAll={handleDeselectAll}
+          onApplySelected={handleApplySelected}
+          onRevertFinding={handleRevertFinding}
           status={shelfStatus}
           statusMessage={shelfStatusMessage}
         />
