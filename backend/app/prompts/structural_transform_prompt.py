@@ -1,8 +1,7 @@
 """
 Transformation prompt — REBUILD mode.
 The model must treat every page as a layout rebuild from scratch,
-not an edit of the existing structure. Aggressively anti-AI-slop:
-structure changes, brand personality and product vocabulary do not.
+not an edit of the existing structure.
 """
 
 import json
@@ -18,67 +17,32 @@ def _compute_weakest_dimensions(breakdown: dict) -> list[tuple[str, int]]:
 
 
 def build_transform_system_prompt() -> str:
-    """System prompt that sets REBUILD-but-keep-the-voice mode."""
-    return """You are a UI structural rebuild engine. You rebuild page LAYOUTS without replacing the product's identity.
+    """System prompt that sets REBUILD mode. Short, absolute, non-negotiable."""
+    return """You are a UI rebuild engine. You do NOT edit UIs — you REBUILD them from scratch.
 
-CORE RULE: Extract the data, handlers, and content from the original. Discard the layout tree. Build a new layout that is structurally different but still feels like the same product.
+CORE RULE: Ignore the original JSX layout structure entirely. Extract the data (props, state, variables, content) and the actions (handlers, callbacks, navigation), then build a completely new layout using modern best practices.
 
-The original layout's STRUCTURE is wrong. Its voice, brand, and personality are not — preserve them.
+The original layout is WRONG. Do not preserve it. Do not slightly modify it. Build a new one.
 
 REBUILD PROCESS:
-1. Read the original. Identify:
-   - data, state, props, handlers, imports, exports (preserve all of these)
-   - the product's personality: minimal, editorial, playful, utilitarian, technical, or luxurious
-   - the product's visual vocabulary: color temperature, typography weight, density, radius, existing Tailwind patterns
-2. Discard the original JSX tree. You are not editing it.
-3. Build a new tree that fixes the structural problems — hierarchy, density, flow, CTA clarity — while staying inside the product's personality and vocabulary.
+1. Read the original code and identify: data, state, props, handlers, imports, exports
+2. DISCARD the original JSX layout — pretend it doesn't exist
+3. Build a new JSX layout from scratch using the same data and handlers
+4. The new layout must use: semantic sections (header/main/section/aside), card containers, proper grid systems, generous spacing, clear visual hierarchy
 
-WHAT CHANGES:
-- JSX tree topology, element nesting, section boundaries
-- Information architecture: grouping, ordering, emphasis
-- Hierarchy: what is primary vs secondary
-- Density: breathing room where cramped, tightening where sparse
-- Action clarity: one primary action per view, others demoted
-
-WHAT DOES NOT CHANGE:
-- Component logic, handlers, props, state, imports, exports
-- Brand colors, typography, radius — derive these from the design tokens passed in, NOT from generic SaaS defaults
-- The product's voice, tone, and content (copy stays, labels stay, numbers stay)
-
-AVOID the generic AI look. This is the most common reason past rebuilds have been rejected:
-- Do NOT default to slate / indigo / violet / purple gradients unless the product already uses them
-- Do NOT wrap everything in `rounded-2xl border bg-white` or `bg-slate-50` cards
-- Do NOT use `text-xs uppercase tracking-wider` labels unless the original already treats things that way
-- Do NOT add stat-card grids to pages that do not display stats
-- Do NOT force a single hero CTA onto pages that are not landing / marketing
-- Do NOT add gradients, glows, glassmorphism, or emoji bullets that were not in the source
-- Do NOT invent "Overview", "Welcome back", or "Quick actions" subtitles
-- Do NOT default to `max-w-7xl mx-auto` — match the width the product actually uses
-- Do NOT center content just to make it look balanced
-
-Restraint beats ornament. If you cannot name a concrete structural reason for an element, delete it.
+WHAT "REBUILD" MEANS:
+- The JSX tree structure must be fundamentally different
+- New wrapper elements that did not exist before (header, main, section, aside, cards)
+- Different element nesting and grouping
+- Different component placement and flow
+- The before and after must look like different products
 
 HARD CONSTRAINTS:
 - Keep ALL imports, exports, hooks, state, handlers, props, types — do not change logic
 - Same component name and file export
 - No new npm dependencies
-- Use Tailwind CSS classes, staying within the product's existing vocabulary
+- Use Tailwind CSS classes
 - Return the COMPLETE file — not a snippet
-
-LANGUAGE IS TYPESCRIPT/JSX — NEVER PYTHON. This is critical.
-The file will be executed by Node/Next.js, not Python. Any Python syntax
-will crash the page at runtime.
-
-FORBIDDEN (will cause runtime errors):
-- Tuple literals `("alice", 142)` → use arrays `["alice", 142]` or objects `{ name: "alice", value: 142 }`
-- f-strings `f"hello {name}"` → use template literals `` `hello ${name}` ``
-- `print(...)` → use `console.log(...)`
-- `def name():` → use `function name() {}` or `const name = () => {}`
-- `from X import Y` → use `import { Y } from "X"`
-- `True` / `False` / `None` → use `true` / `false` / `null`
-- `dict(...)` / `list(...)` → use `{}` / `[]`
-
-Before returning your JSON, mentally compile the code. Check every array literal for nested tuples. Check every string for f-prefix. Check that every bracket is balanced.
 
 OUTPUT: Return ONLY valid JSON, no markdown fences."""
 
@@ -127,7 +91,7 @@ def build_structural_transform_prompt(
     if di.get("design_tokens") or di.get("recommendations"):
         di_parts = []
         if di.get("design_tokens"):
-            di_parts.append(f"Design tokens (USE THESE — do not substitute generic slate/indigo):\n{json.dumps(di['design_tokens'], indent=2)[:1500]}")
+            di_parts.append(f"Design tokens: {json.dumps(di['design_tokens'], indent=2)[:1500]}")
         if di.get("recommendations"):
             di_parts.append(f"Recommendations: {json.dumps(di['recommendations'])[:500]}")
         di_text = "\n".join(di_parts)
@@ -159,31 +123,25 @@ Your previous output was REJECTED because it contained invalid JavaScript:
 
     {previous_syntax_error}
 
-This code would have crashed the Next.js dev server or broken the page at runtime.
-Remember: the file is TypeScript/JSX, not Python. Before returning this time,
-walk through your code mentally and check every array, every string, every
-function call. No tuples. No f-strings. No `True`/`False`/`None`. No `print`.
-No `def`. Balanced braces.
-
-Fix the specific problem above AND produce the same level of structural rebuild.
+This code would have crashed the Next.js dev server. The file is TypeScript/JSX,
+not Python — no tuples, no f-strings, no `True`/`False`/`None`, no `print`, no
+`def`, balanced braces. Fix the specific problem above AND produce the same
+level of structural rebuild.
 """
         else:
             retry_block = f"""
 ⚠️ ATTEMPT {attempt_number} — PREVIOUS ATTEMPT REJECTED
 
-Your previous output was REJECTED because the before/after looked too similar
-OR because it drifted into generic AI-dashboard styling (slate/indigo, rounded-2xl
-card-everything, invented subtitles, hero CTAs where none belong).
+Your previous output was REJECTED because the before/after looked too similar.
+The layout structure was too close to the original.
 
-This time:
-- DO NOT reference the original layout tree AT ALL — start from a blank tree.
-- DO NOT reach for slate/indigo/violet defaults. Use the product's own tokens.
-- DO NOT card-wrap every element. Use restraint.
-- The result must pass two tests: "Does this look like a different layout?"
-  AND "Does this still look like the SAME product?" Both must be yes.
+This time: DO NOT reference the original layout AT ALL.
+Start from a blank page. Place elements in a completely new arrangement.
+The result must pass this test: "Does this look like a different product?"
+If no → you will be rejected again.
 """
 
-    return f"""{retry_block}REBUILD this page structurally. Score: {score}/100.
+    return f"""{retry_block}REBUILD this page. Score: {score}/100.
 
 {weak_section}
 
@@ -192,9 +150,10 @@ This time:
 {ux_findings_text}
 
 Assessment: {reasoning}
+
 {intent_line}
 
-## ORIGINAL CODE — extract data and handlers, then discard the layout tree
+## ORIGINAL CODE — extract data and handlers, then DISCARD the layout
 File: {target_path}
 ```tsx
 {target_code}
@@ -205,50 +164,31 @@ File: {target_path}
 
 {f"## DESIGN INTELLIGENCE{chr(10)}{di_text}" if di_text else ""}
 
-## REBUILD PRINCIPLES
+## REBUILD REQUIREMENTS
 
-1. MATCH THE PRODUCT'S PERSONALITY. Before you write code, internally answer: is this
-   product minimal, editorial, playful, utilitarian, technical, or luxurious? Keep that
-   personality. Structure changes; voice does not.
+1. LAYOUT: Create a new page structure with semantic wrappers (header, main, section).
+   Use a max-width container (max-w-7xl mx-auto). Group content into card panels.
+   If the original is single-column, make it multi-column or grid-based.
 
-2. USE THE PRODUCT'S OWN DESIGN TOKENS. Colors, radius, typography, and density come
-   from the design tokens above (or from what you can infer from the original if none
-   are provided). Do NOT substitute generic slate / indigo / violet / rounded-2xl just
-   because it is your default.
+2. SPACING: Generous spacing throughout. Section gaps: space-y-10 or larger.
+   Card padding: p-6 minimum (p-8 preferred). Grid gaps: gap-6 minimum.
+   NO cramped layouts. Double whatever the original had.
 
-3. FIX STRUCTURE, NOT STYLING. The real problems are hierarchy, density, flow, and CTA
-   clarity. If the original is cramped, add breathing room. If it is flat, build a
-   hierarchy. If actions compete, demote the secondary ones. If content is
-   undifferentiated, group it.
+3. HIERARCHY: ONE primary heading per section (text-2xl+ font-bold).
+   Clear typographic scale: title > section heading > body > caption.
+   ONE dominant CTA per page — large, colored, prominent position.
+   All other actions demoted to text or outlined buttons.
 
-4. EVERY ELEMENT EARNS ITS PLACE. If you cannot give a concrete structural reason for
-   an element, delete it. No decorative wrappers. No invented "Overview" subtitles. No
-   stat cards if the page has no stats. No hero CTA if the page is not a landing page.
+4. COMPONENTS: Stats → card grid with large bold numbers + tiny uppercase labels.
+   Lists → card-wrapped sections with divide-y rows + metadata.
+   Forms → grouped sections with proper labels and spacing.
+   Buttons → properly sized (px-6 py-3) with hover states.
 
-## AVOID these AI-generated tropes (most common rejection cause)
+5. CLUTTER: Remove visual noise. Simplify dense areas. Every element earns its space.
 
-- Defaulting to slate / indigo / violet / purple gradients regardless of the product's palette
-- Wrapping everything in `rounded-2xl border bg-white` or `bg-slate-50` cards
-- `text-xs uppercase tracking-wider` labels unless the original already uses that treatment
-- Stat-card grids on pages that do not display stats
-- A single hero CTA on pages that are not landing / marketing
-- Gradients, glows, glassmorphism, or emoji bullets that were not in the source
-- "Overview" / "Welcome back" / "Quick actions" subtitles you invented
-- `max-w-7xl mx-auto` by default — match the width the product actually uses
-- Centering everything just to make it look balanced
+## EXAMPLE — this is the level of change required
 
-## STRUCTURAL CHANGES TO MAKE
-
-- Semantic wrappers where missing: header, main, section, aside
-- Clearer hierarchy: one primary heading per section, consistent type scale
-- Grouping: related controls and data in the same container
-- Ordering: most important content first
-- Density: generous spacing in cramped areas, tightening in sparse ones
-- Action clarity: ONE primary action per view, others demoted to plain / ghost buttons
-
-## EXAMPLE — the level of structural change required
-
-BEFORE (flat, cramped, three competing CTAs):
+BEFORE (flat, cramped, multi-CTA):
 ```tsx
 <div className="p-4">
   <h1>Dashboard</h1>
@@ -261,43 +201,44 @@ BEFORE (flat, cramped, three competing CTAs):
 </div>
 ```
 
-AFTER — same data and handlers, new topology. This example deliberately shows
-STRUCTURE ONLY — className values are intentionally omitted so you do not copy generic
-SaaS defaults. Your own output MUST be fully styled, using the product's own design
-tokens and existing Tailwind vocabulary, NOT the slate / indigo / rounded-2xl default:
-
+AFTER (structured, spacious, single primary CTA):
 ```tsx
-<div>
-  <header>
-    <div>
-      <h1>Dashboard</h1>
-    </div>
-    <button onClick={{addUser}}>Add user</button>
-  </header>
-  <main>
-    <section aria-label="metrics">
+<div className="min-h-screen bg-slate-50">
+  <header className="border-b bg-white px-8 py-6">
+    <div className="max-w-7xl mx-auto flex items-center justify-between">
       <div>
-        <p>Users</p>
-        <p>{{users}}</p>
+        <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
+        <p className="text-sm text-slate-500 mt-1">Overview</p>
       </div>
-      <div>
-        <p>Revenue</p>
-        <p>${{revenue}}</p>
+      <button onClick={{addUser}} className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700">
+        + Add User
+      </button>
+    </div>
+  </header>
+  <main className="max-w-7xl mx-auto px-8 py-10 space-y-10">
+    <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="bg-white rounded-2xl border p-8">
+        <p className="text-xs font-medium uppercase tracking-wider text-slate-400">Users</p>
+        <p className="text-4xl font-bold text-slate-900 mt-2">{{users}}</p>
+      </div>
+      <div className="bg-white rounded-2xl border p-8">
+        <p className="text-xs font-medium uppercase tracking-wider text-slate-400">Revenue</p>
+        <p className="text-4xl font-bold text-slate-900 mt-2">${{revenue}}</p>
       </div>
     </section>
-    <section aria-label="activity">
-      <div>
-        <h2>Activity</h2>
-        <div>
-          <button onClick={{refresh}}>Refresh</button>
-          <button onClick={{exportData}}>Export</button>
+    <section className="bg-white rounded-2xl border overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-5 border-b">
+        <h2 className="text-lg font-semibold">Activity</h2>
+        <div className="flex gap-2">
+          <button onClick={{refresh}} className="text-sm text-slate-500 hover:text-slate-900">Refresh</button>
+          <button onClick={{exportData}} className="text-sm text-slate-500 hover:text-slate-900">Export</button>
         </div>
       </div>
-      <ul>
+      <ul className="divide-y">
         {{items.map(i => (
-          <li key={{i.id}}>
-            <span>{{i.name}}</span>
-            <span>{{i.status}}</span>
+          <li key={{i.id}} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50">
+            <span className="font-medium text-slate-900">{{i.name}}</span>
+            <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-600">{{i.status}}</span>
           </li>
         ))}}
       </ul>
@@ -306,14 +247,9 @@ tokens and existing Tailwind vocabulary, NOT the slate / indigo / rounded-2xl de
 </div>
 ```
 
-Structural differences to notice:
-- Flat `div` → semantic `header` / `main` / `section`
-- Three equal-weight buttons → one primary action in the header, two demoted next to the list
-- Undifferentiated metrics → grouped in their own metrics section
-- Orphaned list → grouped under an activity section with its own header
+Note: COMPLETELY different JSX tree. New header/main/section wrappers. Stats in card grid. List in card with header. One primary CTA. Same data + handlers.
 
-Your output must show this level of structural difference AND be fully styled using the
-product's existing tokens, colors, typography, and Tailwind vocabulary.
+YOUR OUTPUT must show this level of structural difference.
 
 ## OUTPUT FORMAT
 

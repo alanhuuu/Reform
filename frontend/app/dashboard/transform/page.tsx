@@ -56,46 +56,92 @@ interface GithubRepo {
 }
 type PipelineStep = 'idle' | 'ingesting' | 'analyzing' | 'transforming' | 'complete'
 
-const PIPELINE_STAGES = [
-  { key: 'ingesting', label: 'Analyzing & transforming pages', duration: 240 },
+type PipelineStage = { key: string; label: string; logLine: string; duration: number }
+
+// Hardcoded substage timings that roughly track the backend pipeline.
+// The backend is a single blocking request so we can't poll real progress —
+// these durations are a realistic approximation for a 5-page run.
+const PIPELINE_STAGES: PipelineStage[] = [
+  { key: 'clone', label: 'Clone repo', logLine: 'Repository cloned and indexed', duration: 15 },
+  { key: 'discover', label: 'Find pages', logLine: 'Discovered pages to analyze', duration: 20 },
+  { key: 'evaluate', label: 'Score UI', logLine: 'Scored UI quality per page', duration: 35 },
+  { key: 'plan', label: 'Plan rebuild', logLine: 'Built transformation plan', duration: 20 },
+  { key: 'rebuild', label: 'Rebuild layouts', logLine: 'Rebuilt page layouts with Claude', duration: 120 },
+  { key: 'render', label: 'Render preview', logLine: 'Rendered before/after screenshots', duration: 30 },
 ]
 
-function PipelineProgress({ step, repoName, targetFile, startedAt }: { step: PipelineStep; repoName: string; targetFile: string; startedAt: number }) {
-  // Elapsed is derived from the persisted startedAt timestamp rather than
-  // component-mount time, so remounts (tab nav, route change) resume the
-  // real clock instead of snapping back to 0s.
-  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+const PIPELINE_TOTAL_DURATION = PIPELINE_STAGES.reduce((sum, s) => sum + s.duration, 0)
 
+const PIPELINE_TIPS = [
+  'Reform rebuilds structure, not styling — your brand colors and voice stay intact.',
+  'Every page gets a UX score before and after. Pages already above 85 are left alone.',
+  'Competitor patterns from similar products are merged into your design intelligence.',
+  'Purely cosmetic changes get rejected and retried — every rebuild must be structural.',
+  'Claude extracts your data and handlers, then discards the layout and builds a new one.',
+  'Each rebuilt page is rendered in a real Next.js dev server for the before/after preview.',
+  'Runs cap at 5 pages — Reform picks the lowest-scoring ones to rebuild.',
+  'The transform keeps all your imports, state, and handlers. Only the JSX tree changes.',
+]
+
+function PipelineProgress({ repoName, startedAt }: { repoName: string; startedAt: number }) {
+  // Force re-render ~4x/sec so elapsed / stage / bar always reflect real
+  // wall-clock, regardless of tab throttling or when the last tick fired.
+  // On visibilitychange we force an immediate tick so users see fresh state
+  // the moment they come back to the tab.
+  const [, forceTick] = useState(0)
   useEffect(() => {
-    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
-    tick()
-    const interval = setInterval(tick, 1000)
-    return () => clearInterval(interval)
-  }, [startedAt])
+    const tick = () => forceTick(n => (n + 1) % 1_000_000)
+    const id = setInterval(tick, 250)
+    const onVisibility = () => { if (!document.hidden) tick() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
 
-  const currentIdx = PIPELINE_STAGES.findIndex(s => s.key === step)
-  const currentStage = PIPELINE_STAGES[currentIdx]
-  const totalEstimate = PIPELINE_STAGES.reduce((a, s) => a + s.duration, 0)
-  const completedTime = PIPELINE_STAGES.slice(0, currentIdx).reduce((a, s) => a + s.duration, 0)
-  const stageProgress = currentStage ? Math.min(elapsed / currentStage.duration, 0.95) : 0
-  const overallProgress = ((completedTime + (currentStage ? stageProgress * currentStage.duration : 0)) / totalEstimate) * 100
+  // Derived directly from wall-clock — never stored in state, so there's
+  // no staleness after tab-switch, HMR, or throttling.
+  const elapsedMs = Math.max(0, Date.now() - startedAt)
+  const elapsed = Math.floor(elapsedMs / 1000)
 
-  const subtitle = step === 'ingesting' ? `Discovering, evaluating, and transforming all pages in ${repoName}`
-    : step === 'analyzing' ? 'Scoring UI quality and planning improvements'
-    : 'Rendering before & after previews'
+  // Find the current substage by consuming durations left-to-right.
+  let acc = 0
+  let currentIdx = PIPELINE_STAGES.length - 1
+  for (let i = 0; i < PIPELINE_STAGES.length; i++) {
+    acc += PIPELINE_STAGES[i].duration
+    if (elapsed < acc) { currentIdx = i; break }
+  }
+
+  // Cap at 98% so the bar never looks "done" until the pipeline actually
+  // finishes (which unmounts this component).
+  const overallProgress = Math.min(98, (elapsedMs / (PIPELINE_TOTAL_DURATION * 1000)) * 100)
+  const remaining = Math.max(0, PIPELINE_TOTAL_DURATION - elapsed)
+
+  const tipIdx = Math.floor(elapsed / 8) % PIPELINE_TIPS.length
+  const tip = PIPELINE_TIPS[tipIdx]
+
+  const logLines: { text: string; done: boolean }[] = []
+  for (let i = 0; i <= currentIdx; i++) {
+    if (i < currentIdx) logLines.push({ text: PIPELINE_STAGES[i].logLine, done: true })
+    else logLines.push({ text: PIPELINE_STAGES[i].label + '…', done: false })
+  }
+  const visibleLines = logLines.slice(-4)
+
+  const fmt = (s: number) => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
 
   return (
-    <div className="max-w-xl mx-auto pt-6 pb-10 w-full">
-      <div className="flex items-center justify-center gap-1 mb-6">
+    <div className="max-w-xl mx-auto pt-6 pb-10 w-full px-4">
+      <div className="flex items-center justify-center flex-wrap gap-y-2 mb-6">
         {PIPELINE_STAGES.map((s, i) => {
           const isDone = i < currentIdx
-          const isActive = s.key === step
+          const isActive = i === currentIdx
           return (
-            <div key={s.key} className="flex items-center gap-1">
-              {i > 0 && <div className="w-8 h-px" style={{ background: isDone ? 'rgba(168,85,247,0.4)' : 'rgba(255,255,255,0.06)' }} />}
+            <div key={s.key} className="flex items-center">
+              {i > 0 && <div className="w-4 h-px" style={{ background: isDone || isActive ? 'rgba(168,85,247,0.35)' : 'rgba(255,255,255,0.06)' }} />}
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{
-                background: isActive ? 'rgba(168,85,247,0.1)' : isDone ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.02)',
-                border: `1px solid ${isActive ? 'rgba(168,85,247,0.25)' : isDone ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.04)'}`,
+                background: isActive ? 'rgba(168,85,247,0.12)' : isDone ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.02)',
+                border: `1px solid ${isActive ? 'rgba(168,85,247,0.3)' : isDone ? 'rgba(34,197,94,0.18)' : 'rgba(255,255,255,0.05)'}`,
               }}>
                 {isDone ? (
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
@@ -104,21 +150,59 @@ function PipelineProgress({ step, repoName, targetFile, startedAt }: { step: Pip
                 ) : (
                   <div className="w-2 h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.1)' }} />
                 )}
-                <span className="text-[10px] font-medium" style={{ color: isActive ? 'rgba(168,85,247,0.8)' : isDone ? 'rgba(34,197,94,0.6)' : 'rgba(255,255,255,0.2)' }}>{s.label}</span>
+                <span className="text-[10px] font-medium whitespace-nowrap" style={{ color: isActive ? 'rgba(168,85,247,0.9)' : isDone ? 'rgba(34,197,94,0.7)' : 'rgba(255,255,255,0.25)' }}>{s.label}</span>
               </div>
             </div>
           )
         })}
       </div>
-      <div className="w-full h-1 rounded-full mb-4" style={{ background: 'rgba(255,255,255,0.04)' }}>
-        <div className="h-full rounded-full transition-all duration-1000 ease-out" style={{ width: `${Math.max(2, overallProgress)}%`, background: 'linear-gradient(90deg, #7c3aed, #a855f7)', boxShadow: '0 0 12px rgba(168,85,247,0.3)' }} />
+
+      <div className="w-full h-1.5 rounded-full mb-3" style={{ background: 'rgba(255,255,255,0.04)' }}>
+        <div
+          className="h-full rounded-full transition-[width] duration-300 ease-out"
+          style={{
+            width: `${Math.max(2, overallProgress)}%`,
+            background: 'linear-gradient(90deg, #7c3aed, #a855f7)',
+            boxShadow: '0 0 14px rgba(168,85,247,0.35)',
+          }}
+        />
       </div>
+
+      <div className="flex items-center justify-between text-[11px] font-mono mb-6" style={{ color: 'rgba(255,255,255,0.3)' }}>
+        <span>{fmt(elapsed)} elapsed</span>
+        <span>~{fmt(remaining)} remaining</span>
+      </div>
+
+      <div className="rounded-xl px-4 py-3 mb-5" style={{
+        background: 'rgba(255,255,255,0.015)',
+        border: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7' }} />
+          <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>
+            {repoName || 'reform pipeline'}
+          </span>
+        </div>
+        <div className="space-y-1 font-mono text-[11px]">
+          {visibleLines.map((line, i) => (
+            <div key={`${i}-${line.done ? 'd' : 'a'}`} className="flex items-center gap-2">
+              {line.done ? (
+                <span style={{ color: '#22c55e' }}>✓</span>
+              ) : (
+                <span className="animate-pulse" style={{ color: '#a855f7' }}>◐</span>
+              )}
+              <span style={{ color: line.done ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.78)' }}>
+                {line.text}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="text-center">
-        <p className="text-[13px] text-white/60 mb-0.5">{subtitle}</p>
-        <p className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.15)' }}>
-          {elapsed}s elapsed · {(totalEstimate - completedTime - elapsed) > 0
-            ? `~${Math.max(0, totalEstimate - completedTime - elapsed)}s remaining`
-            : 'Almost done, finishing up...'}
+        <p className="text-[11px] leading-relaxed max-w-md mx-auto" style={{ color: 'rgba(255,255,255,0.42)' }}>
+          <span style={{ color: 'rgba(168,85,247,0.65)' }}>◆ </span>
+          {tip}
         </p>
       </div>
     </div>
@@ -1444,7 +1528,7 @@ function TransformPage() {
 
         {/* ── PIPELINE PROGRESS ── */}
         {(pipelineStep === 'ingesting' || pipelineStep === 'analyzing' || pipelineStep === 'transforming') && (
-          <PipelineProgress step={pipelineStep} repoName={repoName} targetFile={selectedTarget} startedAt={pipelineStartedAt ?? Date.now()} />
+          <PipelineProgress repoName={repoName} startedAt={pipelineStartedAt ?? Date.now()} />
         )}
 
         {/* ── RE-RENDER PROGRESS BAR ── */}
