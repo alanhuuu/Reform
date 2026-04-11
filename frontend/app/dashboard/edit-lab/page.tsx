@@ -254,8 +254,26 @@ const PROMPT_EXAMPLES = [
 
 const HIGHLIGHT_MS = 3200
 
+const LAB_PASSWORD = process.env.NEXT_PUBLIC_LAB_PASSWORD || 'reform2026'
+const LAB_UNLOCK_KEY = 'reform_lab_unlocked'
+
 export default function EditLabPage() {
   const { data: session } = useSession()
+  const [labUnlocked, setLabUnlocked] = useState(false)
+  const [labUnlockChecked, setLabUnlockChecked] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      if (localStorage.getItem(LAB_UNLOCK_KEY) === 'true') {
+        setLabUnlocked(true)
+      }
+    } catch {
+      /* storage disabled */
+    }
+    setLabUnlockChecked(true)
+  }, [])
+
   const [repoState, setRepoState] = useState<RepoState | null>(null)
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
@@ -786,6 +804,27 @@ export default function EditLabPage() {
       height: height * scale,
     }
   }, [dragStart, dragCurrent, isDragging, scale])
+
+  // Gate the full Lab behind a password. Attendees who don't know it see a
+  // "coming soon" teaser; the page still exists so they can read the feature
+  // description. Unlock persists via localStorage so we only ask once.
+  if (!labUnlockChecked) {
+    return null
+  }
+  if (!labUnlocked) {
+    return (
+      <LabComingSoon
+        onUnlock={() => {
+          try {
+            localStorage.setItem(LAB_UNLOCK_KEY, 'true')
+          } catch {
+            /* ignore */
+          }
+          setLabUnlocked(true)
+        }}
+      />
+    )
+  }
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6">
@@ -1648,6 +1687,217 @@ function SectionCrop({
           backgroundPosition: `${-rect.x * effectiveScale}px ${-rect.y * effectiveScale}px`,
         }}
       />
+    </div>
+  )
+}
+
+function LabComingSoon({ onUnlock }: { onUnlock: () => void }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState(false)
+  const [shake, setShake] = useState(false)
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    if (password.trim() === LAB_PASSWORD) {
+      setError(false)
+      onUnlock()
+    } else {
+      setError(true)
+      setShake(true)
+      setTimeout(() => setShake(false), 400)
+    }
+  }
+
+  return (
+    <div className="max-w-[960px] mx-auto px-4 sm:px-6 py-16">
+      <style>{`
+        @keyframes labGateShake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-6px); }
+          75% { transform: translateX(6px); }
+        }
+      `}</style>
+
+      {/* Header */}
+      <div className="text-center mb-10">
+        <div
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full mb-5"
+          style={{
+            background: 'rgba(168,85,247,0.08)',
+            border: '1px solid rgba(168,85,247,0.2)',
+          }}
+        >
+          <span
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ background: '#a855f7', boxShadow: '0 0 8px rgba(168,85,247,0.6)' }}
+          />
+          <span className="text-[10px] mono uppercase tracking-[0.14em]" style={{ color: 'rgba(196,181,253,0.9)' }}>
+            Coming Soon
+          </span>
+        </div>
+        <h1
+          className="text-[40px] sm:text-[48px] font-semibold text-white leading-[1.02] mb-4"
+          style={{ letterSpacing: '-0.03em' }}
+        >
+          The Lab
+        </h1>
+        <p
+          className="text-[15px] max-w-[560px] mx-auto leading-[1.65]"
+          style={{ color: 'rgba(255,255,255,0.5)' }}
+        >
+          Select any section of your live website, describe the change in plain English,
+          and Reform rewrites that slice of your source against a warm dev server so every
+          edit lands in seconds.
+        </p>
+      </div>
+
+      {/* Feature card */}
+      <div
+        className="rounded-2xl p-8 sm:p-10 mb-8"
+        style={{
+          background: 'linear-gradient(180deg, rgba(168,85,247,0.04) 0%, rgba(168,85,247,0.01) 100%)',
+          border: '1px solid rgba(168,85,247,0.15)',
+          boxShadow:
+            '0 1px 0 rgba(255,255,255,0.04) inset, 0 24px 80px rgba(0,0,0,0.5), 0 0 40px rgba(168,85,247,0.04)',
+        }}
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <LabFeatureCell
+            icon={
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+              </svg>
+            }
+            title="Click or drag to select"
+            body="Pick any section — navbar, hero, pricing card, a single button — or drag a rectangle across multiple elements."
+          />
+          <LabFeatureCell
+            icon={
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            }
+            title="Describe the change"
+            body="Plain English prompts — 'make this white background', 'reduce clutter', 'use a bigger font'. No CSS knowledge required."
+          />
+          <LabFeatureCell
+            icon={
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 3 21 3 21 8" />
+                <line x1="4" y1="20" x2="21" y2="3" />
+                <polyline points="21 16 21 21 16 21" />
+                <line x1="15" y1="15" x2="21" y2="21" />
+                <line x1="4" y1="4" x2="9" y2="9" />
+              </svg>
+            }
+            title="Instant preview + publish"
+            body="Reform rewrites your source in a warm dev server, renders the result in under 10 seconds, and pushes the diff to a new GitHub branch on approval."
+          />
+        </div>
+      </div>
+
+      {/* Password entry */}
+      <form
+        onSubmit={handleSubmit}
+        className="max-w-[420px] mx-auto flex flex-col items-center gap-3"
+        style={{ animation: shake ? 'labGateShake 0.4s ease-in-out' : undefined }}
+      >
+        <label
+          className="text-[10px] mono uppercase tracking-[0.14em] mb-1"
+          style={{ color: 'rgba(255,255,255,0.35)' }}
+        >
+          Have an access code?
+        </label>
+        <div className="flex items-center gap-2 w-full">
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value)
+              if (error) setError(false)
+            }}
+            placeholder="Enter access code"
+            className="flex-1 h-11 rounded-xl px-4 text-[13px] outline-none transition-all duration-200"
+            style={{
+              color: 'white',
+              background: 'rgba(255,255,255,0.03)',
+              border: `1px solid ${error ? 'rgba(239,68,68,0.45)' : 'rgba(255,255,255,0.08)'}`,
+              letterSpacing: '-0.005em',
+            }}
+            onFocus={(e) => {
+              if (!error) {
+                e.currentTarget.style.borderColor = 'rgba(168,85,247,0.45)'
+                e.currentTarget.style.background = 'rgba(168,85,247,0.04)'
+              }
+            }}
+            onBlur={(e) => {
+              if (!error) {
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
+                e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
+              }
+            }}
+          />
+          <button
+            type="submit"
+            disabled={!password.trim()}
+            className="h-11 px-5 rounded-xl text-[12.5px] font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.97]"
+            style={{
+              background: password.trim()
+                ? 'linear-gradient(135deg, #7c3aed, #6d28d9)'
+                : 'rgba(255,255,255,0.04)',
+              color: password.trim() ? 'white' : 'rgba(255,255,255,0.2)',
+              border: '1px solid rgba(168,85,247,0.3)',
+              boxShadow: password.trim() ? '0 0 24px rgba(124,58,237,0.25)' : 'none',
+              letterSpacing: '-0.005em',
+            }}
+          >
+            Unlock
+          </button>
+        </div>
+        {error && (
+          <div className="text-[11px]" style={{ color: 'rgba(248,113,113,0.9)' }}>
+            Incorrect code. Try again or contact the team for access.
+          </div>
+        )}
+        <div className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.25)' }}>
+          The Lab is gated during the hackathon. General access ships after the event.
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function LabFeatureCell({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ReactNode
+  title: string
+  body: string
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className="w-8 h-8 rounded-lg flex items-center justify-center mb-1"
+        style={{
+          color: '#a855f7',
+          background: 'rgba(168,85,247,0.08)',
+          border: '1px solid rgba(168,85,247,0.15)',
+        }}
+      >
+        {icon}
+      </div>
+      <div className="text-[13px] font-semibold text-white" style={{ letterSpacing: '-0.01em' }}>
+        {title}
+      </div>
+      <p className="text-[12px] leading-[1.6]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+        {body}
+      </p>
     </div>
   )
 }
