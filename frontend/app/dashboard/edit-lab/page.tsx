@@ -770,26 +770,15 @@ export default function EditLabPage() {
         }
       `}</style>
 
-      <div className="mb-8">
-        <div
-          className="text-[11px] font-medium uppercase tracking-[0.14em]"
-          style={{ color: '#10B981', fontFamily: 'var(--font-mono), monospace' }}
-        >
-          THE LAB
+      <div className="mb-6">
+        <div className="text-[11px] mono uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>
+          The Lab
         </div>
-        <h1
-          className="text-[34px] font-semibold text-white mt-2.5"
-          style={{ letterSpacing: '-0.028em', lineHeight: 1.05 }}
-        >
+        <h1 className="text-[28px] font-semibold text-white mt-1" style={{ letterSpacing: '-0.02em' }}>
           Select a section. Describe the change.
         </h1>
-        <p
-          className="text-[14px] mt-3 max-w-[640px] leading-[1.6]"
-          style={{ color: '#A1A1AA' }}
-        >
-          The Lab loads your repo&apos;s live website. Click or drag to select any region,
-          describe the change, and Reform rewrites that slice of your source against a warm
-          dev server so every subsequent edit lands in seconds.
+        <p className="text-[13px] mt-1.5 max-w-[620px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
+          The Lab loads the current website from your repo. Click or drag to select any region, write a short prompt, and Reform applies the change to that part of your source — the dev server stays warm, so repeat edits are fast.
         </p>
       </div>
 

@@ -420,7 +420,7 @@ function DiscoveryPageInner() {
           <div className="w-full h-1.5 rounded-full mb-5" style={{ background: 'rgba(255,255,255,0.04)' }}>
             <div
               className="h-full rounded-full transition-all duration-1000 ease-out"
-              style={{ width: `${progressPct}%`, background: 'linear-gradient(90deg, #10B981, #34D399)', boxShadow: '0 0 14px rgba(16,185,129,0.3)' }}
+              style={{ width: `${progressPct}%`, background: 'linear-gradient(90deg, #7c3aed, #a855f7)', boxShadow: '0 0 12px rgba(168,85,247,0.25)' }}
             />
           </div>
 
@@ -491,15 +491,15 @@ function DiscoveryPageInner() {
           <div className="mt-8 flex items-center justify-center gap-2 min-h-[18px]">
             <span
               className="w-1 h-1 rounded-full"
-              style={{ background: '#10B981', animation: 'discoveryDotPulse 1.4s ease-in-out infinite' }}
+              style={{ background: '#a855f7', animation: 'discoveryDotPulse 1.4s ease-in-out infinite' }}
             />
             <span
               className="w-1 h-1 rounded-full"
-              style={{ background: '#10B981', animation: 'discoveryDotPulse 1.4s ease-in-out infinite 0.2s' }}
+              style={{ background: '#a855f7', animation: 'discoveryDotPulse 1.4s ease-in-out infinite 0.2s' }}
             />
             <span
               className="w-1 h-1 rounded-full"
-              style={{ background: '#10B981', animation: 'discoveryDotPulse 1.4s ease-in-out infinite 0.4s' }}
+              style={{ background: '#a855f7', animation: 'discoveryDotPulse 1.4s ease-in-out infinite 0.4s' }}
             />
           </div>
 
@@ -521,71 +521,25 @@ function DiscoveryPageInner() {
 
   // ── QUESTIONNAIRE ──
   return (
-    <div className="flex items-start justify-center min-h-[calc(100vh-60px)] px-4 pt-20 pb-16">
-      <div className="w-full max-w-[540px]">
-        <div className="flex flex-col items-center text-center mb-10">
-          <div
-            className="text-[11px] font-medium uppercase tracking-[0.14em] mb-3"
-            style={{ color: '#10B981', fontFamily: 'var(--font-mono), monospace' }}
-          >
-            PROJECT DISCOVERY
-          </div>
-          <h1
-            className="text-[34px] sm:text-[40px] font-semibold text-white leading-[1.05] mb-3"
-            style={{ letterSpacing: '-0.028em' }}
-          >
-            Tell us what you&apos;re building
-          </h1>
-          <p className="text-[14px] max-w-[420px]" style={{ color: '#A1A1AA' }}>
-            A few answers and Reform finds the best design references in your space.
-          </p>
+    <div className="flex items-center justify-center min-h-[70vh] px-6">
+      <div className="w-full max-w-lg">
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-bold text-white mb-2" style={{ letterSpacing: '-0.02em' }}>Project Discovery</h1>
+          <p className="text-[13px]" style={{ color: 'rgba(255,255,255,0.3)' }}>Answer a few questions to find the best design references.</p>
         </div>
 
         {/* Progress */}
-        <div className="flex items-center justify-between mb-3">
-          <span
-            className="text-[10px] font-medium uppercase tracking-[0.1em]"
-            style={{ color: '#6B7280' }}
-          >
-            Step {currentStep + 1} / {QUESTIONS.length}
-          </span>
-          <span
-            className="text-[10px]"
-            style={{ color: '#6B7280', fontFamily: 'var(--font-mono), monospace' }}
-          >
-            {Math.round(((currentStep + 1) / QUESTIONS.length) * 100)}%
-          </span>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[10px] font-medium" style={{ color: 'rgba(255,255,255,0.2)' }}>Question {currentStep + 1} of {QUESTIONS.length}</span>
+          <span className="text-[10px] font-mono" style={{ color: 'rgba(255,255,255,0.12)' }}>{Math.round(((currentStep + 1) / QUESTIONS.length) * 100)}%</span>
         </div>
-        <div
-          className="w-full h-[2px] rounded-full mb-10"
-          style={{ background: 'rgba(255,255,255,0.05)' }}
-        >
-          <div
-            className="h-full rounded-full transition-all duration-500 ease-out"
-            style={{
-              width: `${((currentStep + 1) / QUESTIONS.length) * 100}%`,
-              background: 'linear-gradient(90deg, #10B981, #34D399)',
-              boxShadow: '0 0 12px rgba(16,185,129,0.35)',
-            }}
-          />
+        <div className="w-full h-[2px] rounded-full mb-8" style={{ background: 'rgba(255,255,255,0.04)' }}>
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${((currentStep + 1) / QUESTIONS.length) * 100}%`, background: 'linear-gradient(90deg, #7c3aed, #a855f7)' }} />
         </div>
 
-        {/* Question card */}
-        <div
-          className="rounded-[20px] p-7"
-          style={{
-            background: '#111113',
-            border: '1px solid rgba(255,255,255,0.06)',
-            boxShadow:
-              '0 1px 0 rgba(255,255,255,0.04) inset, 0 24px 56px rgba(0,0,0,0.5)',
-          }}
-        >
-          <label
-            className="block text-white font-semibold text-[18px] mb-5"
-            style={{ letterSpacing: '-0.018em' }}
-          >
-            {currentQ.label}
-          </label>
+        {/* Question */}
+        <div className="surface-interactive rounded-xl p-6">
+          <label className="block text-white font-semibold text-lg mb-4" style={{ letterSpacing: '-0.01em' }}>{currentQ.label}</label>
           <input
             autoFocus
             type="text"
@@ -593,109 +547,42 @@ function DiscoveryPageInner() {
             value={answers[currentQ.key] || ''}
             onChange={(e) => setAnswers({ ...answers, [currentQ.key]: e.target.value })}
             onKeyDown={handleKeyDown}
-            className="w-full h-12 rounded-[12px] px-4 text-[14px] outline-none transition-all duration-200"
-            style={{
-              color: '#FFFFFF',
-              background: '#0B0B0E',
-              border: '1px solid rgba(255,255,255,0.08)',
-              letterSpacing: '-0.01em',
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(16,185,129,0.45)'
-              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(16,185,129,0.15)'
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
-              e.currentTarget.style.boxShadow = 'none'
-            }}
+            className="w-full bg-transparent px-4 py-3 text-sm outline-none rounded-lg transition-colors focus:border-purple-500/30"
+            style={{ color: 'white', border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}
           />
 
-          <div className="flex items-center gap-2 mt-6">
+          <div className="flex items-center gap-3 mt-5">
             {currentStep > 0 && (
-              <button
-                onClick={() => setCurrentStep(currentStep - 1)}
-                className="h-10 px-4 rounded-[12px] text-[12.5px] font-medium transition-all duration-200"
-                style={{
-                  color: '#A1A1AA',
-                  background: 'transparent',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = '#FFFFFF'
-                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.16)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = '#A1A1AA'
-                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
-                }}
-              >
+              <button onClick={() => setCurrentStep(currentStep - 1)} className="btn-ghost px-4 py-2 rounded-lg text-[12px] font-medium">
                 Back
               </button>
             )}
             <button
               onClick={handleNext}
               disabled={!isOptional && !answers[currentQ.key]?.trim()}
-              className="h-10 px-5 rounded-[12px] text-[12.5px] font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-5 py-2 rounded-lg text-[12px] font-semibold transition-all active:scale-[0.98]"
               style={{
-                background: '#10B981',
-                color: '#06221B',
-                border: '1px solid rgba(16,185,129,0.6)',
-                boxShadow:
-                  '0 1px 0 rgba(255,255,255,0.16) inset, 0 8px 24px rgba(16,185,129,0.22)',
-                letterSpacing: '-0.01em',
-              }}
-              onMouseEnter={(e) => {
-                if (!e.currentTarget.disabled) {
-                  e.currentTarget.style.background = '#34D399'
-                  e.currentTarget.style.transform = 'translateY(-1px)'
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#10B981'
-                e.currentTarget.style.transform = 'translateY(0)'
+                background: (isOptional || answers[currentQ.key]?.trim()) ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'rgba(255,255,255,0.03)',
+                color: (isOptional || answers[currentQ.key]?.trim()) ? 'white' : 'rgba(255,255,255,0.15)',
+                boxShadow: (isOptional || answers[currentQ.key]?.trim()) ? '0 0 20px rgba(124,58,237,0.12)' : 'none',
               }}
             >
-              {isLastStep ? 'Start discovery' : 'Continue'}
+              {isLastStep ? 'Discover Competitors' : 'Next'}
             </button>
             {isOptional && !answers[currentQ.key]?.trim() && (
-              <button
-                onClick={handleNext}
-                className="text-[11px] font-medium transition-colors"
-                style={{ color: '#6B7280' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = '#A1A1AA')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = '#6B7280')}
-              >
-                Skip
-              </button>
+              <button onClick={handleNext} className="text-[11px] font-medium transition-colors hover:text-white/40" style={{ color: 'rgba(255,255,255,0.2)' }}>Skip</button>
             )}
-            <span
-              className="text-[10px] ml-auto font-medium"
-              style={{ color: '#3F3F46', fontFamily: 'var(--font-mono), monospace' }}
-            >
-              ⏎ Enter
-            </span>
+            <span className="text-[10px] ml-auto" style={{ color: 'rgba(255,255,255,0.1)' }}>Enter ↵</span>
           </div>
         </div>
 
         {/* Previous answers */}
         {currentStep > 0 && (
-          <div className="mt-6 space-y-0.5">
+          <div className="mt-6 space-y-1">
             {QUESTIONS.slice(0, currentStep).map((q) => (
-              <div
-                key={q.key}
-                className="flex items-center justify-between py-2.5 px-3 rounded-[10px] cursor-pointer transition-colors"
-                onClick={() => setCurrentStep(QUESTIONS.indexOf(q))}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = 'rgba(255,255,255,0.025)')
-                }
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              >
-                <span className="text-[11px]" style={{ color: '#6B7280' }}>
-                  {q.label}
-                </span>
-                <span className="text-[11px] font-medium text-white truncate ml-4 max-w-[60%]">
-                  {answers[q.key]}
-                </span>
+              <div key={q.key} className="flex items-center justify-between py-2 px-3 rounded-lg cursor-pointer transition-colors hover:bg-white/[0.02]" onClick={() => setCurrentStep(QUESTIONS.indexOf(q))}>
+                <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.15)' }}>{q.label}</span>
+                <span className="text-[11px] font-medium text-white">{answers[q.key]}</span>
               </div>
             ))}
           </div>
