@@ -137,3 +137,14 @@ class UXLabSession(Base):
     findings_json = Column(JSON, nullable=False, default=list)
     status = Column(String, nullable=False, default="pending")  # pending / complete / error
     created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+class SiteVisit(Base):
+    """Tracks individual page visit durations for analytics."""
+    __tablename__ = "site_visits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    github_user_id = Column(String, nullable=True, index=True)
+    path = Column(String, nullable=False, default="/")
+    duration_seconds = Column(Integer, nullable=False, default=0)
+    visited_at = Column(DateTime(timezone=True), default=_utcnow)
