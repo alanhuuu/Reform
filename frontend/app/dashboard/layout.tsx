@@ -111,13 +111,13 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3 sm:gap-8 min-w-0">
             <Link href="/" className="flex items-center gap-3 flex-shrink-0">
               <div
-                className="w-10 h-10 rounded-2xl flex items-center justify-center"
+                className="w-12 h-12 rounded-2xl flex items-center justify-center overflow-hidden"
                 style={{
                   background: 'linear-gradient(180deg, rgba(124,140,255,0.2) 0%, rgba(124,140,255,0.08) 100%)',
                   border: '1px solid rgba(170,180,255,0.16)',
                 }}
               >
-                <Image src="/reform_logo.png" alt="Reform" width={20} height={20} className="object-contain" />
+                <Image src="/reform_justlogo.png" alt="Reform" width={36} height={36} className="object-contain" />
               </div>
               <div className="hidden sm:block">
                 <div className="text-[14px] font-semibold text-white" style={{ letterSpacing: '-0.03em' }}>Reform</div>

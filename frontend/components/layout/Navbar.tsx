@@ -28,13 +28,13 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-5 sm:px-8 h-16 sm:h-[72px] flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5 min-w-0">
           <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+            className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden"
             style={{
               background: 'linear-gradient(180deg, rgba(124,140,255,0.16) 0%, rgba(124,140,255,0.06) 100%)',
               border: '1px solid rgba(170,180,255,0.12)',
             }}
           >
-            <Image src="/reform_logo.png" alt="Reform" width={20} height={20} className="object-contain" />
+            <Image src="/reform_justlogo.png" alt="Reform" width={34} height={34} className="object-contain" />
           </div>
           <div className="leading-none">
             <div className="text-[15px] font-semibold text-white" style={{ letterSpacing: '-0.02em' }}>Reform</div>

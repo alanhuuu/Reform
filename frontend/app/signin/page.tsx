@@ -44,13 +44,13 @@ function SignInContent() {
           }}
         >
           <div
-            className="w-14 h-14 rounded-2xl mx-auto mb-6 flex items-center justify-center"
+            className="w-16 h-16 rounded-2xl mx-auto mb-6 flex items-center justify-center overflow-hidden"
             style={{
               background: 'linear-gradient(180deg, rgba(124,140,255,0.2) 0%, rgba(124,140,255,0.08) 100%)',
               border: '1px solid rgba(170,180,255,0.16)',
             }}
           >
-            <Image src="/reform_logo.png" alt="Reform" width={24} height={24} className="object-contain" />
+            <Image src="/reform_justlogo.png" alt="Reform" width={48} height={48} className="object-contain" />
           </div>
 
           <h1 className="text-xl font-bold text-white mb-2" style={{ letterSpacing: '-0.02em' }}>
