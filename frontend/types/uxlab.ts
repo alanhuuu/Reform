@@ -2,12 +2,6 @@ export type FindingSeverity = 'critical' | 'major' | 'minor';
 export type FindingType    = 'ISSUE' | 'WARNING' | 'POSITIVE';
 export type FindingStatus  = 'open' | 'queued' | 'patched' | 'dismissed';
 
-export interface CompetitorEvidence {
-  url: string;
-  screenshotUrl: string;
-  annotation: string; // one sentence: what the competitor does differently
-}
-
 export interface Finding {
   id: string;
   type: FindingType;
@@ -19,8 +13,6 @@ export interface Finding {
   principle: string;
   principleExplanation: string;
   recommendation: string;
-  requiresCompetitorEvidence: boolean;
-  competitorEvidence?: CompetitorEvidence[];
   annotation: { xPercent: number; yPercent: number };
 }
 

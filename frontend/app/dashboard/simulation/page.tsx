@@ -92,18 +92,7 @@ function toImageSrc(image: string) {
   return image.startsWith('data:') ? image : `data:image/png;base64,${image}`
 }
 
-function getCompetitorUrls(): string[] {
-  try {
-    const raw = sessionStorage.getItem('refineui_discovery')
-    if (!raw) return []
-    const data = JSON.parse(raw)
-    return Array.isArray(data?.selected_for_analysis) ? data.selected_for_analysis.slice(0, 3) : []
-  } catch {
-    return []
-  }
-}
-
-async function analyzeUxLab(url: string, page: string, signal?: AbortSignal): Promise<UXLabSession> {
+async function analyzeUxLab(url: string, page: string, workspaceId: string, signal?: AbortSignal): Promise<UXLabSession> {
   const response = await fetch(apiUrl('/api/ux-lab/analyze'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -111,8 +100,7 @@ async function analyzeUxLab(url: string, page: string, signal?: AbortSignal): Pr
     body: JSON.stringify({
       url,
       page,
-      competitor_urls: getCompetitorUrls(),
-      workspace_id: 'local',
+      workspace_id: workspaceId,
       analysis_only: true,
     }),
   })
@@ -139,12 +127,6 @@ async function analyzeUxLab(url: string, page: string, signal?: AbortSignal): Pr
       principle: String(finding.principle ?? ''),
       principleExplanation: String(finding.principle_explanation ?? ''),
       recommendation: String(finding.recommendation ?? ''),
-      requiresCompetitorEvidence: Boolean(finding.requires_competitor_evidence),
-      competitorEvidence: ((finding.competitor_evidence as Record<string, unknown>[] | undefined) ?? []).map((evidence) => ({
-        url: String(evidence.url ?? ''),
-        screenshotUrl: String(evidence.screenshot_url ?? ''),
-        annotation: String(evidence.annotation ?? ''),
-      })),
       annotation: {
         xPercent: Number((finding.annotation as { xPercent?: number } | undefined)?.xPercent ?? 50),
         yPercent: Number((finding.annotation as { yPercent?: number } | undefined)?.yPercent ?? 50),
@@ -622,7 +604,7 @@ export default function SimulationPage() {
 
     const controller = new AbortController()
 
-    analyzeUxLab(targetUrl, selectedScreen.route, controller.signal)
+    analyzeUxLab(targetUrl, selectedScreen.route, session?.githubId ?? 'anonymous', controller.signal)
       .then((result) => {
         analysisCache.current[cacheKey] = result
         try {

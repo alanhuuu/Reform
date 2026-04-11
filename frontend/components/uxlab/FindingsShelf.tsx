@@ -604,35 +604,7 @@ export default function FindingsShelf({
                   <div style={{ fontSize: 12, color: 'var(--reform-text-primary)', lineHeight: 1.6 }}>{activeFinding.recommendation}</div>
                 </div>
 
-                {activeFinding.competitorEvidence && activeFinding.competitorEvidence.length > 0 && (
-                  <div style={{ marginTop: 16 }}>
-                    <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--reform-text-muted)', marginBottom: 8 }}>
-                      Competitor Comparisons
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      {activeFinding.competitorEvidence.map((evidence, i) => (
-                        <div key={i} style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.03)' }}>
-                          {evidence.screenshotUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={evidence.screenshotUrl}
-                              alt={`Competitor screenshot ${i + 1}`}
-                              style={{ width: '100%', display: 'block', maxHeight: 120, objectFit: 'cover', objectPosition: 'top' }}
-                            />
-                          )}
-                          <div style={{ padding: '8px 10px' }}>
-                            <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(167,139,250,0.7)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {evidence.url}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--reform-text-secondary)', lineHeight: 1.55 }}>
-                              {evidence.annotation}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+
               </>
             ) : (
               <div className="shelf-empty-detail">

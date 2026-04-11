@@ -34,24 +34,6 @@ def _compress_to_jpeg(png_bytes: bytes, quality: int = 85) -> bytes:
     return buf.getvalue()
 
 
-async def take_competitor_screenshot_b64(url: str) -> str:
-    """Take a viewport-only screenshot of a competitor URL, compressed to stay within Claude limits."""
-    logger.info("Taking competitor screenshot of %s", url)
-    from playwright.async_api import async_playwright
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page(viewport={"width": 1440, "height": 900})
-        try:
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            await page.wait_for_timeout(2000)
-            # Viewport-only (no full_page) to avoid multi-thousand-pixel heights
-            png_bytes = await page.screenshot(type="png", full_page=False)
-        finally:
-            await browser.close()
-
-    jpeg_bytes = _compress_to_jpeg(png_bytes)
-    return base64.b64encode(jpeg_bytes).decode("utf-8")
-
 
 async def take_screenshot_b64(url: str) -> str:
     """Take a screenshot of a URL and return base64-encoded PNG."""
