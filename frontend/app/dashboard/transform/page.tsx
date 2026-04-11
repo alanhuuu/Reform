@@ -727,7 +727,7 @@ function TransformPage() {
   const [commits, setCommits] = useState<CommitEntry[]>(INITIAL_COMMITS)
   const [changeStatus, setChangeStatus] = useState<'pending' | 'accepted' | 'rejected'>('pending')
   const [showSuggestModal, setShowSuggestModal] = useState(false)
-  const [suggestTab, setSuggestTab] = useState<'text' | 'voice'>('text')
+  // Voice prompt tab was removed — only the text flow is supported now.
   const [suggestion, setSuggestion] = useState('')
   // Refinement status card state — floating bottom-right feedback
   const [refineStatus, setRefineStatus] = useState<{
@@ -1251,7 +1251,6 @@ function TransformPage() {
   }
 
   function openSuggestModal() {
-    setSuggestTab('text')
     setShowSuggestModal(true)
   }
 
@@ -1587,7 +1586,7 @@ function TransformPage() {
                 </div>
                 <div>
                   <h2 className="text-white font-semibold text-[15px]">Suggest an Edit</h2>
-                  <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>Choose how you&apos;d like to describe your change</p>
+                  <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>Describe the change you&apos;d like Reform to apply</p>
                 </div>
               </div>
               <button onClick={() => setShowSuggestModal(false)} className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-white/[0.05]" style={{ color: 'rgba(255,255,255,0.3)' }}>
@@ -1595,78 +1594,41 @@ function TransformPage() {
               </button>
             </div>
 
-            {/* Tabs */}
-            <div className="flex px-6 pt-4 gap-1">
-              {([
-                { key: 'text' as const, label: 'Text Prompt', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg> },
-                { key: 'voice' as const, label: 'Voice Prompt', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg> },
-              ]).map(tab => (
-                <button
-                  key={tab.key}
-                  onClick={() => setSuggestTab(tab.key)}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-[11px] font-medium transition-all duration-200"
-                  style={suggestTab === tab.key ? {
-                    background: 'rgba(168,85,247,0.06)',
-                    color: 'white',
-                    borderTop: '2px solid #a855f7',
-                    borderLeft: '1px solid rgba(255,255,255,0.06)',
-                    borderRight: '1px solid rgba(255,255,255,0.06)',
-                    boxShadow: '0 -4px 12px rgba(168,85,247,0.06)',
-                  } : {
-                    color: 'rgba(255,255,255,0.35)',
-                    border: '1px solid transparent',
-                  }}
-                >
-                  {tab.icon}
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab Content */}
-            <div className="px-6 pb-6">
+            {/* Text Prompt (voice prompt removed) */}
+            <div className="px-6 pt-5 pb-6">
               <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-
-                {/* TEXT PROMPT TAB */}
-                {suggestTab === 'text' && (
-                  <div className="p-5">
-                    <textarea
-                      autoFocus
-                      value={suggestion}
-                      onChange={e => setSuggestion(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) handleSuggestSubmit() }}
-                      placeholder="Describe what you'd like to change... (e.g., 'Make the sidebar collapsible', 'Change the accent color to blue')"
-                      className="w-full bg-transparent text-[13px] text-white outline-none resize-none placeholder:text-white/20"
-                      style={{ minHeight: '140px', lineHeight: '1.7' }}
-                    />
-                    <div className="flex items-center justify-between mt-4 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-                      <span className="text-[10px] flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.15)' }}>
-                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>&#8984;</kbd>
-                        <span>+</span>
-                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>Enter</kbd>
-                        <span className="ml-1">to submit</span>
-                      </span>
-                      <button
-                        onClick={() => handleSuggestSubmit()}
-                        disabled={!suggestion.trim()}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[11px] font-semibold transition-all active:scale-[0.97]"
-                        style={{
-                          background: suggestion.trim() ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'rgba(255,255,255,0.04)',
-                          color: suggestion.trim() ? 'white' : 'rgba(255,255,255,0.2)',
-                          boxShadow: suggestion.trim() ? '0 0 25px rgba(124,58,237,0.25)' : 'none',
-                        }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-                        Send to AI
-                      </button>
-                    </div>
+                <div className="p-5">
+                  <textarea
+                    autoFocus
+                    value={suggestion}
+                    onChange={e => setSuggestion(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) handleSuggestSubmit() }}
+                    placeholder="Describe what you'd like to change... (e.g., 'Make the sidebar collapsible', 'Change the accent color to blue')"
+                    className="w-full bg-transparent text-[13px] text-white outline-none resize-none placeholder:text-white/20"
+                    style={{ minHeight: '140px', lineHeight: '1.7' }}
+                  />
+                  <div className="flex items-center justify-between mt-4 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                    <span className="text-[10px] flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.15)' }}>
+                      <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>&#8984;</kbd>
+                      <span>+</span>
+                      <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>Enter</kbd>
+                      <span className="ml-1">to submit</span>
+                    </span>
+                    <button
+                      onClick={() => handleSuggestSubmit()}
+                      disabled={!suggestion.trim()}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[11px] font-semibold transition-all active:scale-[0.97]"
+                      style={{
+                        background: suggestion.trim() ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'rgba(255,255,255,0.04)',
+                        color: suggestion.trim() ? 'white' : 'rgba(255,255,255,0.2)',
+                        boxShadow: suggestion.trim() ? '0 0 25px rgba(124,58,237,0.25)' : 'none',
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                      Send to AI
+                    </button>
                   </div>
-                )}
-
-                {/* VOICE PROMPT TAB */}
-                {suggestTab === 'voice' && <VoiceOrb onFinalPrompt={(prompt) => {
-                  handleSuggestSubmit(prompt)
-                }} />}
+                </div>
               </div>
             </div>
           </div>
