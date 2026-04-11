@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useProgress } from '@/components/dashboard/ProgressContext'
 import { apiUrl } from '@/lib/api'
+import { setSelectedRepo } from '@/lib/selectedRepo'
 import GateErrorBanner, { type GateErrorData } from '@/components/dashboard/GateError'
 
 // Set to true to skip API calls and use mock data for local testing
@@ -88,8 +89,7 @@ function DiscoveryPageInner() {
   const { startProgress, updateProgress, finishProgress } = useProgress()
 
   useEffect(() => {
-    if (repo) sessionStorage.setItem('refineui_repo', repo)
-    if (branch) sessionStorage.setItem('refineui_branch', branch)
+    if (repo) setSelectedRepo(repo, branch || 'main')
   }, [repo, branch])
 
   useEffect(() => {

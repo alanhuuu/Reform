@@ -9,6 +9,7 @@ import { ProgressProvider, useProgress } from '@/components/dashboard/ProgressCo
 import InteractiveBackground from '@/components/landing/InteractiveBackground'
 import ProjectsDrawer from '@/components/layout/ProjectsDrawer'
 import AccountMenu from '@/components/layout/AccountMenu'
+import { clearSelectedRepo } from '@/lib/selectedRepo'
 
 const NAV_ITEMS = [
   { href: '/dashboard/discovery', label: 'Project Discovery' },
@@ -142,9 +143,8 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                 sessionStorage.removeItem('refineui_answers')
                 sessionStorage.removeItem('refineui_analysis_cache')
                 sessionStorage.removeItem('refineui_transform')
-                sessionStorage.removeItem('refineui_repo')
-                sessionStorage.removeItem('refineui_branch')
                 sessionStorage.removeItem('refineui_site_url')
+                clearSelectedRepo()
                 window.location.href = '/dashboard/discovery'
               }}
               className="btn-ghost px-3 sm:px-4 py-2 rounded-xl text-[10px] sm:text-[11px] font-medium"

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import { apiUrl } from '@/lib/api'
+import { getSelectedRepo } from '@/lib/selectedRepo'
 
 interface Rect {
   x: number
@@ -279,8 +280,14 @@ export default function EditLabPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const url = sessionStorage.getItem('refineui_repo') || ''
-    let branch = 'main'
+    const selected = getSelectedRepo()
+    if (!selected) {
+      setRepoState(null)
+      return
+    }
+    // Prefer a branch captured by a completed transform run if present —
+    // it can be more specific than the persisted default branch.
+    let branch = selected.branch
     const tRaw = sessionStorage.getItem('refineui_transform')
     if (tRaw) {
       try {
@@ -290,7 +297,7 @@ export default function EditLabPage() {
         /* ignore */
       }
     }
-    setRepoState(url ? { url, branch } : null)
+    setRepoState({ url: selected.url, branch })
   }, [])
 
   const runLoad = useCallback(
