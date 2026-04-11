@@ -1,16 +1,47 @@
+import asyncio
 import json
 import logging
 import os
 import time
 
-import httpx
+from tinyfish import AsyncTinyFish, RunStatus
 
 from app.prompts.competitor_analysis_prompt import SITE_EXTRACTION_GOAL
 from app.services.s3_client import download_tinyfish_cache, upload_tinyfish_cache
 
 logger = logging.getLogger(__name__)
 
-TINYFISH_SSE_URL = "https://agent.tinyfish.ai/v1/automation/run-sse"
+# ─── Concurrency ────────────────────────────────────────────────────────────
+# Aligns our client-side backpressure with the TinyFish account concurrency
+# limit. Firing more than this just queues silently on TinyFish's end, so the
+# semaphore gives us clearer runtime behaviour + makes it easy to bump this
+# via env var when the plan tier changes (Starter=10, Pro=higher, etc.).
+_CONCURRENCY_LIMIT = int(os.environ.get("TINYFISH_MAX_CONCURRENT", "10"))
+_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    global _semaphore
+    if _semaphore is None:
+        _semaphore = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+    return _semaphore
+
+
+# ─── Shared AsyncTinyFish client ────────────────────────────────────────────
+# Lazily created, reused across all extract_site_data calls so every request
+# shares one HTTP connection pool instead of constructing a fresh client per
+# URL (saves ~100-300ms of TCP + TLS handshake per call).
+_client: AsyncTinyFish | None = None
+
+
+def _get_client() -> AsyncTinyFish:
+    global _client
+    if _client is None:
+        api_key = os.environ.get("TINYFISH_API_KEY")
+        if not api_key:
+            raise RuntimeError("TINYFISH_API_KEY environment variable is not set")
+        _client = AsyncTinyFish(api_key=api_key, timeout=120.0)
+    return _client
 
 # ─── URL-level cache ────────────────────────────────────────────────────────
 # Two-tier: in-memory (fast, per-process) backed by S3 (persistent across
@@ -113,19 +144,6 @@ def _get_api_key() -> str:
     if not api_key:
         raise RuntimeError("TINYFISH_API_KEY environment variable is not set")
     return api_key
-
-
-def _parse_sse_events(text: str) -> list[dict]:
-    """Parse raw SSE text into a list of event dicts."""
-    events = []
-    for line in text.strip().split("\n"):
-        line = line.strip()
-        if line.startswith("data: "):
-            try:
-                events.append(json.loads(line[6:]))
-            except json.JSONDecodeError:
-                continue
-    return events
 
 
 def _ensure_typography(data: dict, url: str) -> None:
@@ -313,41 +331,41 @@ def _normalize(raw: str, url: str) -> dict:
     return fallback
 
 
-def extract_site_data(url: str) -> dict:
-    """Use TinyFish to visit a URL and extract UI/UX design intelligence."""
+async def extract_site_data(url: str) -> dict:
+    """Use TinyFish to visit a URL and extract UI/UX design intelligence.
+
+    Async path through `AsyncTinyFish.agent.run()`. A module-level
+    semaphore caps in-flight runs at the account concurrency limit so
+    we don't flood TinyFish's queue beyond what their quota can serve.
+    """
     cached = get_cached(url)
     if cached:
         return cached
 
     logger.info("TinyFish: navigating to %s", url)
-    api_key = _get_api_key()
+    client = _get_client()
 
-    with httpx.Client(timeout=60.0) as client:
-        with client.stream(
-            "POST",
-            TINYFISH_SSE_URL,
-            headers={
-                "X-API-Key": api_key,
-                "Content-Type": "application/json",
-            },
-            json={"url": url, "goal": SITE_EXTRACTION_GOAL},
-        ) as response:
-            response.raise_for_status()
-            raw_sse = response.read().decode("utf-8")
+    started = time.monotonic()
+    async with _get_semaphore():
+        waited_for = time.monotonic() - started
+        if waited_for > 0.5:
+            logger.info("TinyFish: %s waited %.1fs for a slot", url, waited_for)
+        try:
+            response = await client.agent.run(
+                url=url,
+                goal=SITE_EXTRACTION_GOAL,
+            )
+        except Exception as e:
+            logger.error("TinyFish call failed for %s: %s", url, e)
+            raise
 
-    events = _parse_sse_events(raw_sse)
+    if response.status != RunStatus.COMPLETED:
+        raise RuntimeError(
+            f"TinyFish run did not complete for {url}: "
+            f"status={response.status.name} error={response.error}"
+        )
 
-    # Find the COMPLETE event with result
-    result_data = None
-    for event in events:
-        if event.get("type") == "COMPLETE":
-            if event.get("status") == "CANCELLED":
-                raise RuntimeError(
-                    f"TinyFish run cancelled: {event.get('error', 'unknown reason')}"
-                )
-            result_data = event.get("result")
-            break
-
+    result_data = response.result
     if not result_data:
         raise RuntimeError(f"TinyFish returned no result for {url}")
 
@@ -357,7 +375,10 @@ def extract_site_data(url: str) -> dict:
     else:
         raw_text = str(result_data)
 
-    logger.info("TinyFish: raw response from %s (%d chars)", url, len(raw_text))
+    logger.info(
+        "TinyFish: %s — %d chars, %d steps",
+        url, len(raw_text), response.num_of_steps,
+    )
 
     normalized = _normalize(raw_text, url)
 

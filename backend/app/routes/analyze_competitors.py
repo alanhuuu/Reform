@@ -32,7 +32,7 @@ async def analyze_competitors_endpoint(request: CompetitorRequest):
     logger.info("Analyzing %d competitor URLs: %s (backups: %d)", len(urls), urls, len(backups))
 
     try:
-        result = analyze_competitors(urls, request.style_goal, backup_urls=backups)
+        result = await analyze_competitors(urls, request.style_goal, backup_urls=backups)
     except Exception as e:
         if is_anthropic_exception(e):
             info = log_and_classify(e)
@@ -70,8 +70,9 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
 
         async def _run(url: str):
             try:
-                # extract_site_data is blocking — offload to a worker thread.
-                result = await asyncio.to_thread(extract_site_data, url)
+                # extract_site_data is now fully async (AsyncTinyFish client
+                # under the hood) — no thread-pool hop needed.
+                result = await extract_site_data(url)
                 await queue.put(("ok", url, result))
             except Exception as e:
                 logger.warning("TinyFish failed for %s (%s)", url, e)
@@ -112,7 +113,7 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
                 break
             yield f"data: {json.dumps({'event': 'retrying', 'url': backup_url})}\n\n"
             try:
-                result = await asyncio.to_thread(extract_site_data, backup_url)
+                result = await extract_site_data(backup_url)
                 site_analyses.append(result)
                 failed_urls.pop(0)
                 yield f"data: {json.dumps({'event': 'site_complete', 'url': backup_url, 'index': total, 'total': total, 'status': 'ok'})}\n\n"
@@ -179,7 +180,7 @@ async def extract_raw_endpoint(request: CompetitorRequest):
     for url in request.urls:
         url_str = str(url)
         try:
-            data = extract_site_data(url_str)
+            data = await extract_site_data(url_str)
             analysis = data["raw_analysis"]
             present = [f for f in EXPECTED_FIELDS if f in analysis]
             missing = [f for f in EXPECTED_FIELDS if f not in analysis]
