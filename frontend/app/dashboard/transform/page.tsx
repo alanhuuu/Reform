@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 // Editor import removed — Code Editor tab eliminated in favor of no-code flow
 import { apiUrl } from '@/lib/api'
+import { getSelectedRepo, setSelectedRepo } from '@/lib/selectedRepo'
 import { useSubscription } from '@/lib/useSubscription'
 import UpgradeBanner from '@/components/dashboard/UpgradeBanner'
 import GateErrorBanner, { parseResponseError, type GateErrorData } from '@/components/dashboard/GateError'
@@ -754,8 +755,18 @@ function TransformPage() {
   const [selectedTarget, setSelectedTarget] = useState('')
   const [userIntent, setUserIntent] = useState('')
   const [transformResult, setTransformResult] = useState<TransformResult | null>(null)
-  const [repoName, setRepoName] = useState('')
-  const [repoBranch, setRepoBranch] = useState('main')
+  const [repoName, setRepoName] = useState<string>(() => {
+    if (typeof window === 'undefined') return ''
+    const stored = sessionStorage.getItem('refineui_transform')
+    if (!stored) return ''
+    try { return JSON.parse(stored).repoName ?? '' } catch { return '' }
+  })
+  const [repoBranch, setRepoBranch] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'main'
+    const stored = sessionStorage.getItem('refineui_transform')
+    if (!stored) return 'main'
+    try { return JSON.parse(stored).branch || 'main' } catch { return 'main' }
+  })
   const [repos, setRepos] = useState<GithubRepo[]>([])
   const [loadingRepos, setLoadingRepos] = useState(false)
   const [repoSearch, setRepoSearch] = useState('')
@@ -889,23 +900,25 @@ function TransformPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
-  // Auto-start pipeline if a repo was selected in Discovery
+  // Auto-start pipeline if a repo was selected anywhere (session OR local
+  // storage) — picks up selections made in /new or in a previous tab so the
+  // user isn't re-prompted to choose the same repo again.
   useEffect(() => {
     if (autoStartedRef.current || pipelineStep !== 'idle' || transformResult) return
-    const repoUrl = sessionStorage.getItem('refineui_repo')
-    if (!repoUrl) return
+    const selected = getSelectedRepo()
+    if (!selected?.url) return
     autoStartedRef.current = true
 
     // Extract owner/repo from URL like https://github.com/owner/repo
-    const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
+    const match = selected.url.match(/github\.com\/([^/]+\/[^/]+)/)
     if (!match) return
     const fullName = match[1].replace(/\.git$/, '')
 
     // Create a minimal GithubRepo object and start pipeline
     runPipeline({
       id: 0, full_name: fullName, name: fullName.split('/')[1],
-      private: false, language: null, updated_at: '', default_branch: 'main',
-      homepage: null, html_url: repoUrl,
+      private: false, language: null, updated_at: '', default_branch: selected.branch || 'main',
+      homepage: null, html_url: selected.url,
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipelineStep])
@@ -923,6 +936,10 @@ function TransformPage() {
   async function runPipeline(repo: GithubRepo) {
     setPipelineError(''); setGateError(null); setRepoName(repo.full_name); setRepoBranch(repo.default_branch || 'main')
     const branch = repo.default_branch || 'main'
+
+    // Persist the selection so the user isn't re-prompted in future tabs.
+    const repoUrl = repo.html_url || `https://github.com/${repo.full_name}`
+    setSelectedRepo(repoUrl, branch)
 
     // ── Fetch current HEAD SHA from GitHub so we can look up a cached run.
     // A run is considered valid until the next commit on this branch.
@@ -1440,7 +1457,7 @@ function TransformPage() {
           </div>
         )}
 
-        {/* ── Edit Lab CTA — only when complete ── */}
+        {/* ── The Lab CTA — only when complete ── */}
         {pipelineStep === 'complete' && <div className="flex justify-center">
           <button
             onClick={() => router.push('/dashboard/edit-lab')}
@@ -1452,7 +1469,7 @@ function TransformPage() {
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
             </svg>
-            <span>Open Edit Lab</span>
+            <span>Open The Lab</span>
             <span style={{ color: 'rgba(168,85,247,0.5)', fontSize: '12px' }}>→</span>
           </button>
         </div>}

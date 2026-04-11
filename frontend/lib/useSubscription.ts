@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { apiUrl } from '@/lib/api'
+import { BILLING_ENABLED } from '@/lib/billing'
 
 export interface SubscriptionData {
   plan: string
@@ -43,14 +44,17 @@ export function useSubscription() {
       .then(data => {
         if (data) setSubscription(data)
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.warn('Failed to fetch subscription status:', err.message || err)
+      })
       .finally(() => setLoading(false))
   }, [session?.githubId])
 
-  const canScan = subscription.scans_used < subscription.scans_limit
-  const canAddRepo = subscription.repos_limit === -1 || subscription.repos_connected < subscription.repos_limit
-  const canAutofix = subscription.features.pr_autofix
-  const isFree = subscription.plan === 'free'
+  // When billing is disabled, unlock all features so the product can be demoed freely.
+  const canScan = !BILLING_ENABLED || subscription.scans_used < subscription.scans_limit
+  const canAddRepo = !BILLING_ENABLED || subscription.repos_limit === -1 || subscription.repos_connected < subscription.repos_limit
+  const canAutofix = !BILLING_ENABLED || subscription.features.pr_autofix
+  const isFree = BILLING_ENABLED && subscription.plan === 'free'
 
   return {
     subscription,
@@ -64,7 +68,7 @@ export function useSubscription() {
       fetch(apiUrl(`/billing/subscription/${session.githubId}`))
         .then(r => r.ok ? r.json() : null)
         .then(data => { if (data) setSubscription(data) })
-        .catch(() => {})
+        .catch((err) => { console.warn('Failed to refresh subscription:', err.message || err) })
     },
   }
 }

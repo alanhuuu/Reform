@@ -6,6 +6,8 @@ import anthropic
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.services.anthropic_errors import is_anthropic_exception, log_and_classify
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -155,5 +157,8 @@ async def suggest_edit_endpoint(req: SuggestEditRequest):
         return SuggestEditResponse(revised_code=revised_code, summary=summary)
 
     except Exception as e:
+        if is_anthropic_exception(e):
+            info = log_and_classify(e)
+            raise HTTPException(status_code=info.http_status, detail=info.user_message) from e
         logger.error("Suggest edit failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Edit suggestion failed: {e}") from e

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import { apiUrl } from '@/lib/api'
+import { getSelectedRepo } from '@/lib/selectedRepo'
 
 interface Rect {
   x: number
@@ -58,6 +59,16 @@ interface NavigatePayload {
   document_size: DocumentSize
   current_page: string
   target_page_file: string | null
+  session_expired?: boolean
+  error?: string | null
+}
+
+interface RevertPayload {
+  session_id: string
+  screenshot: string
+  sections: Section[]
+  document_size: DocumentSize
+  target_file: string | null
   session_expired?: boolean
   error?: string | null
 }
@@ -269,7 +280,14 @@ export default function EditLabPage() {
     afterDocumentSize: DocumentSize
     afterScreenshot: string
     newSectionId: string | null
+    pending: boolean
   } | null>(null)
+  const [reverting, setReverting] = useState(false)
+  const [acceptedFiles, setAcceptedFiles] = useState<string[]>([])
+  const [publishing, setPublishing] = useState(false)
+  const [publishResult, setPublishResult] = useState<{ branch_name: string; branch_url: string; files_changed: string[] } | null>(null)
+
+  const githubUserId = (session as unknown as { githubId?: string } | null)?.githubId || ''
 
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const [canvasWidth, setCanvasWidth] = useState(1)
@@ -279,8 +297,14 @@ export default function EditLabPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const url = sessionStorage.getItem('refineui_repo') || ''
-    let branch = 'main'
+    const selected = getSelectedRepo()
+    if (!selected) {
+      setRepoState(null)
+      return
+    }
+    // Prefer a branch captured by a completed transform run if present —
+    // it can be more specific than the persisted default branch.
+    let branch = selected.branch
     const tRaw = sessionStorage.getItem('refineui_transform')
     if (tRaw) {
       try {
@@ -290,7 +314,7 @@ export default function EditLabPage() {
         /* ignore */
       }
     }
-    setRepoState(url ? { url, branch } : null)
+    setRepoState({ url: selected.url, branch })
   }, [])
 
   const runLoad = useCallback(
@@ -525,8 +549,9 @@ export default function EditLabPage() {
         afterDocumentSize: data.document_size,
         afterScreenshot: data.screenshot,
         newSectionId,
+        pending: true,
       })
-      setToast({ kind: 'ok', msg: data.summary || `Updated ${beforeSnapshot.label}` })
+      // No toast — the Accept/Reject card is the primary confirmation.
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to apply change'
       setToast({ kind: 'err', msg })
@@ -543,6 +568,104 @@ export default function EditLabPage() {
     runLoad,
     triggerHighlight,
   ])
+
+  const handleAcceptEdit = useCallback(async () => {
+    setLastEdit((prev) => (prev ? { ...prev, pending: false } : prev))
+    if (sessionId) {
+      try {
+        const res = await fetch(apiUrl('/edit-lab/accept'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (Array.isArray(data.accepted_files)) {
+            setAcceptedFiles(data.accepted_files)
+          }
+        }
+      } catch {
+        /* non-blocking — accept still succeeded locally */
+      }
+    }
+    // Fade the accepted card out after a moment so the right panel returns
+    // to its neutral empty state and the user can start a new selection.
+    setTimeout(() => setLastEdit(null), 1800)
+  }, [sessionId])
+
+  const handlePublish = useCallback(async () => {
+    if (!sessionId || !acceptedFiles.length) return
+    const token = (session as unknown as { accessToken?: string } | null)?.accessToken
+    if (!token) {
+      setToast({ kind: 'err', msg: 'Sign in with GitHub to publish changes.' })
+      return
+    }
+    setPublishing(true)
+    setPublishResult(null)
+    try {
+      const res = await fetch(apiUrl('/edit-lab/publish'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          access_token: token,
+          github_user_id: githubUserId,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Publish failed (${res.status})`)
+      }
+      setPublishResult({
+        branch_name: data.branch_name,
+        branch_url: data.branch_url,
+        files_changed: data.files_changed || [],
+      })
+      setToast({ kind: 'ok', msg: `Published to ${data.branch_name}` })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to publish'
+      setToast({ kind: 'err', msg })
+    } finally {
+      setPublishing(false)
+    }
+  }, [sessionId, acceptedFiles, session, githubUserId])
+
+  const handleRejectEdit = useCallback(async () => {
+    if (!sessionId) return
+    setReverting(true)
+    try {
+      const res = await fetch(apiUrl('/edit-lab/revert'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      })
+      if (!res.ok) throw new Error(`Revert failed (${res.status})`)
+      const data: RevertPayload = await res.json()
+      if (data.session_expired) {
+        setToast({ kind: 'err', msg: 'Session expired. Reload the preview and try again.' })
+        return
+      }
+      if (data.error) throw new Error(data.error)
+      setPayload((prev) =>
+        prev
+          ? {
+              ...prev,
+              screenshot: data.screenshot || prev.screenshot,
+              sections: data.sections || [],
+              document_size: data.document_size || prev.document_size,
+            }
+          : prev,
+      )
+      setLastEdit(null)
+      setSelection(null)
+      setJustUpdatedId(null)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to revert change'
+      setToast({ kind: 'err', msg })
+    } finally {
+      setReverting(false)
+    }
+  }, [sessionId])
 
   const onCanvasPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -649,13 +772,13 @@ export default function EditLabPage() {
 
       <div className="mb-6">
         <div className="text-[11px] mono uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          Edit Lab
+          The Lab
         </div>
         <h1 className="text-[28px] font-semibold text-white mt-1" style={{ letterSpacing: '-0.02em' }}>
           Select a section. Describe the change.
         </h1>
         <p className="text-[13px] mt-1.5 max-w-[620px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
-          Edit Lab loads the current website from your repo. Click a section, write a short prompt, and Reform applies the change to that part of your source — the dev server stays warm, so repeat edits are fast.
+          The Lab loads the current website from your repo. Click or drag to select any region, write a short prompt, and Reform applies the change to that part of your source — the dev server stays warm, so repeat edits are fast.
         </p>
       </div>
 
@@ -803,7 +926,127 @@ export default function EditLabPage() {
             >
               {loading ? 'Loading…' : 'Reload preview'}
             </button>
+            {acceptedFiles.length > 0 && (
+              <button
+                onClick={handlePublish}
+                disabled={publishing}
+                className="text-[11px] px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-40 flex-shrink-0"
+                style={{
+                  background: 'rgba(34,197,94,0.12)',
+                  border: '1px solid rgba(34,197,94,0.3)',
+                  color: 'rgba(187,247,208,0.95)',
+                }}
+                title={`Publish ${acceptedFiles.length} accepted ${acceptedFiles.length === 1 ? 'file' : 'files'} to a new GitHub branch`}
+              >
+                {publishing ? (
+                  <>
+                    <div
+                      className="w-3 h-3 rounded-full animate-spin"
+                      style={{
+                        border: '1.5px solid rgba(187,247,208,0.25)',
+                        borderTopColor: 'rgba(187,247,208,0.95)',
+                      }}
+                    />
+                    Publishing…
+                  </>
+                ) : (
+                  <>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Publish to GitHub · {acceptedFiles.length}
+                  </>
+                )}
+              </button>
+            )}
           </div>
+
+          {publishResult && (
+            <div
+              className="flex items-center justify-between gap-3 px-4 py-2"
+              style={{
+                background: 'rgba(34,197,94,0.06)',
+                borderBottom: '1px solid rgba(34,197,94,0.18)',
+              }}
+            >
+              <div className="flex items-center gap-2 min-w-0 text-[11px]">
+                <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#22c55e' }} />
+                <span style={{ color: 'rgba(187,247,208,0.9)' }}>Published</span>
+                <span className="mono truncate" style={{ color: 'rgba(255,255,255,0.55)' }}>
+                  {publishResult.branch_name}
+                </span>
+                <span style={{ color: 'rgba(255,255,255,0.3)' }}>·</span>
+                <span className="mono" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  {publishResult.files_changed.length} file{publishResult.files_changed.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a
+                  href={publishResult.branch_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] px-2.5 py-1 rounded-md"
+                  style={{
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: 'rgba(255,255,255,0.75)',
+                  }}
+                >
+                  View branch →
+                </a>
+                <button
+                  onClick={() => setPublishResult(null)}
+                  className="text-[11px]"
+                  style={{ color: 'rgba(255,255,255,0.35)' }}
+                  aria-label="Dismiss"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
+
+          {payload && payload.available_pages && payload.available_pages.length > 1 && (
+            <div
+              className="flex items-center gap-1 px-3 py-2 overflow-x-auto"
+              style={{
+                background: 'rgba(255,255,255,0.015)',
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+              }}
+            >
+              <span
+                className="text-[10px] mono uppercase tracking-wider pr-2 flex-shrink-0"
+                style={{ color: 'rgba(255,255,255,0.3)' }}
+              >
+                Pages
+              </span>
+              {payload.available_pages.map((p) => {
+                const isCurrent = p.route === payload.current_page
+                return (
+                  <button
+                    key={p.route}
+                    onClick={() => !navigating && !applying && runNavigate(p.route)}
+                    disabled={navigating || applying || isCurrent}
+                    className="text-[11px] px-2.5 py-1 rounded-md whitespace-nowrap transition-colors flex-shrink-0"
+                    style={{
+                      background: isCurrent ? 'rgba(124,140,255,0.14)' : 'transparent',
+                      color: isCurrent ? 'white' : 'rgba(255,255,255,0.5)',
+                      border: isCurrent
+                        ? '1px solid rgba(170,180,255,0.25)'
+                        : '1px solid rgba(255,255,255,0.06)',
+                      cursor: isCurrent ? 'default' : navigating || applying ? 'not-allowed' : 'pointer',
+                    }}
+                    title={p.path || p.route}
+                  >
+                    {p.name}
+                    <span className="mono ml-1.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                      {p.route}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           <div ref={canvasRef} className="relative w-full" style={{ minHeight: 500 }}>
             {!repoState && !loading && (
@@ -1081,6 +1324,9 @@ export default function EditLabPage() {
             <LastEditCard
               lastEdit={lastEdit}
               onDismiss={() => setLastEdit(null)}
+              onAccept={handleAcceptEdit}
+              onReject={handleRejectEdit}
+              reverting={reverting}
             />
           )}
 
@@ -1118,8 +1364,8 @@ export default function EditLabPage() {
                   </div>
                 )}
                 {selection.kind === 'rect' && selection.memberIds.length === 0 && (
-                  <div className="text-[11px] mt-1" style={{ color: 'rgba(234,179,8,0.7)' }}>
-                    No detected content inside this rectangle — the edit will target the page root file.
+                  <div className="text-[11px] mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    Custom region — Reform will interpret this area by visible content and edit the page root file.
                   </div>
                 )}
                 {selection.source_file && (
@@ -1192,7 +1438,16 @@ export default function EditLabPage() {
                 {applying ? 'Applying…' : 'Apply change'}
               </button>
 
-              {lastEdit && <LastEditCard lastEdit={lastEdit} onDismiss={() => setLastEdit(null)} compact />}
+              {lastEdit && (
+                <LastEditCard
+                  lastEdit={lastEdit}
+                  onDismiss={() => setLastEdit(null)}
+                  onAccept={handleAcceptEdit}
+                  onReject={handleRejectEdit}
+                  reverting={reverting}
+                  compact
+                />
+              )}
             </>
           )}
 
@@ -1217,6 +1472,9 @@ export default function EditLabPage() {
 function LastEditCard({
   lastEdit,
   onDismiss,
+  onAccept,
+  onReject,
+  reverting,
   compact = false,
 }: {
   lastEdit: {
@@ -1226,33 +1484,45 @@ function LastEditCard({
     afterDocumentSize: DocumentSize
     afterScreenshot: string
     newSectionId: string | null
+    pending: boolean
   }
   onDismiss: () => void
+  onAccept: () => void
+  onReject: () => void
+  reverting: boolean
   compact?: boolean
 }) {
+  const pending = lastEdit.pending
+  const accentBg = pending ? 'rgba(124,140,255,0.05)' : 'rgba(34,197,94,0.04)'
+  const accentBorder = pending ? 'rgba(124,140,255,0.22)' : 'rgba(34,197,94,0.18)'
+  const statusDot = pending ? '#7c8cff' : '#22c55e'
+  const statusLabelColor = pending ? 'rgba(170,180,255,0.9)' : 'rgba(134,239,172,0.9)'
+
   return (
     <div
       className="rounded-xl p-3 flex flex-col gap-3"
       style={{
-        background: 'rgba(34,197,94,0.04)',
-        border: '1px solid rgba(34,197,94,0.18)',
+        background: accentBg,
+        border: `1px solid ${accentBorder}`,
       }}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#22c55e' }} />
-          <div className="text-[10px] mono uppercase tracking-wider" style={{ color: 'rgba(134,239,172,0.9)' }}>
-            Updated {lastEdit.before.label}
+          <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: statusDot }} />
+          <div className="text-[10px] mono uppercase tracking-wider" style={{ color: statusLabelColor }}>
+            {pending ? `Review ${lastEdit.before.label}` : `Accepted ${lastEdit.before.label}`}
           </div>
         </div>
-        <button
-          onClick={onDismiss}
-          className="text-[10px]"
-          style={{ color: 'rgba(255,255,255,0.3)' }}
-          aria-label="Dismiss"
-        >
-          ×
-        </button>
+        {!pending && (
+          <button
+            onClick={onDismiss}
+            className="text-[10px]"
+            style={{ color: 'rgba(255,255,255,0.3)' }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        )}
       </div>
       <div className="text-[12px] font-medium text-white line-clamp-2">{lastEdit.summary}</div>
 
@@ -1270,6 +1540,45 @@ function LastEditCard({
             rect={lastEdit.afterRect}
             documentSize={lastEdit.afterDocumentSize}
           />
+        </div>
+      )}
+
+      {pending && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onAccept}
+            disabled={reverting}
+            className="flex-1 py-2 rounded-lg text-[11px] font-semibold transition-all disabled:opacity-40"
+            style={{
+              background: 'rgba(34,197,94,0.15)',
+              border: '1px solid rgba(34,197,94,0.35)',
+              color: 'rgba(187,247,208,0.95)',
+            }}
+          >
+            ✓ Accept
+          </button>
+          <button
+            onClick={onReject}
+            disabled={reverting}
+            className="flex-1 py-2 rounded-lg text-[11px] font-semibold transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
+            style={{
+              background: 'rgba(239,68,68,0.1)',
+              border: '1px solid rgba(239,68,68,0.3)',
+              color: 'rgba(254,202,202,0.95)',
+            }}
+          >
+            {reverting ? (
+              <>
+                <div
+                  className="w-3 h-3 rounded-full animate-spin"
+                  style={{ border: '1.5px solid rgba(254,202,202,0.25)', borderTopColor: 'rgba(254,202,202,0.95)' }}
+                />
+                Reverting…
+              </>
+            ) : (
+              <>✕ Reject</>
+            )}
+          </button>
         </div>
       )}
     </div>

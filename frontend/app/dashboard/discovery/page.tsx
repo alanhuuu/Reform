@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useProgress } from '@/components/dashboard/ProgressContext'
 import { apiUrl } from '@/lib/api'
+import { setSelectedRepo } from '@/lib/selectedRepo'
 import GateErrorBanner, { type GateErrorData } from '@/components/dashboard/GateError'
 
 // Set to true to skip API calls and use mock data for local testing
@@ -88,8 +89,7 @@ function DiscoveryPageInner() {
   const { startProgress, updateProgress, finishProgress } = useProgress()
 
   useEffect(() => {
-    if (repo) sessionStorage.setItem('refineui_repo', repo)
-    if (branch) sessionStorage.setItem('refineui_branch', branch)
+    if (repo) setSelectedRepo(repo, branch || 'main')
   }, [repo, branch])
 
   useEffect(() => {
@@ -165,10 +165,18 @@ function DiscoveryPageInner() {
       const analyzeUrl = apiUrl('/analyze-competitors-stream')
       const sseBody = JSON.stringify({ urls: discoveryData.selected_for_analysis, style_goal: '', backup_urls: backupUrls })
       let analysis = null
+      let streamErrorMessage: string | null = null
 
       try {
         const sseRes = await fetch(analyzeUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: sseBody })
-        if (!sseRes.ok) throw new Error('Analysis failed')
+        if (!sseRes.ok) {
+          let detail = ''
+          try {
+            const body = await sseRes.json()
+            detail = body?.detail || ''
+          } catch { /* non-JSON body */ }
+          throw new Error(detail || `Analysis stream returned ${sseRes.status}`)
+        }
         const reader = sseRes.body?.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
@@ -200,19 +208,37 @@ function DiscoveryPageInner() {
                   updateProgress(85)
                 } else if (evt.event === 'complete') {
                   analysis = evt.data
+                } else if (evt.event === 'error') {
+                  // Backend surfaced a classified failure (TinyFish wipeout,
+                  // Claude credits, aggregation crash). Capture so it
+                  // propagates instead of the generic "no data" message.
+                  streamErrorMessage = evt.message || 'Analysis failed with an unknown error'
                 }
               } catch { /* skip malformed events */ }
             }
           }
         }
-      } catch {
-        // Fallback to non-streaming endpoint (same body with backup_urls)
-        const analyzeRes = await fetch(apiUrl('/analyze-competitors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: sseBody })
-        if (!analyzeRes.ok) throw new Error('Analysis failed')
+      } catch (streamErr) {
+        if (streamErrorMessage) throw new Error(streamErrorMessage)
+        const fallbackBody = JSON.stringify({ urls: discoveryData.selected_for_analysis, style_goal: '', backup_urls: backupUrls })
+        const analyzeRes = await fetch(apiUrl('/analyze-competitors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: fallbackBody })
+        if (!analyzeRes.ok) {
+          let detail = ''
+          try {
+            const body = await analyzeRes.json()
+            detail = body?.detail || ''
+          } catch { /* non-JSON body */ }
+          throw new Error(detail || (streamErr instanceof Error ? streamErr.message : 'Analysis failed'))
+        }
         analysis = await analyzeRes.json()
       }
 
-      if (!analysis) throw new Error('Analysis returned no data')
+      if (!analysis) {
+        throw new Error(
+          streamErrorMessage ||
+          'Analysis stream ended without returning results. This usually means Anthropic credits ran out, TinyFish blocked every URL, or the worker hit the 120s batch timeout — check the Railway backend logs.',
+        )
+      }
 
       updateProgress(95); setLoadingStatus('Analysis complete!')
       sessionStorage.setItem('refineui_discovery', JSON.stringify(discoveryData))

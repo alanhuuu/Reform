@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import FindingsShelf from '@/components/uxlab/FindingsShelf'
 import { apiUrl } from '@/lib/api'
+import { getSelectedRepo } from '@/lib/selectedRepo'
 import type { Finding, FindingSeverity, FindingType, UXLabSession } from '@/types/uxlab'
 
 interface Annotation {
@@ -548,8 +549,9 @@ export default function SimulationPage() {
       }
     }
 
-    const repoUrl = sessionStorage.getItem('refineui_repo')
-    const repoBranch = sessionStorage.getItem('refineui_branch')
+    const selected = getSelectedRepo()
+    const repoUrl = selected?.url
+    const repoBranch = selected?.branch
 
     if (!repoUrl) {
       setScreensError('No repository connected.')
@@ -766,8 +768,9 @@ export default function SimulationPage() {
   }, [])
 
   const handleApplyTransformation = useCallback(() => {
-    const repoUrl = sessionStorage.getItem('refineui_repo') ?? ''
-    const branch = sessionStorage.getItem('refineui_branch') ?? 'main'
+    const selected = getSelectedRepo()
+    const repoUrl = selected?.url ?? ''
+    const branch = selected?.branch ?? 'main'
     const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
 
     if (!match) {

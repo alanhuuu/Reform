@@ -17,6 +17,12 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+if not os.environ.get("FRONTEND_URL"):
+    import logging
+    logging.getLogger(__name__).warning(
+        "FRONTEND_URL not set — Stripe checkout/portal redirects will use localhost. "
+        "Set this to your Vercel URL in production."
+    )
 
 
 # ── Request / response schemas ──────────────────────────────────────────

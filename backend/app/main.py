@@ -24,11 +24,28 @@ from app.routes.ux_lab import router as ux_lab_router
 from app.routes.billing import router as billing_router
 from app.routes.webhook import router as webhook_router
 from app.routes.edit_lab import router as edit_lab_router
+from app.routes.analytics import router as analytics_router
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+
+_logger = logging.getLogger(__name__)
+
+# ── Startup env validation ─────────────────────────────────────────────
+_REQUIRED_ENV = {
+    "DATABASE_URL": "Database will not be available",
+    "STRIPE_SECRET_KEY": "Billing and checkout will not work",
+    "STRIPE_WEBHOOK_SECRET": "Stripe webhooks will be rejected",
+    "STRIPE_PRO_PRICE_ID": "Pro plan mapping will be missing",
+    "STRIPE_MAX_PRICE_ID": "Max plan mapping will be missing",
+    "ANTHROPIC_API_KEY": "AI analysis will not work",
+    "FRONTEND_URL": "Stripe redirects will fall back to localhost",
+}
+for _var, _msg in _REQUIRED_ENV.items():
+    if not os.environ.get(_var):
+        _logger.warning("Missing env var %s — %s", _var, _msg)
 
 app = FastAPI(
     title="Reform Analysis Service",
@@ -41,11 +58,18 @@ app = FastAPI(
 async def startup():
     from app.db import create_tables
     await create_tables()
-    logging.getLogger(__name__).info("Database tables created/verified")
+    _logger.info("Database tables created/verified")
 
 # CORS: allow origins from env or sensible defaults
-_default_origins = "http://localhost:3000,https://refineui-chi.vercel.app"
+_default_origins = (
+    "http://localhost:3000,"
+    "https://refineui-chi.vercel.app,"
+    "https://reformui.ca,"
+    "https://www.reformui.ca"
+)
 _allowed_origins = os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",")
+if not os.environ.get("ALLOWED_ORIGINS"):
+    _logger.warning("ALLOWED_ORIGINS not set — defaulting to localhost only. Set this in production.")
 
 app.add_middleware(
     CORSMiddleware,
@@ -73,6 +97,7 @@ app.include_router(ux_lab_router)
 app.include_router(billing_router)
 app.include_router(webhook_router)
 app.include_router(edit_lab_router)
+app.include_router(analytics_router)
 
 
 @app.get("/health")

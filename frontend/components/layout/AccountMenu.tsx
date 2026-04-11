@@ -5,6 +5,7 @@ import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
 import { apiUrl } from '@/lib/api'
 import { useSubscription } from '@/lib/useSubscription'
+import { BILLING_ENABLED } from '@/lib/billing'
 
 const PLAN_LABELS: Record<string, string> = {
   free: 'Free',
@@ -186,17 +187,21 @@ export default function AccountMenu() {
             <MenuLink href="/settings" icon={<SettingsIcon />} label="Settings" onClick={() => setOpen(false)} />
           </div>
 
-          <div className="mx-3 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }} />
+          {BILLING_ENABLED && (
+            <>
+              <div className="mx-3 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }} />
 
-          <div className="py-1.5">
-            <MenuLink href="/subscription" icon={<PlansIcon />} label="Plans & Usage" onClick={() => setOpen(false)} />
-            <MenuButton
-              icon={<BillingIcon />}
-              label={portalLoading ? 'Opening...' : 'Manage Billing'}
-              onClick={openBillingPortal}
-              disabled={portalLoading}
-            />
-          </div>
+              <div className="py-1.5">
+                <MenuLink href="/subscription" icon={<PlansIcon />} label="Plans & Usage" onClick={() => setOpen(false)} />
+                <MenuButton
+                  icon={<BillingIcon />}
+                  label={portalLoading ? 'Opening...' : 'Manage Billing'}
+                  onClick={openBillingPortal}
+                  disabled={portalLoading}
+                />
+              </div>
+            </>
+          )}
 
           <div className="mx-3 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }} />
 

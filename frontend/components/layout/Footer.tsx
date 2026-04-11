@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { BILLING_ENABLED } from '@/lib/billing'
 
 export default function Footer() {
   return (
@@ -16,9 +17,11 @@ export default function Footer() {
           </p>
         </div>
         <div className="flex items-center gap-6">
-          <Link href="/subscription" className="link-muted text-xs tracking-[0.18em] uppercase">
-            Pricing
-          </Link>
+          {BILLING_ENABLED && (
+            <Link href="/subscription" className="link-muted text-xs tracking-[0.18em] uppercase">
+              Pricing
+            </Link>
+          )}
           <span className="link-muted text-xs tracking-[0.18em] uppercase cursor-default">
             Privacy
           </span>

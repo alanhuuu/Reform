@@ -3,6 +3,12 @@ Subscription service — plan config, feature gating, and usage tracking.
 
 All plan enforcement happens here. Routes call these functions to check
 whether a user can perform an action before proceeding.
+
+Billing is gated behind the `BILLING_ENABLED` env var. When the var is
+unset, empty, or anything other than "true"/"1", every check becomes a
+no-op and the subscription summary reports unlimited usage — the product
+runs fully free. Set BILLING_ENABLED=true on the backend environment to
+re-enable plan enforcement.
 """
 
 from __future__ import annotations
@@ -16,6 +22,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import UserSubscription
+
+
+def _billing_enabled() -> bool:
+    """Read the kill-switch each call so tests and env reloads work."""
+    return os.environ.get("BILLING_ENABLED", "").strip().lower() in ("true", "1", "yes")
 
 # ── Plan definitions ────────────────────────────────────────────────────
 
@@ -137,6 +148,8 @@ def _gate_error(
 
 def check_subscription_active(sub: UserSubscription) -> None:
     """Raise if the subscription is not in an active state."""
+    if not _billing_enabled():
+        return
     if sub.plan != "free" and not _is_active(sub):
         raise _gate_error(
             403,
@@ -151,6 +164,8 @@ def check_feature(sub: UserSubscription, feature: str) -> None:
 
     Supported features: "pr_autofix", "full_report".
     """
+    if not _billing_enabled():
+        return
     limits = _limits(sub)
     if not limits.get(feature, False):
         label = FEATURE_LABELS.get(feature, feature)
@@ -164,6 +179,8 @@ def check_feature(sub: UserSubscription, feature: str) -> None:
 
 def check_repo_limit(sub: UserSubscription) -> None:
     """Raise if the user has reached their repo limit."""
+    if not _billing_enabled():
+        return
     limits = _limits(sub)
     max_repos = limits["max_repos"]
     if max_repos != -1 and sub.repos_connected >= max_repos:
@@ -179,6 +196,8 @@ def check_repo_limit(sub: UserSubscription) -> None:
 
 def check_scan_limit(sub: UserSubscription) -> None:
     """Raise if the user has used all their scans this billing period."""
+    if not _billing_enabled():
+        return
     limits = _limits(sub)
     max_scans = limits["max_scans_per_month"]
     if sub.scans_used_this_month >= max_scans:
@@ -228,6 +247,22 @@ def _maybe_reset_usage(sub: UserSubscription) -> None:
 
 def subscription_summary(sub: UserSubscription) -> dict:
     """Return a frontend-friendly summary of the user's subscription."""
+    if not _billing_enabled():
+        # Kill-switch: report unlimited everything so the dashboard hides
+        # the usage meters and the upgrade prompts entirely.
+        return {
+            "plan": "unlimited",
+            "status": "active",
+            "scans_used": 0,
+            "scans_limit": 999999,
+            "repos_connected": sub.repos_connected,
+            "repos_limit": -1,
+            "features": {
+                "pr_autofix": True,
+                "full_report": True,
+            },
+            "current_period_end": None,
+        }
     limits = _limits(sub)
     return {
         "plan": sub.plan,

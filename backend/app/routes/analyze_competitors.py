@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.schemas.competitors import CompetitorAnalysisResponse, CompetitorRequest
+from app.services.anthropic_errors import is_anthropic_exception, log_and_classify
 from app.services.competitor_analyzer import analyze_competitors
 from app.services.tinyfish_client import EXPECTED_FIELDS, extract_site_data
 from app.services.pattern_aggregator import aggregate_patterns
@@ -30,7 +31,14 @@ async def analyze_competitors_endpoint(request: CompetitorRequest):
     backups = [str(u) for u in request.backup_urls]
     logger.info("Analyzing %d competitor URLs: %s (backups: %d)", len(urls), urls, len(backups))
 
-    result = analyze_competitors(urls, request.style_goal, backup_urls=backups)
+    try:
+        result = analyze_competitors(urls, request.style_goal, backup_urls=backups)
+    except Exception as e:
+        if is_anthropic_exception(e):
+            info = log_and_classify(e)
+            raise HTTPException(status_code=info.http_status, detail=info.user_message) from e
+        logger.error("analyze-competitors failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Analyze failed: {e}") from e
     return result
 
 
@@ -112,12 +120,35 @@ async def analyze_competitors_stream_endpoint(request: CompetitorRequest):
                 continue
 
         if not site_analyses:
-            yield f"data: {json.dumps({'event': 'error', 'message': 'All competitor sites failed or timed out'})}\n\n"
+            failed_count = len([u for u in urls if u not in succeeded_urls])
+            message = (
+                f"All {total} competitor site analyses failed. TinyFish either "
+                f"couldn't reach them, was rate-limited, or timed out. Check the "
+                f"backend logs for per-site errors (failed={failed_count})."
+            )
+            logger.error("analyze-competitors-stream: %s", message)
+            yield f"data: {json.dumps({'event': 'error', 'kind': 'tinyfish_all_failed', 'message': message})}\n\n"
             return
 
         yield f"data: {json.dumps({'event': 'aggregating'})}\n\n"
 
-        result = await asyncio.to_thread(aggregate_patterns, site_analyses, request.style_goal)
+        try:
+            result = await asyncio.to_thread(
+                aggregate_patterns, site_analyses, request.style_goal
+            )
+        except Exception as e:
+            if is_anthropic_exception(e):
+                info = log_and_classify(e)
+                yield f"data: {json.dumps({'event': 'error', 'kind': info.kind, 'message': info.user_message})}\n\n"
+                return
+            logger.error(
+                "analyze-competitors-stream: pattern aggregation failed: %s",
+                e,
+                exc_info=True,
+            )
+            yield f"data: {json.dumps({'event': 'error', 'kind': 'aggregation_failed', 'message': f'Design intelligence aggregation failed: {e}'})}\n\n"
+            return
+
         yield f"data: {json.dumps({'event': 'complete', 'data': result.model_dump()})}\n\n"
 
     return StreamingResponse(

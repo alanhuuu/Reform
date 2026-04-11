@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import AccountMenu from '@/components/layout/AccountMenu'
+import { BILLING_ENABLED } from '@/lib/billing'
 
 function Separator() {
   return (
@@ -42,17 +43,21 @@ export default function Navbar() {
         </Link>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/subscription"
-            className="text-[13px] px-3 py-1.5 rounded-lg transition-colors duration-150"
-            style={{ color: 'rgba(255,255,255,0.55)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.85)')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)')}
-          >
-            Pricing
-          </Link>
+          {BILLING_ENABLED && (
+            <>
+              <Link
+                href="/subscription"
+                className="text-[13px] px-3 py-1.5 rounded-lg transition-colors duration-150"
+                style={{ color: 'rgba(255,255,255,0.55)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.85)')}
+                onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)')}
+              >
+                Pricing
+              </Link>
 
-          <Separator />
+              <Separator />
+            </>
+          )}
 
           <Link
             href="/new"

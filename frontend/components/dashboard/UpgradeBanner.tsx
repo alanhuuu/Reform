@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { BILLING_ENABLED } from '@/lib/billing'
 
 interface UpgradeBannerProps {
   message: string
@@ -8,6 +9,7 @@ interface UpgradeBannerProps {
 }
 
 export default function UpgradeBanner({ message, compact }: UpgradeBannerProps) {
+  if (!BILLING_ENABLED) return null
   if (compact) {
     return (
       <Link

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { apiUrl } from '@/lib/api'
 import { useSubscription } from '@/lib/useSubscription'
+import { setSelectedRepo } from '@/lib/selectedRepo'
 import CheckoutResult from '@/components/dashboard/CheckoutResult'
 import UpgradeBanner from '@/components/dashboard/UpgradeBanner'
 
@@ -23,17 +24,23 @@ function DashboardContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const repo = searchParams.get('repo')
+  const branch = searchParams.get('branch')
   const { data: session } = useSession()
   const { subscription, canScan, canAddRepo, isFree, loading: subLoading } = useSubscription()
   const [projects, setProjects] = useState<ProjectData[]>([])
   const [loading, setLoading] = useState(true)
 
-  // If a repo param is present, redirect to discovery flow
+  // If a repo param is present, persist the selection (so the user isn't
+  // re-prompted when they later open /dashboard/transform directly) and
+  // redirect to the discovery flow.
   useEffect(() => {
     if (repo) {
-      router.replace(`/dashboard/discovery?repo=${encodeURIComponent(repo)}`)
+      setSelectedRepo(repo, branch || 'main')
+      const qs = new URLSearchParams({ repo })
+      if (branch) qs.set('branch', branch)
+      router.replace(`/dashboard/discovery?${qs.toString()}`)
     }
-  }, [repo, router])
+  }, [repo, branch, router])
 
   // Load user's projects
   useEffect(() => {

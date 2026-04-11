@@ -9,9 +9,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.services.edit_lab_service import (
+    accept_last_edit,
     apply_section_edit,
     load_current_preview,
     navigate_to_page,
+    publish_session_edits,
+    revert_last_edit,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,6 +108,98 @@ class NavigateResponse(BaseModel):
     error: str | None = None
 
 
+class AcceptRequest(BaseModel):
+    session_id: str
+
+
+class AcceptResponse(BaseModel):
+    session_id: str = ""
+    accepted_files: list[str] = []
+    session_expired: bool = False
+    error: str | None = None
+
+
+@router.post("/accept", response_model=AcceptResponse)
+async def accept_endpoint(req: AcceptRequest):
+    try:
+        result = await accept_last_edit(req.session_id)
+        if result.get("error"):
+            return AcceptResponse(
+                session_id=result.get("session_id", ""),
+                error=result["error"],
+                session_expired=bool(result.get("session_expired")),
+            )
+        return AcceptResponse(**result)
+    except Exception as e:
+        logger.error("edit-lab/accept failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class PublishRequest(BaseModel):
+    session_id: str
+    access_token: str
+    github_user_id: str = ""
+
+
+class PublishResponse(BaseModel):
+    session_id: str = ""
+    branch_name: str = ""
+    branch_url: str = ""
+    files_changed: list[str] = []
+    session_expired: bool = False
+    error: str | None = None
+
+
+@router.post("/publish", response_model=PublishResponse)
+async def publish_endpoint(req: PublishRequest):
+    try:
+        result = await publish_session_edits(
+            session_id=req.session_id,
+            access_token=req.access_token,
+            github_user_id=req.github_user_id,
+        )
+        if result.get("error"):
+            return PublishResponse(
+                session_id=result.get("session_id", ""),
+                error=result["error"],
+                session_expired=bool(result.get("session_expired")),
+            )
+        return PublishResponse(**result)
+    except Exception as e:
+        logger.error("edit-lab/publish failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class RevertRequest(BaseModel):
+    session_id: str
+
+
+class RevertResponse(BaseModel):
+    session_id: str = ""
+    screenshot: str = ""
+    sections: list[SectionPayload] = []
+    document_size: DocumentSize = DocumentSize()
+    target_file: str | None = None
+    session_expired: bool = False
+    error: str | None = None
+
+
+@router.post("/revert", response_model=RevertResponse)
+async def revert_endpoint(req: RevertRequest):
+    try:
+        result = await revert_last_edit(req.session_id)
+        if result.get("error"):
+            return RevertResponse(
+                session_id=result.get("session_id", ""),
+                error=result["error"],
+                session_expired=bool(result.get("session_expired")),
+            )
+        return RevertResponse(**result)
+    except Exception as e:
+        logger.error("edit-lab/revert failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.post("/navigate", response_model=NavigateResponse)
 async def navigate_endpoint(req: NavigateRequest):
     try:
@@ -146,6 +241,7 @@ class ApplyResponse(BaseModel):
     updated_section_id: str | None = None
     session_expired: bool = False
     error: str | None = None
+    error_kind: str | None = None
 
 
 @router.post("/apply", response_model=ApplyResponse)
@@ -168,6 +264,7 @@ async def apply_endpoint(req: ApplyRequest):
             return ApplyResponse(
                 session_id=result.get("session_id", ""),
                 error=result["error"],
+                error_kind=result.get("error_kind"),
                 session_expired=bool(result.get("session_expired")),
             )
         return ApplyResponse(**result)
