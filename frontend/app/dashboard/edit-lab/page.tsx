@@ -84,6 +84,122 @@ interface SectionSnapshot {
   documentSize: DocumentSize
 }
 
+interface EditSelection {
+  kind: 'section' | 'rect'
+  label: string
+  heading: string
+  paragraph: string
+  text: string
+  rect: Rect
+  source_file: string | null
+  memberIds: string[]
+}
+
+function rectsIntersect(a: Rect, b: Rect): boolean {
+  return !(
+    a.x + a.width < b.x ||
+    b.x + b.width < a.x ||
+    a.y + a.height < b.y ||
+    b.y + b.height < a.y
+  )
+}
+
+function unionRects(rects: Rect[]): Rect {
+  const x1 = Math.min(...rects.map((r) => r.x))
+  const y1 = Math.min(...rects.map((r) => r.y))
+  const x2 = Math.max(...rects.map((r) => r.x + r.width))
+  const y2 = Math.max(...rects.map((r) => r.y + r.height))
+  return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 }
+}
+
+function hitTestSection(x: number, y: number, sections: Section[]): Section | null {
+  const hits = sections.filter(
+    (s) =>
+      x >= s.rect.x &&
+      x <= s.rect.x + s.rect.width &&
+      y >= s.rect.y &&
+      y <= s.rect.y + s.rect.height,
+  )
+  if (!hits.length) return null
+  hits.sort((a, b) => a.rect.width * a.rect.height - b.rect.width * b.rect.height)
+  return hits[0]
+}
+
+function sectionToSelection(s: Section): EditSelection {
+  return {
+    kind: 'section',
+    label: s.label,
+    heading: s.heading,
+    paragraph: s.paragraph,
+    text: s.text,
+    rect: { ...s.rect },
+    source_file: s.source_file || null,
+    memberIds: [s.id],
+  }
+}
+
+function buildRectSelection(
+  rect: Rect,
+  sections: Section[],
+  rootFile: string | null,
+): EditSelection {
+  const included = sections.filter((s) => rectsIntersect(rect, s.rect))
+  if (included.length === 0) {
+    return {
+      kind: 'rect',
+      label: 'Custom region',
+      heading: '',
+      paragraph: '',
+      text: '',
+      rect,
+      source_file: rootFile,
+      memberIds: [],
+    }
+  }
+  if (included.length === 1) {
+    const sel = sectionToSelection(included[0])
+    sel.kind = 'rect'
+    return sel
+  }
+  const label =
+    included.length <= 3
+      ? included.map((s) => s.label).join(' + ')
+      : `${included.slice(0, 2).map((s) => s.label).join(' + ')} +${included.length - 2}`
+  const heading = included
+    .map((s) => s.heading)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' · ')
+  const paragraph = included
+    .map((s) => s.paragraph)
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(' · ')
+  const text = included
+    .map((s) => s.text)
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 400)
+
+  const fileCounts: Record<string, number> = {}
+  for (const s of included) {
+    if (s.source_file) fileCounts[s.source_file] = (fileCounts[s.source_file] || 0) + 1
+  }
+  const sortedFiles = Object.entries(fileCounts).sort((a, b) => b[1] - a[1])
+  const source_file = sortedFiles[0]?.[0] || rootFile
+
+  return {
+    kind: 'rect',
+    label,
+    heading,
+    paragraph,
+    text,
+    rect: unionRects(included.map((s) => s.rect)),
+    source_file,
+    memberIds: included.map((s) => s.id),
+  }
+}
+
 const PROMPT_EXAMPLES = [
   'Make this section feel more modern',
   'Reduce clutter and simplify',
@@ -100,7 +216,7 @@ export default function EditLabPage() {
   const [error, setError] = useState<string | null>(null)
   const [payload, setPayload] = useState<LoadPayload | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selection, setSelection] = useState<EditSelection | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [promptText, setPromptText] = useState('')
   const [navigating, setNavigating] = useState(false)
@@ -108,6 +224,9 @@ export default function EditLabPage() {
   const [customPath, setCustomPath] = useState('')
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
   const [justUpdatedId, setJustUpdatedId] = useState<string | null>(null)
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null)
+  const [dragCurrent, setDragCurrent] = useState<{ x: number; y: number } | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
   const [lastEdit, setLastEdit] = useState<{
     summary: string
     before: SectionSnapshot
@@ -145,7 +264,7 @@ export default function EditLabPage() {
       if (!opts?.silent) {
         setLoading(true)
         setError(null)
-        setSelectedId(null)
+        setSelection(null)
         setHoveredId(null)
       }
       try {
@@ -185,7 +304,7 @@ export default function EditLabPage() {
       const target = route.trim() || '/'
       setNavigating(true)
       setError(null)
-      setSelectedId(null)
+      setSelection(null)
       setHoveredId(null)
       try {
         const res = await fetch(apiUrl('/edit-lab/navigate'), {
@@ -273,11 +392,6 @@ export default function EditLabPage() {
     ? canvasWidth / payload.document_size.width
     : 1
 
-  const selectedSection = useMemo(
-    () => payload?.sections.find((s) => s.id === selectedId) || null,
-    [payload, selectedId],
-  )
-
   const triggerHighlight = useCallback((sectionId: string | null) => {
     if (!sectionId) return
     setJustUpdatedId(sectionId)
@@ -287,10 +401,10 @@ export default function EditLabPage() {
 
   const performApply = useCallback(
     async (activeSessionId: string): Promise<ApplyPayload | null> => {
-      if (!payload || !selectedSection || !repoState) return null
-      const targetFile = selectedSection.source_file || payload.root_file
+      if (!payload || !selection || !repoState) return null
+      const targetFile = selection.source_file || payload.root_file
       if (!targetFile) {
-        setToast({ kind: 'err', msg: 'Could not locate a source file for this section.' })
+        setToast({ kind: 'err', msg: 'Could not locate a source file for this selection.' })
         return null
       }
       const res = await fetch(apiUrl('/edit-lab/apply'), {
@@ -299,27 +413,27 @@ export default function EditLabPage() {
         body: JSON.stringify({
           session_id: activeSessionId,
           target_file: targetFile,
-          section_label: selectedSection.label,
-          section_heading: selectedSection.heading,
-          section_paragraph: selectedSection.paragraph,
-          section_text: selectedSection.text,
+          section_label: selection.label,
+          section_heading: selection.heading,
+          section_paragraph: selection.paragraph,
+          section_text: selection.text,
           prompt: promptText.trim(),
         }),
       })
       if (!res.ok) throw new Error(`Apply failed (${res.status})`)
       return (await res.json()) as ApplyPayload
     },
-    [payload, selectedSection, repoState, promptText],
+    [payload, selection, repoState, promptText],
   )
 
   const handleApply = useCallback(async () => {
-    if (!payload || !selectedSection || !repoState || !promptText.trim()) return
+    if (!payload || !selection || !repoState || !promptText.trim()) return
 
     const beforeSnapshot: SectionSnapshot = {
-      label: selectedSection.label,
-      heading: selectedSection.heading,
+      label: selection.label,
+      heading: selection.heading,
       screenshot: payload.screenshot,
-      rect: { ...selectedSection.rect },
+      rect: { ...selection.rect },
       documentSize: { ...payload.document_size },
     }
 
@@ -363,7 +477,7 @@ export default function EditLabPage() {
       )
       setSessionId(data.session_id || active)
       setPromptText('')
-      setSelectedId(null)
+      setSelection(null)
       triggerHighlight(newSectionId)
       setLastEdit({
         summary: data.summary || `Updated ${beforeSnapshot.label}`,
@@ -382,7 +496,7 @@ export default function EditLabPage() {
     }
   }, [
     payload,
-    selectedSection,
+    selection,
     repoState,
     promptText,
     sessionId,
@@ -390,6 +504,99 @@ export default function EditLabPage() {
     runLoad,
     triggerHighlight,
   ])
+
+  const onCanvasPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (applying || navigating || loading || !payload) return
+      if (e.button !== 0) return
+      const rect = e.currentTarget.getBoundingClientRect()
+      const x = (e.clientX - rect.left) / (scale || 1)
+      const y = (e.clientY - rect.top) / (scale || 1)
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        /* ignore */
+      }
+      setDragStart({ x, y })
+      setDragCurrent({ x, y })
+      setIsDragging(false)
+    },
+    [applying, navigating, loading, payload, scale],
+  )
+
+  const onCanvasPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!dragStart) return
+      const rect = e.currentTarget.getBoundingClientRect()
+      const x = (e.clientX - rect.left) / (scale || 1)
+      const y = (e.clientY - rect.top) / (scale || 1)
+      setDragCurrent({ x, y })
+      if (!isDragging) {
+        const dx = (x - dragStart.x) * scale
+        const dy = (y - dragStart.y) * scale
+        if (Math.sqrt(dx * dx + dy * dy) > 5) setIsDragging(true)
+      }
+    },
+    [dragStart, isDragging, scale],
+  )
+
+  const onCanvasPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!dragStart || !dragCurrent || !payload) {
+        setDragStart(null)
+        setDragCurrent(null)
+        setIsDragging(false)
+        return
+      }
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      } catch {
+        /* ignore */
+      }
+
+      if (isDragging) {
+        const x = Math.min(dragStart.x, dragCurrent.x)
+        const y = Math.min(dragStart.y, dragCurrent.y)
+        const width = Math.abs(dragCurrent.x - dragStart.x)
+        const height = Math.abs(dragCurrent.y - dragStart.y)
+        if (width * scale > 8 && height * scale > 8) {
+          setSelection(buildRectSelection({ x, y, width, height }, payload.sections, payload.root_file))
+        }
+      } else {
+        const hit = hitTestSection(dragStart.x, dragStart.y, payload.sections)
+        if (hit) {
+          setSelection(sectionToSelection(hit))
+        } else {
+          setSelection(null)
+        }
+      }
+
+      setDragStart(null)
+      setDragCurrent(null)
+      setIsDragging(false)
+    },
+    [dragStart, dragCurrent, isDragging, payload, scale],
+  )
+
+  const onCanvasPointerCancel = useCallback(() => {
+    setDragStart(null)
+    setDragCurrent(null)
+    setIsDragging(false)
+  }, [])
+
+  const dragRectPx = useMemo(() => {
+    if (!dragStart || !dragCurrent || !isDragging) return null
+    const x = Math.min(dragStart.x, dragCurrent.x)
+    const y = Math.min(dragStart.y, dragCurrent.y)
+    const width = Math.abs(dragCurrent.x - dragStart.x)
+    const height = Math.abs(dragCurrent.y - dragStart.y)
+    return {
+      left: x * scale,
+      top: y * scale,
+      width: width * scale,
+      height: height * scale,
+    }
+  }, [dragStart, dragCurrent, isDragging, scale])
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6">
@@ -614,7 +821,18 @@ export default function EditLabPage() {
             )}
 
             {payload && payload.screenshot && !loading && (
-              <div className="relative w-full" style={{ height: payload.document_size.height * scale }}>
+              <div
+                className="relative w-full select-none"
+                style={{
+                  height: payload.document_size.height * scale,
+                  cursor: applying || navigating ? 'default' : 'crosshair',
+                  touchAction: 'none',
+                }}
+                onPointerDown={onCanvasPointerDown}
+                onPointerMove={onCanvasPointerMove}
+                onPointerUp={onCanvasPointerUp}
+                onPointerCancel={onCanvasPointerCancel}
+              >
                 <img
                   src={`data:image/png;base64,${payload.screenshot}`}
                   alt="Current website preview"
@@ -623,20 +841,19 @@ export default function EditLabPage() {
                   draggable={false}
                 />
                 {payload.sections.map((sec) => {
-                  const isSelected = selectedId === sec.id
-                  const isHovered = hoveredId === sec.id
+                  const isMember = selection?.memberIds.includes(sec.id) ?? false
+                  const isHovered = hoveredId === sec.id && !isDragging
                   const isJustUpdated = justUpdatedId === sec.id
                   const area = Math.max(1, sec.rect.width * sec.rect.height)
                   const z = 100000 - Math.round(area / 1000)
                   return (
                     <div
                       key={sec.id}
-                      onMouseEnter={() => setHoveredId(sec.id)}
-                      onMouseLeave={() =>
+                      onPointerEnter={() => !isDragging && setHoveredId(sec.id)}
+                      onPointerLeave={() =>
                         setHoveredId((prev) => (prev === sec.id ? null : prev))
                       }
-                      onClick={() => setSelectedId(sec.id)}
-                      className="absolute cursor-pointer transition-[border,background] duration-100"
+                      className="absolute transition-[border,background] duration-100 pointer-events-none"
                       style={{
                         left: sec.rect.x * scale,
                         top: sec.rect.y * scale,
@@ -645,30 +862,29 @@ export default function EditLabPage() {
                         zIndex: isJustUpdated ? 250000 : z,
                         border: isJustUpdated
                           ? '2px solid rgba(34,197,94,0.9)'
-                          : isSelected
-                            ? '2px solid #7c8cff'
+                          : isMember
+                            ? '1.5px solid rgba(124,140,255,0.7)'
                             : isHovered
-                              ? '1px solid rgba(124,140,255,0.55)'
+                              ? '1px solid rgba(124,140,255,0.4)'
                               : '1px solid transparent',
                         background: isJustUpdated
                           ? 'rgba(34,197,94,0.08)'
-                          : isSelected
-                            ? 'rgba(124,140,255,0.08)'
+                          : isMember
+                            ? 'rgba(124,140,255,0.05)'
                             : isHovered
-                              ? 'rgba(124,140,255,0.035)'
+                              ? 'rgba(124,140,255,0.025)'
                               : 'transparent',
-                        boxShadow: isSelected ? '0 0 0 4px rgba(124,140,255,0.12)' : undefined,
                         animation: isJustUpdated ? 'editLabPulse 2.8s ease-out' : undefined,
                       }}
                     >
-                      {(isHovered || isSelected || isJustUpdated) && (
+                      {(isHovered || isJustUpdated) && !isMember && (
                         <div
                           className="absolute left-0 px-2 py-[3px] rounded-md text-[10px] mono whitespace-nowrap pointer-events-none flex items-center gap-1"
                           style={{
                             top: sec.rect.y * scale > 22 ? -22 : 4,
-                            background: isJustUpdated ? '#22c55e' : isSelected ? '#7c8cff' : 'rgba(6,8,13,0.92)',
-                            color: isJustUpdated || isSelected ? 'white' : 'rgba(255,255,255,0.78)',
-                            border: isJustUpdated || isSelected ? 'none' : '1px solid rgba(255,255,255,0.08)',
+                            background: isJustUpdated ? '#22c55e' : 'rgba(6,8,13,0.92)',
+                            color: isJustUpdated ? 'white' : 'rgba(255,255,255,0.78)',
+                            border: isJustUpdated ? 'none' : '1px solid rgba(255,255,255,0.08)',
                             backdropFilter: 'blur(8px)',
                           }}
                         >
@@ -679,6 +895,53 @@ export default function EditLabPage() {
                     </div>
                   )
                 })}
+
+                {/* Active selection outline (click or rect) */}
+                {selection && !isDragging && (
+                  <div
+                    className="absolute pointer-events-none"
+                    style={{
+                      left: selection.rect.x * scale,
+                      top: selection.rect.y * scale,
+                      width: selection.rect.width * scale,
+                      height: selection.rect.height * scale,
+                      border: '2px solid #7c8cff',
+                      background: 'rgba(124,140,255,0.06)',
+                      boxShadow: '0 0 0 4px rgba(124,140,255,0.12)',
+                      zIndex: 260000,
+                    }}
+                  >
+                    <div
+                      className="absolute left-0 px-2 py-[3px] rounded-md text-[10px] mono whitespace-nowrap flex items-center gap-1"
+                      style={{
+                        top: selection.rect.y * scale > 22 ? -22 : 4,
+                        background: '#7c8cff',
+                        color: 'white',
+                      }}
+                    >
+                      {selection.label}
+                      {selection.memberIds.length > 1 && (
+                        <span style={{ opacity: 0.75 }}>· {selection.memberIds.length} sections</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Live drag rectangle */}
+                {dragRectPx && (
+                  <div
+                    className="absolute pointer-events-none"
+                    style={{
+                      left: dragRectPx.left,
+                      top: dragRectPx.top,
+                      width: dragRectPx.width,
+                      height: dragRectPx.height,
+                      border: '1.5px dashed rgba(124,140,255,0.75)',
+                      background: 'rgba(124,140,255,0.06)',
+                      zIndex: 270000,
+                    }}
+                  />
+                )}
 
                 {payload.sections.length === 0 && (
                   <div
@@ -732,7 +995,7 @@ export default function EditLabPage() {
                         style={{ border: '2px solid rgba(124,140,255,0.15)', borderTopColor: '#7c8cff' }}
                       />
                       <div className="text-[12px]" style={{ color: 'rgba(255,255,255,0.65)' }}>
-                        Applying change to {selectedSection?.label || 'section'}…
+                        Applying change to {selection?.label || 'selection'}…
                       </div>
                       <div className="text-[10px] mono" style={{ color: 'rgba(255,255,255,0.3)' }}>
                         Hot-reloading the warm dev server — ~10s
@@ -752,7 +1015,7 @@ export default function EditLabPage() {
             border: '1px solid rgba(255,255,255,0.06)',
           }}
         >
-          {!selectedSection && !lastEdit && (
+          {!selection && !lastEdit && (
             <div className="py-8 flex flex-col items-center gap-3 text-center">
               <div
                 className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -768,30 +1031,38 @@ export default function EditLabPage() {
                   <rect x="3" y="14" width="7" height="7" />
                 </svg>
               </div>
-              <div className="text-[13px] font-medium text-white">Select a section to edit</div>
+              <div className="text-[13px] font-medium text-white">Click or drag to select</div>
               <div className="text-[11px] max-w-[260px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                Hover the preview to reveal sections, then click one. The dev server stays warm between edits.
+                Click any section, or drag a rectangle across multiple. The dev server stays warm between edits.
               </div>
             </div>
           )}
 
-          {!selectedSection && lastEdit && (
+          {!selection && lastEdit && (
             <LastEditCard
               lastEdit={lastEdit}
               onDismiss={() => setLastEdit(null)}
             />
           )}
 
-          {selectedSection && (
+          {selection && (
             <>
               <div>
                 <div className="flex items-center justify-between">
-                  <div className="text-[10px] mono uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                    Editing
+                  <div className="text-[10px] mono uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                    <span>Editing</span>
+                    {selection.kind === 'rect' && selection.memberIds.length > 1 && (
+                      <span
+                        className="px-1.5 py-[1px] rounded"
+                        style={{ background: 'rgba(124,140,255,0.15)', color: 'rgba(170,180,255,0.9)' }}
+                      >
+                        {selection.memberIds.length} sections
+                      </span>
+                    )}
                   </div>
                   <button
                     onClick={() => {
-                      setSelectedId(null)
+                      setSelection(null)
                       setPromptText('')
                     }}
                     disabled={applying}
@@ -801,13 +1072,18 @@ export default function EditLabPage() {
                     clear
                   </button>
                 </div>
-                <div className="text-[15px] font-semibold text-white mt-1">{selectedSection.label}</div>
-                {selectedSection.heading && (
+                <div className="text-[15px] font-semibold text-white mt-1">{selection.label}</div>
+                {selection.heading && (
                   <div className="text-[11px] mt-1 line-clamp-2" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                    “{selectedSection.heading}”
+                    “{selection.heading}”
                   </div>
                 )}
-                {selectedSection.source_file && (
+                {selection.kind === 'rect' && selection.memberIds.length === 0 && (
+                  <div className="text-[11px] mt-1" style={{ color: 'rgba(234,179,8,0.7)' }}>
+                    No detected content inside this rectangle — the edit will target the page root file.
+                  </div>
+                )}
+                {selection.source_file && (
                   <div
                     className="text-[10px] mono mt-2 truncate px-2 py-1 rounded"
                     style={{
@@ -815,9 +1091,9 @@ export default function EditLabPage() {
                       background: 'rgba(255,255,255,0.03)',
                       border: '1px solid rgba(255,255,255,0.05)',
                     }}
-                    title={selectedSection.source_file}
+                    title={selection.source_file}
                   >
-                    {selectedSection.source_file}
+                    {selection.source_file}
                   </div>
                 )}
               </div>
