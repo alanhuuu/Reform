@@ -305,17 +305,18 @@ function SpaceBlackMacBook({
       {/* ── HINGE ── */}
       <div
         style={{
-          height: '3px',
+          height: '7px',
           background: 'linear-gradient(180deg, #3a3a3c 0%, #2c2c2e 40%, #1c1c1e 100%)',
           position: 'relative',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(0,0,0,0.35)',
         }}
       >
         <div
           style={{
             position: 'absolute',
             inset: '0 6% auto 6%',
-            height: '0.5px',
-            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.10) 40%, rgba(255,255,255,0.10) 60%, transparent)',
+            height: '1px',
+            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.14) 40%, rgba(255,255,255,0.14) 60%, transparent)',
           }}
         />
       </div>
@@ -323,15 +324,15 @@ function SpaceBlackMacBook({
       {/* ── KEYBOARD BASE ── */}
       <div
         style={{
-          height: '46px',
+          aspectRatio: '16 / 2.5',
           background: 'linear-gradient(180deg, #262628 0%, #212123 15%, #1e1e20 40%, #1b1b1d 70%, #18181a 100%)',
-          borderRadius: '0 0 10px 10px',
+          borderRadius: '0 0 14px 14px',
           position: 'relative',
           overflow: 'hidden',
           boxShadow: `
-            inset 0 0.5px 0 rgba(255,255,255,0.05),
-            inset 0 0 0 0.5px rgba(255,255,255,0.03),
-            0 1px 0 rgba(0,0,0,0.3)
+            inset 0 0.5px 0 rgba(255,255,255,0.06),
+            inset 0 0 0 0.5px rgba(255,255,255,0.035),
+            0 2px 0 rgba(0,0,0,0.35)
           `,
         }}
       >
@@ -378,9 +379,9 @@ function SpaceBlackMacBook({
                   key={i}
                   style={{
                     flex: (row === 3 && i === 4) ? '3.5 1 0%' : '1 1 0%',
-                    background: 'rgba(0,0,0,0.22)',
-                    borderRadius: '1.5px',
-                    boxShadow: 'inset 0 0.5px 0 rgba(255,255,255,0.02), inset 0 -0.5px 0 rgba(0,0,0,0.1)',
+                    background: 'linear-gradient(180deg, rgba(10,10,12,0.7) 0%, rgba(0,0,0,0.85) 100%)',
+                    borderRadius: '2.5px',
+                    boxShadow: 'inset 0 0.5px 0 rgba(255,255,255,0.055), inset 0 -0.5px 0 rgba(0,0,0,0.4), 0 0.5px 0 rgba(255,255,255,0.015)',
                   }}
                 />
               ))}
@@ -430,14 +431,15 @@ function SpaceBlackMacBook({
         />
       </div>
 
-      {/* ── FRONT LIP ── */}
+      {/* ── FRONT LIP — curved cutout under the palm rest ── */}
       <div
         style={{
-          height: '2px',
-          margin: '0 2px',
-          background: 'linear-gradient(180deg, #18181a, #111113)',
-          borderRadius: '0 0 10px 10px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.35)',
+          height: '6px',
+          margin: '0 4%',
+          background: 'linear-gradient(180deg, #141416 0%, #0a0a0c 100%)',
+          borderRadius: '0 0 12px 12px',
+          boxShadow:
+            '0 1px 0 rgba(255,255,255,0.02) inset, 0 3px 8px rgba(0,0,0,0.5)',
         }}
       />
     </div>

@@ -102,15 +102,15 @@ export default function NewPage() {
           <div className="max-w-5xl mx-auto px-5 sm:px-6 py-4 flex items-center justify-between gap-4">
             <Link href="/" className="flex items-center gap-3">
               <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center"
+                className="w-11 h-11 rounded-xl flex items-center justify-center overflow-hidden"
                 style={{
                   background: 'linear-gradient(180deg, rgba(124,140,255,0.2) 0%, rgba(124,140,255,0.08) 100%)',
                   border: '1px solid rgba(170,180,255,0.16)',
                 }}
               >
-                <Image src="/reform_logo.png" alt="Reform" width={20} height={20} className="object-contain" />
+                <Image src="/reform_justlogo.png" alt="Reform" width={34} height={34} className="object-contain" />
               </div>
-              <span className="text-[15px] font-semibold text-white" style={{ letterSpacing: '-0.03em' }}>Reform</span>
+              <span className="text-[16px] font-semibold text-white" style={{ letterSpacing: '-0.03em' }}>Reform</span>
             </Link>
 
             {status === 'loading' ? null : session ? (

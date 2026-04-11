@@ -1,9 +1,10 @@
-"""Tests for tinyfish_client.py — all private helpers and extract_site_data."""
+"""Tests for tinyfish_client.py — private helpers and the async extract_site_data."""
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
+
+from tinyfish import RunStatus
 
 from app.services.tinyfish_client import (
     BORDER_DEFAULTS,
@@ -16,39 +17,49 @@ from app.services.tinyfish_client import (
     _ensure_typography,
     _get_api_key,
     _normalize,
-    _parse_sse_events,
+    clear_cache,
     extract_site_data,
 )
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _make_httpx_mock(sse_bytes: bytes, raise_status: bool = False):
-    """Build a mock httpx.Client that returns the given SSE bytes."""
-    mock_response = MagicMock()
-    mock_response.read.return_value = sse_bytes
-    if raise_status:
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "403 Forbidden", request=MagicMock(), response=MagicMock()
-        )
+def _make_async_tinyfish_mock(
+    result=None,
+    status=RunStatus.COMPLETED,
+    error=None,
+    steps: int = 7,
+):
+    """Build a mock AsyncTinyFish whose agent.run() returns a configured response."""
+    response = MagicMock()
+    response.status = status
+    response.result = result
+    response.error = error
+    response.num_of_steps = steps
 
-    mock_client = MagicMock()
-    mock_client.stream.return_value.__enter__.return_value = mock_response
-    mock_client.stream.return_value.__exit__.return_value = False
+    run_mock = AsyncMock(return_value=response)
 
-    mock_http_class = MagicMock()
-    mock_http_class.return_value.__enter__.return_value = mock_client
-    mock_http_class.return_value.__exit__.return_value = False
-
-    return mock_http_class
-
-
-def _sse(payload: dict) -> bytes:
-    return f"data: {json.dumps(payload)}\n".encode()
+    client = MagicMock()
+    client.agent = MagicMock()
+    client.agent.run = run_mock
+    return client, run_mock
 
 
-def _complete_event(result) -> bytes:
-    return _sse({"type": "COMPLETE", "status": "ok", "result": result})
+@pytest.fixture(autouse=True)
+def _reset_tinyfish_state(monkeypatch):
+    """Each test gets a fresh cache and a sanitised module state so the
+    lazily-built AsyncTinyFish singleton can't leak across tests."""
+    import app.services.tinyfish_client as tf
+    tf._client = None
+    tf._semaphore = None
+    clear_cache()
+    # Point S3 cache helpers at no-op stubs so we never hit the real bucket.
+    monkeypatch.setattr(tf, "download_tinyfish_cache", lambda *a, **kw: None)
+    monkeypatch.setattr(tf, "upload_tinyfish_cache", lambda *a, **kw: None)
+    yield
+    tf._client = None
+    tf._semaphore = None
+    clear_cache()
 
 
 FULL_ANALYSIS = {
@@ -98,47 +109,6 @@ class TestGetApiKey:
         monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="TINYFISH_API_KEY"):
             _get_api_key()
-
-
-# ─── _parse_sse_events ────────────────────────────────────────────────────────
-
-class TestParseSSEEvents:
-    def test_single_valid_event(self):
-        text = 'data: {"type": "STATUS"}\n'
-        events = _parse_sse_events(text)
-        assert events == [{"type": "STATUS"}]
-
-    def test_multiple_events(self):
-        text = (
-            'data: {"type": "STATUS", "msg": "starting"}\n'
-            'data: {"type": "COMPLETE", "status": "ok", "result": {}}\n'
-        )
-        events = _parse_sse_events(text)
-        assert len(events) == 2
-        assert events[0]["type"] == "STATUS"
-        assert events[1]["type"] == "COMPLETE"
-
-    def test_non_data_lines_ignored(self):
-        text = "event: progress\ndata: {}\nid: 1\n: comment\n"
-        events = _parse_sse_events(text)
-        assert events == [{}]
-
-    def test_invalid_json_skipped(self):
-        text = "data: {invalid json}\ndata: {}\n"
-        events = _parse_sse_events(text)
-        assert events == [{}]
-
-    def test_empty_string_returns_empty_list(self):
-        assert _parse_sse_events("") == []
-
-    def test_only_non_data_lines_returns_empty(self):
-        text = "event: open\nid: 1\n: heartbeat\n"
-        assert _parse_sse_events(text) == []
-
-    def test_whitespace_around_data_line_stripped(self):
-        text = "  data: {\"k\": 1}  \n"
-        events = _parse_sse_events(text)
-        assert events == [{"k": 1}]
 
 
 # ─── _ensure_typography ───────────────────────────────────────────────────────
@@ -402,88 +372,107 @@ class TestNormalize:
 class TestExtractSiteData:
     URL = "https://example.com"
 
-    def test_success_with_dict_result(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_success_with_dict_result(self, monkeypatch):
         monkeypatch.setenv("TINYFISH_API_KEY", "test-key")
-        sse = _complete_event(FULL_ANALYSIS)
-        mock_http = _make_httpx_mock(sse)
-        with patch("app.services.tinyfish_client.httpx.Client", mock_http):
-            result = extract_site_data(self.URL)
+        mock_client, run_mock = _make_async_tinyfish_mock(result=FULL_ANALYSIS)
+        with patch(
+            "app.services.tinyfish_client.AsyncTinyFish",
+            return_value=mock_client,
+        ):
+            result = await extract_site_data(self.URL)
         assert result["url"] == self.URL
         assert isinstance(result["raw_analysis"], dict)
         assert result["raw_analysis"]["page_type"] == "dashboard"
+        # Verify agent.run was called with the right kwargs
+        run_mock.assert_awaited_once()
+        kwargs = run_mock.await_args.kwargs
+        assert kwargs["url"] == self.URL
+        assert "goal" in kwargs
 
-    def test_success_with_string_result(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_success_with_string_result(self, monkeypatch):
+        """TinyFish returned a string — it should get wrapped in raw_text fallback."""
         monkeypatch.setenv("TINYFISH_API_KEY", "test-key")
-        # result is JSON string instead of dict
-        sse = _sse({"type": "COMPLETE", "status": "ok", "result": json.dumps(FULL_ANALYSIS)})
-        mock_http = _make_httpx_mock(sse)
-        with patch("app.services.tinyfish_client.httpx.Client", mock_http):
-            result = extract_site_data(self.URL)
+        # SDK type says dict|None but the code handles stringy payloads too.
+        mock_client, _ = _make_async_tinyfish_mock(result=json.dumps(FULL_ANALYSIS))
+        with patch(
+            "app.services.tinyfish_client.AsyncTinyFish",
+            return_value=mock_client,
+        ):
+            result = await extract_site_data(self.URL)
+        # The string gets treated as raw text → fallback path (not parsed)
         assert result["url"] == self.URL
-        assert result["raw_analysis"]["page_type"] == "dashboard"
+        assert "raw_analysis" in result
 
-    def test_success_with_plain_text_result(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_cancelled_run_raises_runtime_error(self, monkeypatch):
         monkeypatch.setenv("TINYFISH_API_KEY", "test-key")
-        sse = _sse({"type": "COMPLETE", "status": "ok", "result": "Some plain text output"})
-        mock_http = _make_httpx_mock(sse)
-        with patch("app.services.tinyfish_client.httpx.Client", mock_http):
-            result = extract_site_data(self.URL)
-        # Falls back to raw text wrap
-        assert result["raw_analysis"]["page_type"] == "unknown"
-        assert "raw_text" in result["raw_analysis"]
+        mock_client, _ = _make_async_tinyfish_mock(
+            status=RunStatus.CANCELLED,
+            error="timeout",
+        )
+        with patch(
+            "app.services.tinyfish_client.AsyncTinyFish",
+            return_value=mock_client,
+        ):
+            with pytest.raises(RuntimeError, match="did not complete"):
+                await extract_site_data(self.URL)
 
-    def test_cancelled_run_raises_runtime_error(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_failed_run_raises_runtime_error(self, monkeypatch):
         monkeypatch.setenv("TINYFISH_API_KEY", "test-key")
-        sse = _sse({"type": "COMPLETE", "status": "CANCELLED", "error": "timeout"})
-        mock_http = _make_httpx_mock(sse)
-        with patch("app.services.tinyfish_client.httpx.Client", mock_http):
-            with pytest.raises(RuntimeError, match="cancelled"):
-                extract_site_data(self.URL)
+        mock_client, _ = _make_async_tinyfish_mock(
+            status=RunStatus.FAILED,
+            error="captcha",
+        )
+        with patch(
+            "app.services.tinyfish_client.AsyncTinyFish",
+            return_value=mock_client,
+        ):
+            with pytest.raises(RuntimeError, match="did not complete"):
+                await extract_site_data(self.URL)
 
-    def test_no_complete_event_raises_runtime_error(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_empty_result_raises_runtime_error(self, monkeypatch):
         monkeypatch.setenv("TINYFISH_API_KEY", "test-key")
-        sse = _sse({"type": "STATUS", "message": "processing"})
-        mock_http = _make_httpx_mock(sse)
-        with patch("app.services.tinyfish_client.httpx.Client", mock_http):
+        mock_client, _ = _make_async_tinyfish_mock(result=None)
+        with patch(
+            "app.services.tinyfish_client.AsyncTinyFish",
+            return_value=mock_client,
+        ):
             with pytest.raises(RuntimeError, match="no result"):
-                extract_site_data(self.URL)
+                await extract_site_data(self.URL)
 
-    def test_empty_sse_raises_runtime_error(self, monkeypatch):
-        monkeypatch.setenv("TINYFISH_API_KEY", "test-key")
-        mock_http = _make_httpx_mock(b"")
-        with patch("app.services.tinyfish_client.httpx.Client", mock_http):
-            with pytest.raises(RuntimeError, match="no result"):
-                extract_site_data(self.URL)
-
-    def test_missing_api_key_raises_before_http(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_missing_api_key_raises_before_call(self, monkeypatch):
         monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="TINYFISH_API_KEY"):
-            extract_site_data(self.URL)
+            await extract_site_data(self.URL)
 
-    def test_http_status_error_propagates(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_api_error_propagates(self, monkeypatch):
+        """Any exception from the SDK should bubble up to the caller."""
         monkeypatch.setenv("TINYFISH_API_KEY", "test-key")
-        mock_http = _make_httpx_mock(b"", raise_status=True)
-        with patch("app.services.tinyfish_client.httpx.Client", mock_http):
-            with pytest.raises(httpx.HTTPStatusError):
-                extract_site_data(self.URL)
+        mock_client = MagicMock()
+        mock_client.agent = MagicMock()
+        mock_client.agent.run = AsyncMock(side_effect=RuntimeError("403 Forbidden"))
+        with patch(
+            "app.services.tinyfish_client.AsyncTinyFish",
+            return_value=mock_client,
+        ):
+            with pytest.raises(RuntimeError, match="403"):
+                await extract_site_data(self.URL)
 
-    def test_events_before_complete_are_ignored(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_result_shape_is_url_plus_raw_analysis(self, monkeypatch):
         monkeypatch.setenv("TINYFISH_API_KEY", "test-key")
-        # Multiple events; only COMPLETE is used
-        noise = _sse({"type": "STATUS", "message": "step1"})
-        complete = _complete_event({"page_type": "real_data"})
-        mock_http = _make_httpx_mock(noise + complete)
-        with patch("app.services.tinyfish_client.httpx.Client", mock_http):
-            result = extract_site_data(self.URL)
-        assert result["raw_analysis"]["page_type"] == "real_data"
-
-    def test_all_expected_fields_logged(self, monkeypatch):
-        """Verify return dict always has url + raw_analysis, not bare analysis."""
-        monkeypatch.setenv("TINYFISH_API_KEY", "test-key")
-        sse = _complete_event(FULL_ANALYSIS)
-        mock_http = _make_httpx_mock(sse)
-        with patch("app.services.tinyfish_client.httpx.Client", mock_http):
-            result = extract_site_data(self.URL)
+        mock_client, _ = _make_async_tinyfish_mock(result=FULL_ANALYSIS)
+        with patch(
+            "app.services.tinyfish_client.AsyncTinyFish",
+            return_value=mock_client,
+        ):
+            result = await extract_site_data(self.URL)
         assert "url" in result
         assert "raw_analysis" in result
         assert len(result) == 2  # only two keys

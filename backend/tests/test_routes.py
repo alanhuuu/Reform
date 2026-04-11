@@ -5,7 +5,7 @@ The real FastAPI request/response cycle, schema validation, and status codes are
 all exercised through Starlette's TestClient.
 """
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -75,8 +75,11 @@ class TestAnalyzeCompetitorsEndpoint:
 
     def test_exactly_five_urls_accepted(self, client, mock_competitor_response):
         urls = [f"https://site{i}.com" for i in range(5)]
-        with patch("app.routes.analyze_competitors.analyze_competitors",
-                   return_value=mock_competitor_response):
+        with patch(
+            "app.routes.analyze_competitors.analyze_competitors",
+            new_callable=AsyncMock,
+            return_value=mock_competitor_response,
+        ):
             response = client.post("/analyze-competitors", json={"urls": urls})
         assert response.status_code == 200
 
@@ -93,8 +96,11 @@ class TestAnalyzeCompetitorsEndpoint:
         assert response.status_code == 422
 
     def test_style_goal_forwarded_to_service(self, client, mock_competitor_response):
-        with patch("app.routes.analyze_competitors.analyze_competitors",
-                   return_value=mock_competitor_response) as mock_service:
+        with patch(
+            "app.routes.analyze_competitors.analyze_competitors",
+            new_callable=AsyncMock,
+            return_value=mock_competitor_response,
+        ) as mock_service:
             client.post("/analyze-competitors", json={
                 "urls": ["https://github.com"],
                 "style_goal": "custom_goal",
@@ -103,16 +109,22 @@ class TestAnalyzeCompetitorsEndpoint:
         assert "custom_goal" in call_args.args
 
     def test_design_tokens_in_response_have_typography(self, client, mock_competitor_response):
-        with patch("app.routes.analyze_competitors.analyze_competitors",
-                   return_value=mock_competitor_response):
+        with patch(
+            "app.routes.analyze_competitors.analyze_competitors",
+            new_callable=AsyncMock,
+            return_value=mock_competitor_response,
+        ):
             response = client.post("/analyze-competitors", json=VALID_COMPETITOR_BODY)
         tokens = response.json()["design_tokens"]
         assert "typography" in tokens
         assert "font_family" in tokens["typography"]
 
     def test_design_tokens_shadow_structured(self, client, mock_competitor_response):
-        with patch("app.routes.analyze_competitors.analyze_competitors",
-                   return_value=mock_competitor_response):
+        with patch(
+            "app.routes.analyze_competitors.analyze_competitors",
+            new_callable=AsyncMock,
+            return_value=mock_competitor_response,
+        ):
             response = client.post("/analyze-competitors", json=VALID_COMPETITOR_BODY)
         shadow = response.json()["design_tokens"]["shadow"]
         assert "sm" in shadow
@@ -138,20 +150,29 @@ class TestExtractRawEndpoint:
     }
 
     def test_valid_request_returns_200(self, client):
-        with patch("app.routes.analyze_competitors.extract_site_data",
-                   return_value=self.MOCK_SITE_DATA):
+        with patch(
+            "app.routes.analyze_competitors.extract_site_data",
+            new_callable=AsyncMock,
+            return_value=self.MOCK_SITE_DATA,
+        ):
             response = client.post("/extract-raw", json=VALID_COMPETITOR_BODY)
         assert response.status_code == 200
 
     def test_response_has_results_key(self, client):
-        with patch("app.routes.analyze_competitors.extract_site_data",
-                   return_value=self.MOCK_SITE_DATA):
+        with patch(
+            "app.routes.analyze_competitors.extract_site_data",
+            new_callable=AsyncMock,
+            return_value=self.MOCK_SITE_DATA,
+        ):
             response = client.post("/extract-raw", json=VALID_COMPETITOR_BODY)
         assert "results" in response.json()
 
     def test_result_has_field_coverage(self, client):
-        with patch("app.routes.analyze_competitors.extract_site_data",
-                   return_value=self.MOCK_SITE_DATA):
+        with patch(
+            "app.routes.analyze_competitors.extract_site_data",
+            new_callable=AsyncMock,
+            return_value=self.MOCK_SITE_DATA,
+        ):
             response = client.post("/extract-raw", json=VALID_COMPETITOR_BODY)
         result = response.json()["results"][0]
         assert result["status"] == "ok"
@@ -164,16 +185,22 @@ class TestExtractRawEndpoint:
     def test_field_coverage_counts_expected_fields(self, client):
         """Coverage should report out of all expected fields."""
         from app.services.tinyfish_client import EXPECTED_FIELDS
-        with patch("app.routes.analyze_competitors.extract_site_data",
-                   return_value=self.MOCK_SITE_DATA):
+        with patch(
+            "app.routes.analyze_competitors.extract_site_data",
+            new_callable=AsyncMock,
+            return_value=self.MOCK_SITE_DATA,
+        ):
             response = client.post("/extract-raw", json=VALID_COMPETITOR_BODY)
         coverage_str = response.json()["results"][0]["field_coverage"]["coverage"]
         total = int(coverage_str.split("/")[1])
         assert total == len(EXPECTED_FIELDS)
 
     def test_extraction_failure_returns_error_in_results(self, client):
-        with patch("app.routes.analyze_competitors.extract_site_data",
-                   side_effect=RuntimeError("TinyFish unavailable")):
+        with patch(
+            "app.routes.analyze_competitors.extract_site_data",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("TinyFish unavailable"),
+        ):
             response = client.post("/extract-raw", json=VALID_COMPETITOR_BODY)
         assert response.status_code == 200  # outer response is still 200
         result = response.json()["results"][0]
@@ -182,13 +209,16 @@ class TestExtractRawEndpoint:
 
     def test_partial_failure_mixed_results(self, client):
         """When one URL fails and another succeeds, both appear in results."""
-        def side_effect(url):
+        async def side_effect(url):
             if "fail" in url:
                 raise RuntimeError("failed")
             return {"url": url, "raw_analysis": {**self.MOCK_SITE_DATA["raw_analysis"]}}
 
-        with patch("app.routes.analyze_competitors.extract_site_data",
-                   side_effect=side_effect):
+        with patch(
+            "app.routes.analyze_competitors.extract_site_data",
+            new_callable=AsyncMock,
+            side_effect=side_effect,
+        ):
             response = client.post("/extract-raw", json={
                 "urls": ["https://success.com", "https://fail.com"],
             })
