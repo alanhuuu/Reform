@@ -65,15 +65,27 @@ def _is_frontend_package(pkg_path: str) -> bool:
         return False
 
 
+def _prefers_next(pkg_path: str) -> bool:
+    """Return True if the package.json declares Next.js as a dependency."""
+    import json as _json
+    try:
+        with open(pkg_path) as f:
+            data = _json.load(f)
+        all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+        return "next" in all_deps
+    except Exception:
+        return False
+
+
 def _find_frontend_root(repo_dir: str) -> str:
     """Find the directory containing package.json with a Next.js or React setup.
 
     Strategy:
-    1. Check common hardcoded names first (fast path)
-    2. Scan all immediate subdirectories
-    3. Prefer dirs with 'next' in deps over plain 'react'
+    1. Check common hardcoded names at the repo root (fast path).
+    2. Scan immediate subdirectories.
+    3. Scan monorepo layouts: `apps/*`, `packages/*`, `services/*`.
+    4. Prefer dirs with `next` in deps over plain `react`.
     """
-    # Fast path: check common locations first
     priority_dirs = [
         repo_dir,
         os.path.join(repo_dir, "frontend"),
@@ -88,28 +100,46 @@ def _find_frontend_root(repo_dir: str) -> str:
             logger.info("Frontend root (priority): %s", d)
             return d
 
-    # Scan all immediate subdirectories for any package.json with react/next
-    best = None
-    for entry in os.listdir(repo_dir):
+    best: str | None = None
+
+    # Scan immediate subdirectories for any package.json with react/next
+    try:
+        entries = os.listdir(repo_dir)
+    except OSError:
+        entries = []
+    for entry in entries:
         subdir = os.path.join(repo_dir, entry)
         if not os.path.isdir(subdir) or entry.startswith(".") or entry == "node_modules":
             continue
         pkg = os.path.join(subdir, "package.json")
         if os.path.isfile(pkg) and _is_frontend_package(pkg):
             logger.info("Frontend root (scan): %s", subdir)
-            # Prefer next over plain react
-            import json as _json
-            try:
-                with open(pkg) as f:
-                    data = _json.load(f)
-                all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
-                if "next" in all_deps:
-                    return subdir
-                if best is None:
-                    best = subdir
-            except Exception:
-                if best is None:
-                    best = subdir
+            if _prefers_next(pkg):
+                return subdir
+            if best is None:
+                best = subdir
+
+    # Monorepo layouts: apps/<name>, packages/<name>, services/<name>
+    for parent_name in ("apps", "packages", "services"):
+        parent = os.path.join(repo_dir, parent_name)
+        if not os.path.isdir(parent):
+            continue
+        try:
+            children = sorted(os.listdir(parent))
+        except OSError:
+            continue
+        for child in children:
+            subdir = os.path.join(parent, child)
+            if not os.path.isdir(subdir) or child.startswith(".") or child == "node_modules":
+                continue
+            pkg = os.path.join(subdir, "package.json")
+            if not (os.path.isfile(pkg) and _is_frontend_package(pkg)):
+                continue
+            logger.info("Frontend root (monorepo %s/): %s", parent_name, subdir)
+            if _prefers_next(pkg):
+                return subdir
+            if best is None:
+                best = subdir
 
     if best:
         return best

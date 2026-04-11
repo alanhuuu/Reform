@@ -299,8 +299,8 @@ async def run_pipeline_v2(
 
     if not pages:
         raise ValueError(
-            "No pages found. Ensure the repo has Next.js pages "
-            "(app/**/page.tsx or pages/**/*.tsx)."
+            "No pages detected. This repo may not use a traditional pages "
+            "structure. Falling back to single-page analysis."
         )
 
     logger.info("Pipeline v2: Found %d pages (%s)", len(pages), framework)

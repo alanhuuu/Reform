@@ -135,5 +135,5 @@ class UXLabSession(Base):
     before_screenshot_key = Column(String, nullable=True)   # S3 key
     after_screenshot_key = Column(String, nullable=True)    # S3 key
     findings_json = Column(JSON, nullable=False, default=list)
-status = Column(String, nullable=False, default="pending")  # pending / complete / error
+    status = Column(String, nullable=False, default="pending")  # pending / complete / error
     created_at = Column(DateTime(timezone=True), default=_utcnow)

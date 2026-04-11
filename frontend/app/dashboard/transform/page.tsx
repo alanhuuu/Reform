@@ -1440,19 +1440,19 @@ function TransformPage() {
           </div>
         )}
 
-        {/* ── Heatmap CTA — only when complete ── */}
+        {/* ── Edit Lab CTA — only when complete ── */}
         {pipelineStep === 'complete' && <div className="flex justify-center">
           <button
-            onClick={() => router.push('/dashboard/simulation')}
+            onClick={() => router.push('/dashboard/edit-lab')}
             className="flex items-center gap-3 px-6 py-3 rounded-xl font-semibold text-sm text-white transition-all active:scale-[0.98]"
             style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)', boxShadow: '0 0 30px rgba(124,58,237,0.08)' }}
             onMouseEnter={e => { e.currentTarget.style.background = 'rgba(124,58,237,0.2)'; e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'rgba(124,58,237,0.12)'; e.currentTarget.style.borderColor = 'rgba(124,58,237,0.25)' }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" /><line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
+              <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
             </svg>
-            <span>Analyse UX Heatmaps</span>
+            <span>Open Edit Lab</span>
             <span style={{ color: 'rgba(168,85,247,0.5)', fontSize: '12px' }}>→</span>
           </button>
         </div>}

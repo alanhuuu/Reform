@@ -32,6 +32,24 @@ const MOCK_ANALYSIS = {
   },
 }
 
+const FLAVOR_LINES = [
+  'Squinting at competitor whitespace…',
+  'Measuring button curves down to the pixel…',
+  'Counting navigation items, judging each one…',
+  'Reading between the lines of hero sections…',
+  'Decoding the politics of dropdown menus…',
+  'Looking for hidden gems in the footer…',
+  'Grading spacing with a very harsh eye…',
+  'Interrogating CTAs about their intentions…',
+  'Sniffing out design systems under the hood…',
+  'Judging color palettes like it’s fashion week…',
+  'Taking notes on every hover state…',
+  'Weighing typography choices carefully…',
+  'Comparing shadows for competitive advantage…',
+  'Arguing about which shade of gray is best…',
+  'Stealing ideas, politely and with attribution…',
+]
+
 const QUESTIONS = [
   { key: 'product_type', label: 'What are you building?', placeholder: 'e.g., Dashboard, Mobile app, SaaS platform', optional: false },
   { key: 'industry', label: 'What industry or field?', placeholder: 'e.g., Fintech, Healthcare, Education, DevTools', optional: false },
@@ -57,6 +75,7 @@ function DiscoveryPageInner() {
   const [loadingStatus, setLoadingStatus] = useState('')
   const [stageIdx, setStageIdx] = useState(0)
   const [siteProgress, setSiteProgress] = useState<{ url: string; status: 'pending' | 'ok' | 'timeout' | 'failed' }[]>([])
+  const [flavorIdx, setFlavorIdx] = useState(0)
   const [error, setError] = useState('')
   const [completed, setCompleted] = useState(false)
   const [discovery, setDiscovery] = useState<DiscoveryData | null>(null)
@@ -72,6 +91,19 @@ function DiscoveryPageInner() {
     if (repo) sessionStorage.setItem('refineui_repo', repo)
     if (branch) sessionStorage.setItem('refineui_branch', branch)
   }, [repo, branch])
+
+  useEffect(() => {
+    if (!loading) return
+    setFlavorIdx(Math.floor(Math.random() * FLAVOR_LINES.length))
+    const id = setInterval(() => {
+      setFlavorIdx((prev) => {
+        let next = prev
+        while (next === prev) next = Math.floor(Math.random() * FLAVOR_LINES.length)
+        return next
+      })
+    }, 2800)
+    return () => clearInterval(id)
+  }, [loading])
 
   useEffect(() => {
     const storedDiscovery = sessionStorage.getItem('refineui_discovery')
@@ -383,9 +415,6 @@ function DiscoveryPageInner() {
                   <span className="text-[12px]" style={{ color: isActive ? 'rgba(255,255,255,0.6)' : isDone ? 'rgba(34,197,94,0.5)' : 'rgba(255,255,255,0.15)' }}>
                     {stage.label}
                   </span>
-                  <span className="text-[10px] font-mono ml-auto" style={{ color: 'rgba(255,255,255,0.1)' }}>
-                    ~{stage.est}s
-                  </span>
                 </div>
               )
             })}
@@ -420,8 +449,44 @@ function DiscoveryPageInner() {
             </div>
           )}
 
-          <p className="text-[10px] text-center mt-7" style={{ color: 'rgba(255,255,255,0.15)' }}>
-            Estimated total: ~{totalEst}s — TinyFish visits each site in a real browser
+          <style>{`
+            @keyframes discoveryFlavorFade {
+              0%   { opacity: 0; transform: translateY(3px); }
+              15%  { opacity: 0.55; transform: translateY(0); }
+              85%  { opacity: 0.55; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(-3px); }
+            }
+            @keyframes discoveryDotPulse {
+              0%, 100% { opacity: 0.15; }
+              50%      { opacity: 0.5; }
+            }
+          `}</style>
+
+          <div className="mt-8 flex items-center justify-center gap-2 min-h-[18px]">
+            <span
+              className="w-1 h-1 rounded-full"
+              style={{ background: '#a855f7', animation: 'discoveryDotPulse 1.4s ease-in-out infinite' }}
+            />
+            <span
+              className="w-1 h-1 rounded-full"
+              style={{ background: '#a855f7', animation: 'discoveryDotPulse 1.4s ease-in-out infinite 0.2s' }}
+            />
+            <span
+              className="w-1 h-1 rounded-full"
+              style={{ background: '#a855f7', animation: 'discoveryDotPulse 1.4s ease-in-out infinite 0.4s' }}
+            />
+          </div>
+
+          <p
+            key={flavorIdx}
+            className="text-[11px] italic text-center mt-3"
+            style={{
+              color: 'rgba(255,255,255,0.4)',
+              animation: 'discoveryFlavorFade 2.8s ease-in-out',
+              letterSpacing: '0.01em',
+            }}
+          >
+            {FLAVOR_LINES[flavorIdx]}
           </p>
         </div>
       </div>

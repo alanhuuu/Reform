@@ -102,24 +102,44 @@ def _pages_router_label(path: str) -> tuple[str, str] | None:
 
 
 def _is_spa_page(path: str) -> bool:
-    """Match SPA page patterns: src/pages/*.jsx, src/views/*.tsx, etc.
-    Covers CRA, Vite, and any SPA with conventional page directories."""
-    # Must be a JS/JSX/TS/TSX file
+    """Match SPA page patterns.
+
+    Two accepted paths:
+    1. File lives in a conventional `pages/`, `views/`, `screens/`, or
+       `routes/` directory (strong signal).
+    2. File name ends in `Page`, `Screen`, `View`, or `Route` (PascalCase)
+       — safe to match even without a conventional dir, since it's a clear
+       naming convention that doesn't overlap with generic components.
+
+    Entry-point files (App.*, main.*, index.*) are still excluded here —
+    they're handled by the universal fallback in `discover_pages` so the
+    whole repo collapses to a single Home page rather than treating the
+    entry file as one of N pages.
+    """
     if not re.search(r'\.[jt]sx?$', path):
         return False
-    # Skip test files, config, index entry points
     basename = path.split('/')[-1]
     if basename.startswith('_') or basename in ('index.js', 'index.jsx', 'index.ts', 'index.tsx'):
         return False
     if 'test' in basename.lower() or 'spec' in basename.lower():
         return False
-    if basename in ('App.js', 'App.jsx', 'App.tsx', 'main.tsx', 'main.jsx'):
+    if basename in ('App.js', 'App.jsx', 'App.tsx', 'App.ts',
+                    'main.tsx', 'main.jsx', 'main.ts', 'main.js'):
         return False
-    if basename in ('setupTests.js', 'reportWebVitals.js', 'firebase.js'):
+    if basename in ('setupTests.js', 'reportWebVitals.js', 'firebase.js', 'vite-env.d.ts'):
         return False
-    # Must be in a pages/, views/, screens/, or routes/ directory
+
+    # Path 1: conventional page directories
     page_dirs = re.compile(r'(?:^|/)(?:pages|views|screens|routes)/')
-    return bool(page_dirs.search(path))
+    if page_dirs.search(path):
+        return True
+
+    # Path 2: PascalCase file name ending in a page-like suffix
+    name_no_ext = re.sub(r'\.[jt]sx?$', '', basename)
+    if re.match(r'^[A-Z][A-Za-z0-9]*(Page|Screen|View|Route)$', name_no_ext):
+        return True
+
+    return False
 
 
 def _spa_page_label(path: str) -> tuple[str, str] | None:
@@ -178,14 +198,66 @@ def _has_client_router(files: list[dict]) -> bool:
     return False
 
 
+def _looks_like_react_entry(content: str) -> bool:
+    """Heuristic: does this file look like a React entry point?
+
+    Used to filter out `main.ts`/`index.ts` utility files that happen to share
+    a name with a real entry point.
+    """
+    if not content:
+        return False
+    if "ReactDOM" in content or "createRoot" in content:
+        return True
+    if "render(" in content and "<" in content:
+        return True
+    if "export default" in content and "return" in content and "<" in content:
+        return True
+    return False
+
+
 def _find_spa_entry(files: list[dict]) -> dict | None:
-    """Locate the SPA root component (App.jsx/tsx) so we can treat a
-    routerless site as a single-page site rooted there."""
-    priority = ("App.tsx", "App.jsx", "App.ts", "App.js")
-    for name in priority:
-        for f in files:
-            if f["path"].endswith("/" + name) or f["path"] == name:
-                return f
+    """Locate the best SPA entry file for single-page fallback analysis.
+
+    Preference order:
+      1. App.{tsx,jsx,ts,js} — the conventional root component
+      2. main.{tsx,jsx,ts,js} — Vite's conventional entry
+      3. index.{tsx,jsx,ts,js} — CRA's conventional entry
+    Within a tier, the file with the most content wins (prefer meaningful
+    files over 3-line stubs). Tier 2 and 3 require a React-entry heuristic
+    so we don't mistake utility `main.ts`/`index.ts` files for real entries.
+    """
+
+    def _basename(f: dict) -> str:
+        return (f.get("path") or "").split("/")[-1]
+
+    def _size(f: dict) -> int:
+        return f.get("size") or len(f.get("content") or "")
+
+    tier_1 = {"App.tsx", "App.jsx", "App.ts", "App.js"}
+    tier_2 = {"main.tsx", "main.jsx", "main.ts", "main.js"}
+    tier_3 = {"index.tsx", "index.jsx", "index.ts", "index.js"}
+
+    app_files = [f for f in files if _basename(f) in tier_1]
+    if app_files:
+        app_files.sort(key=_size, reverse=True)
+        return app_files[0]
+
+    main_files = [
+        f for f in files
+        if _basename(f) in tier_2 and _looks_like_react_entry(f.get("content") or "")
+    ]
+    if main_files:
+        main_files.sort(key=_size, reverse=True)
+        return main_files[0]
+
+    index_files = [
+        f for f in files
+        if _basename(f) in tier_3 and _looks_like_react_entry(f.get("content") or "")
+    ]
+    if index_files:
+        index_files.sort(key=_size, reverse=True)
+        return index_files[0]
+
     return None
 
 
@@ -313,6 +385,32 @@ def discover_pages(
                 route="/",
                 framework="spa",
             )]
+
+    # Universal fallback: if nothing matched at all (e.g. a Vite/CRA repo with
+    # no pages/ dir, no Page-suffixed files, and no Next.js structure), treat
+    # the whole repo as a single-page app rooted at the best entry file we
+    # can find. This keeps the pipeline usable on any React-flavored frontend.
+    if not pages:
+        entry = _find_spa_entry(files)
+        if entry and entry["path"] in content_lookup:
+            logger.info(
+                "No pages matched by any pattern — falling back to single-page "
+                "analysis rooted at %s",
+                entry["path"],
+            )
+            pages = [DiscoveredPage(
+                name="Home",
+                path=entry["path"],
+                route="/",
+                framework="spa",
+            )]
+            framework = "spa"
+        else:
+            logger.warning(
+                "No pages detected. This repo may not use a traditional pages "
+                "structure and no React entry file (App.*, main.*, index.*) was "
+                "found either."
+            )
 
     # Resolve dependencies for each page
     dependency_map: dict[str, list[dict]] = {}
