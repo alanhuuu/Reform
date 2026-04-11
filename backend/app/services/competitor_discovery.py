@@ -7,6 +7,7 @@ import anthropic
 
 from app.prompts.competitor_discovery_prompt import build_discovery_prompt
 from app.schemas.discovery import DiscoveredCompetitor, DiscoveryResponse
+from app.services.s3_client import list_cached_tinyfish_urls
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,58 @@ def _deduplicate(competitors: list[DiscoveredCompetitor]) -> list[str]:
             seen.add(cleaned)
             deduped.append(cleaned)
     return deduped
+
+
+def _normalize_for_cache_match(url: str) -> str:
+    """Loose-match key for comparing URLs against the cache list (case-
+    insensitive, strip trailing slashes)."""
+    return (url or "").strip().lower().rstrip("/")
+
+
+def _promote_cached(deduped: list[str], limit: int) -> list[str]:
+    """Re-rank Claude's top competitors so cache-hit URLs are selected first.
+
+    Only promotes URLs that Claude already surfaced as relevant — we never
+    inject a cached URL out of thin air. Cached URLs return in <200ms on
+    analysis, so biasing toward them keeps the hackathon fast and cheap.
+    """
+    try:
+        cached_urls = list_cached_tinyfish_urls()
+    except Exception as e:
+        logger.warning("cache manifest lookup failed, skipping promotion: %s", e)
+        return deduped[:limit]
+
+    if not cached_urls:
+        return deduped[:limit]
+
+    cached_set = {_normalize_for_cache_match(u) for u in cached_urls}
+
+    cached_hits = [u for u in deduped if _normalize_for_cache_match(u) in cached_set]
+    uncached = [u for u in deduped if _normalize_for_cache_match(u) not in cached_set]
+
+    # Consider only the top 2*limit candidates as the promotion pool so a
+    # relevance-7 cached URL doesn't beat a relevance-95 uncached one.
+    pool_size = max(limit * 2, limit)
+    eligible_cached = [u for u in cached_hits if u in deduped[:pool_size]]
+
+    promoted: list[str] = []
+    for u in eligible_cached[:limit]:
+        promoted.append(u)
+    for u in uncached:
+        if len(promoted) >= limit:
+            break
+        promoted.append(u)
+
+    # Fall back in case we somehow ended up empty
+    if not promoted:
+        return deduped[:limit]
+
+    if promoted != deduped[:limit]:
+        logger.info(
+            "Cache-aware re-ranking: promoted %d cached URLs → %s",
+            len(eligible_cached), promoted,
+        )
+    return promoted
 
 
 def discover_competitors(project_description: str) -> DiscoveryResponse:
@@ -114,8 +167,9 @@ def discover_competitors(project_description: str) -> DiscoveryResponse:
     deduped_urls = _deduplicate(competitors)
     logger.info("After dedup: %d unique URLs", len(deduped_urls))
 
-    # Select top N for immediate analysis
-    selected = deduped_urls[:ANALYSIS_LIMIT]
+    # Select top N for immediate analysis, preferring URLs we've already
+    # cached in S3 so the hackathon audience maximizes cache-hit rate.
+    selected = _promote_cached(deduped_urls, ANALYSIS_LIMIT)
     logger.info("Selected top %d for analysis: %s", len(selected), selected)
 
     return DiscoveryResponse(

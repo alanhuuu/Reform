@@ -571,6 +571,19 @@ export default function EditLabPage() {
 
   const handleAcceptEdit = useCallback(async () => {
     setLastEdit((prev) => (prev ? { ...prev, pending: false } : prev))
+    // Track the accepted file locally so the Publish button still works
+    // even if the backend session got GC'd between apply and accept —
+    // the actual edit already landed on disk during apply, so all we
+    // need to remember locally is "yes, include this file on publish".
+    const acceptedTarget =
+      lastEdit?.before?.label
+        ? payload?.sections.find((s) => s.label === lastEdit.before.label)?.source_file
+          || payload?.root_file
+          || null
+        : payload?.root_file || null
+    if (acceptedTarget) {
+      setAcceptedFiles((prev) => (prev.includes(acceptedTarget) ? prev : [...prev, acceptedTarget]))
+    }
     if (sessionId) {
       try {
         const res = await fetch(apiUrl('/edit-lab/accept'), {
@@ -580,9 +593,11 @@ export default function EditLabPage() {
         })
         if (res.ok) {
           const data = await res.json()
-          if (Array.isArray(data.accepted_files)) {
+          if (Array.isArray(data.accepted_files) && data.accepted_files.length > 0) {
             setAcceptedFiles(data.accepted_files)
           }
+          // If data.session_expired is true, we silently keep our local
+          // acceptedFiles list — no need to scare the user.
         }
       } catch {
         /* non-blocking — accept still succeeded locally */
@@ -591,7 +606,7 @@ export default function EditLabPage() {
     // Fade the accepted card out after a moment so the right panel returns
     // to its neutral empty state and the user can start a new selection.
     setTimeout(() => setLastEdit(null), 1800)
-  }, [sessionId])
+  }, [sessionId, lastEdit, payload])
 
   const handlePublish = useCallback(async () => {
     if (!sessionId || !acceptedFiles.length) return
@@ -631,7 +646,13 @@ export default function EditLabPage() {
   }, [sessionId, acceptedFiles, session, githubUserId])
 
   const handleRejectEdit = useCallback(async () => {
-    if (!sessionId) return
+    if (!sessionId) {
+      // No session to talk to — just drop the pending card. Nothing else to do.
+      setLastEdit(null)
+      setSelection(null)
+      setJustUpdatedId(null)
+      return
+    }
     setReverting(true)
     try {
       const res = await fetch(apiUrl('/edit-lab/revert'), {
@@ -642,7 +663,13 @@ export default function EditLabPage() {
       if (!res.ok) throw new Error(`Revert failed (${res.status})`)
       const data: RevertPayload = await res.json()
       if (data.session_expired) {
-        setToast({ kind: 'err', msg: 'Session expired. Reload the preview and try again.' })
+        // Session reaped between apply and reject — drop the pending card
+        // and quietly reload the preview to re-create a fresh workspace.
+        setLastEdit(null)
+        setSelection(null)
+        setJustUpdatedId(null)
+        setToast({ kind: 'err', msg: 'Session expired — reloading preview…' })
+        await runLoad({ silent: true })
         return
       }
       if (data.error) throw new Error(data.error)
@@ -665,7 +692,7 @@ export default function EditLabPage() {
     } finally {
       setReverting(false)
     }
-  }, [sessionId])
+  }, [sessionId, runLoad])
 
   const onCanvasPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {

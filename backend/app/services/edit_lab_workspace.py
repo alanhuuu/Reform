@@ -35,7 +35,9 @@ from app.services.preview_renderer import (
 
 logger = logging.getLogger(__name__)
 
-SESSION_TTL_SECONDS = 900  # 15 minutes of idle before GC
+SESSION_TTL_SECONDS = 3600  # 60 minutes of idle before GC — gives demo users
+                             # a full session's worth of thinking time before
+                             # their warm workspace gets reaped.
 WORKSPACE_PREFIX = "reform_editlab_ws_"
 
 

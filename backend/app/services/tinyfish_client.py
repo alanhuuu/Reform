@@ -40,7 +40,11 @@ def _get_client() -> AsyncTinyFish:
         api_key = os.environ.get("TINYFISH_API_KEY")
         if not api_key:
             raise RuntimeError("TINYFISH_API_KEY environment variable is not set")
-        _client = AsyncTinyFish(api_key=api_key, timeout=120.0)
+        # TinyFish queues internally behind the account concurrency cap, so the
+        # wall-clock for a single `agent.run()` can be queue_wait + actual_run.
+        # Give it 5 minutes before we give up — the Starter plan's 10-concurrent
+        # limit means a 60-URL batch can legitimately take a while per call.
+        _client = AsyncTinyFish(api_key=api_key, timeout=300.0)
     return _client
 
 # ─── URL-level cache ────────────────────────────────────────────────────────
@@ -356,7 +360,12 @@ async def extract_site_data(url: str) -> dict:
                 goal=SITE_EXTRACTION_GOAL,
             )
         except Exception as e:
-            logger.error("TinyFish call failed for %s: %s", url, e)
+            # TinyFish SDK errors often have empty str(), so include the
+            # class name and repr so the log actually tells us something.
+            logger.error(
+                "TinyFish call failed for %s: %s: %s",
+                url, type(e).__name__, repr(e),
+            )
             raise
 
     if response.status != RunStatus.COMPLETED:

@@ -699,18 +699,19 @@ Identify the JSX that renders the element described below. Match by ANY availabl
 
 ## HOW TO SCOPE THE EDIT
 - Your primary target is the JSX element identified above.
-- If the user's change is inherently container-level — background color, padding, margin, border, corner radius, layout direction, gap, alignment — you MAY modify the className or style of the identified element and its DIRECT wrapping container (the nearest enclosing `<div>`, `<nav>`, `<aside>`, `<section>`, `<main>`, `<header>`, or `<footer>` in this file). That wrapping container edit is allowed even when it also contains unrelated siblings, AS LONG AS the siblings themselves are not modified.
-- If the user's change is content-level — copy, headings, button labels, spacing between children of the target — modify ONLY the JSX inside the identified element.
+- If the user's change is inherently container-level — background, padding, margin, border, corner radius, layout direction, gap, alignment, size (bigger/smaller), font-size, text color — you MAY modify the className or style of the identified element AND any descendants of the identified region that the user clearly means. "Make this button bigger" = find the button(s) in the region and add a bigger size class (`text-lg`, `px-6 py-3`, `h-12`, etc.).
+- If the user's change is content-level — copy, headings, button labels — modify only the matching text.
 - Never modify JSX that sits outside the identified element's direct wrapping container. Never modify imports or exports unless the change strictly requires it (e.g. a new Tailwind class is added — that needs no import).
 
 ## CRITICAL RULES
-1. The change MUST be visibly different when the page re-renders. Do not return an unchanged file.
-2. If the element's JSX is imported from another file (i.e. this file only renders `<SomeComponent />`), replace that usage inline in THIS file with JSX that achieves the user's change rather than editing any other file. Inline JSX beats unreachable edits.
-3. When the user mentions a color, background, border, or spacing, apply it via Tailwind classes (e.g. `bg-white`, `border-gray-200`, `p-6`, `rounded-lg`) if the surrounding code uses Tailwind; otherwise match the styling convention already present in the file (inline style, CSS modules, etc.).
-4. Preserve all imports, exports, hooks, state, event handlers, and unrelated markup.
-5. Return the COMPLETE updated file — not a diff, not a snippet.
-6. Return ONLY code — no explanation, no markdown fences, no commentary.
-7. Start with the first line of the original file (import, 'use client', or similar)."""
+1. **The change MUST be visibly different when the page re-renders.** If the user asks for "bigger", at least DOUBLE the padding or font-size. If they ask for "white background", use `bg-white` (not `bg-gray-50`). Subtle tweaks defeat the purpose — be obvious.
+2. Do not return an unchanged file. Do not make a tiny invisible change. If the prompt is ambiguous, pick the most impactful visible interpretation.
+3. If the element's JSX is imported from another file (i.e. this file only renders `<SomeComponent />`), replace that usage inline in THIS file with JSX that achieves the user's change rather than editing any other file. Inline JSX beats unreachable edits.
+4. When the user mentions color/background/border/spacing/size, apply it via Tailwind classes (e.g. `bg-white`, `border-gray-200`, `p-6`, `text-2xl`, `h-14`) if the surrounding code uses Tailwind. Otherwise match the styling convention already present in the file (inline style, CSS modules, etc.).
+5. Preserve all imports, exports, hooks, state, event handlers, and unrelated markup.
+6. Return the COMPLETE updated file — not a diff, not a snippet.
+7. Return ONLY code — no explanation, no markdown fences, no commentary.
+8. Start with the first line of the original file (import, 'use client', or similar)."""
 
 
 def _extract_code_response(raw: str) -> str:
@@ -1049,6 +1050,25 @@ async def apply_section_edit(
             return {
                 "session_id": sess.id,
                 "error": "Claude could not apply the requested change to this section. Try rephrasing.",
+            }
+
+        # Sanity check: if the revised code is effectively identical in
+        # length (<1% change), Claude probably made a cosmetic tweak that
+        # won't be visible. Surface it as an error so the user retries
+        # instead of squinting at an unchanged preview.
+        len_delta = abs(len(revised_code) - len(current_code)) / max(len(current_code), 1)
+        if len_delta < 0.005:
+            logger.warning(
+                "Edit Lab apply: revised code is only %.2f%% different (likely no-op)",
+                len_delta * 100,
+            )
+            return {
+                "session_id": sess.id,
+                "error": (
+                    "Claude's edit was too subtle to make a visible difference. "
+                    "Try rephrasing with a more concrete change (e.g. 'make this "
+                    "button text-xl with bg-emerald-500')."
+                ),
             }
 
         with open(target_full, "w", encoding="utf-8") as f:

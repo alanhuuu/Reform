@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -22,6 +23,13 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger(__name__)
 
 _s3 = None
+
+# In-memory cache of the URL list under the tinyfish-cache/ prefix. Refreshed
+# every 5 minutes via a single ListObjectsV2 + HeadObject fan-out. Used by the
+# discovery prompt so Claude prefers URLs we've already cached.
+_tinyfish_url_list: list[str] = []
+_tinyfish_url_list_fetched_at: float = 0.0
+_TINYFISH_URL_LIST_TTL = 300  # 5 minutes
 
 
 def _get_client():
@@ -156,6 +164,59 @@ def download_tinyfish_cache(url: str, max_age_days: int = 7) -> dict | None:
     except Exception as e:
         logger.warning("TinyFish cache parse failed for %s: %s", url, e)
         return None
+
+
+def list_cached_tinyfish_urls(force_refresh: bool = False) -> list[str]:
+    """Return every URL we currently have cached under tinyfish-cache/.
+
+    Used by the discovery prompt to steer Claude toward already-cached
+    competitors so the hackathon audience maximizes cache-hit rate.
+    Refreshes from S3 at most once every 5 minutes; subsequent calls
+    return the in-memory list.
+    """
+    global _tinyfish_url_list, _tinyfish_url_list_fetched_at
+
+    now = time.time()
+    if (
+        not force_refresh
+        and _tinyfish_url_list
+        and (now - _tinyfish_url_list_fetched_at) < _TINYFISH_URL_LIST_TTL
+    ):
+        return _tinyfish_url_list
+
+    try:
+        client = _get_client()
+        paginator = client.get_paginator("list_objects_v2")
+        keys: list[str] = []
+        for page in paginator.paginate(Bucket=_bucket(), Prefix="tinyfish-cache/"):
+            for obj in page.get("Contents", []) or []:
+                keys.append(obj["Key"])
+        if not keys:
+            _tinyfish_url_list = []
+            _tinyfish_url_list_fetched_at = now
+            return []
+
+        # Fetch source_url metadata from each object. For a few dozen keys
+        # this is a fast sequential loop; boto3's underlying urllib3 pool
+        # handles the ~50-100ms round trips efficiently enough.
+        urls: list[str] = []
+        for key in keys:
+            try:
+                head = client.head_object(Bucket=_bucket(), Key=key)
+                source_url = (head.get("Metadata") or {}).get("source_url")
+                if source_url:
+                    urls.append(source_url)
+            except Exception as e:
+                logger.debug("head_object failed for %s: %s", key, e)
+                continue
+
+        _tinyfish_url_list = urls
+        _tinyfish_url_list_fetched_at = now
+        logger.info("TinyFish cache manifest refreshed: %d URLs", len(urls))
+        return urls
+    except Exception as e:
+        logger.warning("list_cached_tinyfish_urls failed: %s", e)
+        return _tinyfish_url_list  # fall through to the last-known list
 
 
 def download_snapshot(key: str) -> list[dict]:
