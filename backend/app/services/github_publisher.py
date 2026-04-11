@@ -98,6 +98,43 @@ async def _get_default_branch(
     return res.json()["default_branch"]
 
 
+async def list_repo_branches(
+    owner: str, repo: str, access_token: str,
+) -> dict:
+    """List all branches in a repo. Returns {default_branch, branches}.
+
+    Paginates up to 5 pages (500 branches) — enough for any realistic
+    project, and the GitHub API caps per_page at 100.
+    """
+    headers = _github_headers(access_token)
+    branches: list[dict] = []
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        default_branch = await _get_default_branch(client, headers, owner, repo)
+        for page in range(1, 6):
+            res = await client.get(
+                f"{GITHUB_API}/repos/{owner}/{repo}/branches",
+                headers=headers,
+                params={"per_page": 100, "page": page},
+            )
+            if res.status_code == 401:
+                raise PermissionError("GitHub token is invalid or expired")
+            if res.status_code == 403:
+                raise PermissionError(f"Access denied to {owner}/{repo}")
+            if res.status_code != 200:
+                raise RuntimeError(f"Failed to list branches: {res.status_code}")
+            batch = res.json()
+            if not batch:
+                break
+            for b in batch:
+                branches.append({
+                    "name": b.get("name", ""),
+                    "protected": bool(b.get("protected", False)),
+                })
+            if len(batch) < 100:
+                break
+    return {"default_branch": default_branch, "branches": branches}
+
+
 async def _get_branch_sha(
     client: httpx.AsyncClient, headers: dict, owner: str, repo: str, branch: str,
 ) -> str:
@@ -190,8 +227,15 @@ async def publish_approved_branch(
     pages_transformed: list[str],
     summary_text: str | None = None,
     base_branch: str | None = None,
+    create_new_branch: bool = True,
 ) -> dict:
-    """Create a new branch and commit all approved files to it.
+    """Commit approved files to GitHub.
+
+    Two modes:
+      • create_new_branch=True  → branch off `base_branch` with a generated
+        name, then commit there. The safe default.
+      • create_new_branch=False → commit directly to `base_branch`. Used
+        when the user explicitly picks an existing target branch.
 
     Returns dict with: branch_name, branch_url, files_changed.
     """
@@ -206,32 +250,39 @@ async def publish_approved_branch(
             base_branch = await _get_default_branch(client, headers, owner, repo)
             logger.info("Resolved default branch: %s", base_branch)
 
-        # 2. Get base branch SHA
-        base_sha = await _get_branch_sha(client, headers, owner, repo, base_branch)
-        logger.info("Base branch '%s' SHA: %s", base_branch, base_sha[:12])
+        if create_new_branch:
+            # Branch off base_branch with a generated name.
+            base_sha = await _get_branch_sha(client, headers, owner, repo, base_branch)
+            logger.info("Base branch '%s' SHA: %s", base_branch, base_sha[:12])
 
-        # 3. Generate branch name and create it
-        branch_name = generate_branch_name(pages_transformed, summary_text)
-        await _create_branch(client, headers, owner, repo, branch_name, base_sha)
-        logger.info("Created branch: %s", branch_name)
+            target_branch = generate_branch_name(pages_transformed, summary_text)
+            await _create_branch(client, headers, owner, repo, target_branch, base_sha)
+            logger.info("Created branch: %s (from %s)", target_branch, base_branch)
+        else:
+            # Commit directly to the existing branch. We still verify the
+            # branch exists up-front so we fail fast with a clear error
+            # rather than on the first commit attempt.
+            await _get_branch_sha(client, headers, owner, repo, base_branch)
+            target_branch = base_branch
+            logger.info("Committing directly to existing branch: %s", target_branch)
 
-        # 4. Commit each file
+        # 2. Commit each file
         files_changed = []
         for i, f in enumerate(approved_files):
             path = f["path"]
             content = f["content"]
             msg = f"reform: update {path}" if i > 0 else _build_commit_message(pages_transformed)
-            await _commit_file(client, headers, owner, repo, branch_name, path, content, msg)
+            await _commit_file(client, headers, owner, repo, target_branch, path, content, msg)
             files_changed.append(path)
             logger.info("Committed file %d/%d: %s", i + 1, len(approved_files), path)
 
-        # 5. Trigger repository_dispatch so Vercel/Netlify auto-deploy
+        # 3. Trigger repository_dispatch so Vercel/Netlify auto-deploy
         await _trigger_deploy_webhook(client, headers, owner, repo)
 
-    branch_url = f"https://github.com/{owner}/{repo}/tree/{branch_name}"
+    branch_url = f"https://github.com/{owner}/{repo}/tree/{target_branch}"
 
     return {
-        "branch_name": branch_name,
+        "branch_name": target_branch,
         "branch_url": branch_url,
         "files_changed": files_changed,
     }

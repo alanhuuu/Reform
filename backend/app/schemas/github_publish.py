@@ -17,6 +17,10 @@ class PublishBranchRequest(BaseModel):
     owner: str
     repo: str
     base_branch: str | None = None
+    # When True (default), create a new branch off base_branch and commit
+    # there. When False, commit directly to base_branch — used when the
+    # user explicitly picks an existing branch as the push target.
+    create_new_branch: bool = True
     approved_files: list[ApprovedFile]
     transform_summary: TransformSummary
     access_token: str
@@ -28,3 +32,19 @@ class PublishBranchResponse(BaseModel):
     branch_name: str
     branch_url: str
     files_changed: list[str]
+
+
+class ListBranchesRequest(BaseModel):
+    owner: str
+    repo: str
+    access_token: str
+
+
+class BranchInfo(BaseModel):
+    name: str
+    protected: bool = False
+
+
+class ListBranchesResponse(BaseModel):
+    default_branch: str
+    branches: list[BranchInfo]

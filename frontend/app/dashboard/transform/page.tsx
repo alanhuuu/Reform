@@ -878,6 +878,12 @@ function TransformPage() {
   const [repoSearch, setRepoSearch] = useState('')
   const [publishLoading, setPublishLoading] = useState(false)
   const [publishResult, setPublishResult] = useState<{ branch_name: string; branch_url: string; files_changed: string[] } | null>(null)
+  // Branch picker for the Publish-to-GitHub flow. `__new__` means "create
+  // a new branch off default"; any other value is an existing branch to
+  // commit directly to.
+  const [repoBranches, setRepoBranches] = useState<{ name: string; protected: boolean }[]>([])
+  const [branchesLoading, setBranchesLoading] = useState(false)
+  const [publishTarget, setPublishTarget] = useState<string>('__new__')
   const [multiPageResult, setMultiPageResult] = useState<MultiPageTransformResult | null>(() => {
     if (typeof window === 'undefined') return null
     const stored = sessionStorage.getItem('refineui_transform')
@@ -911,6 +917,34 @@ function TransformPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.accessToken, pipelineStep])
+
+  // Fetch the repo's branch list once the pipeline lands on a completed
+  // state. Powers the "push target" dropdown on the Publish toolbar — the
+  // user can either create a new branch or commit directly to an existing
+  // one. Re-runs when the repo changes so switching projects doesn't show
+  // stale branches.
+  useEffect(() => {
+    if (pipelineStep !== 'complete') return
+    if (!session?.accessToken || !repoName) return
+    const [owner, repo] = repoName.split('/')
+    if (!owner || !repo) return
+    let cancelled = false
+    setBranchesLoading(true)
+    setRepoBranches([])
+    setPublishTarget('__new__')
+    fetch(apiUrl('/github/list-branches'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ owner, repo, access_token: session.accessToken }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data) return
+        setRepoBranches(Array.isArray(data.branches) ? data.branches : [])
+      })
+      .catch(() => { /* non-fatal — the dropdown just shows the default option */ })
+      .finally(() => { if (!cancelled) setBranchesLoading(false) })
+    return () => { cancelled = true }
+  }, [pipelineStep, session?.accessToken, repoName])
 
   const autoStartedRef = useRef(false)
 
@@ -1328,11 +1362,19 @@ function TransformPage() {
       setPublishLoading(true); setPipelineError('')
       try {
         const [owner, repo] = repoName.split('/')
+        // Branch-picker semantics:
+        //   __new__           → create a new branch off the repo default
+        //   any other value   → commit directly to that existing branch
+        const createNewBranch = publishTarget === '__new__'
+        const baseBranchForPublish = createNewBranch
+          ? (repoBranch || null)
+          : publishTarget
         const res = await fetch(apiUrl('/github/publish-approved-branch'), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             owner, repo,
-            base_branch: repoBranch || null,
+            base_branch: baseBranchForPublish,
+            create_new_branch: createNewBranch,
             approved_files: pages.map(p => ({ path: p.page_path, content: p.updated_code })),
             transform_summary: {
               pages_transformed: pages.map(p => p.page_path),
@@ -1613,18 +1655,53 @@ function TransformPage() {
                 {!canAutofix ? (
                 <UpgradeBanner message="Upgrade to Pro to publish fixes to GitHub" compact />
               ) : (
-                <button
-                  onClick={handleAccept}
-                  disabled={publishLoading}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-medium transition-all hover:bg-green-500/[0.06] active:scale-[0.97]"
-                  style={{ color: 'rgba(34,197,94,0.7)', border: '1px solid transparent', opacity: publishLoading ? 0.5 : 1 }}
-                >
-                  {publishLoading ? (
-                    <><div className="w-3 h-3 rounded-full animate-spin" style={{ border: '2px solid rgba(34,197,94,0.2)', borderTopColor: 'rgba(34,197,94,0.7)' }} />Publishing approved changes...</>
-                  ) : (
-                    <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>Publish to GitHub</>
-                  )}
-                </button>
+                <>
+                  <div className="flex items-center gap-1.5 pr-1">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></svg>
+                    <select
+                      value={publishTarget}
+                      onChange={e => setPublishTarget(e.target.value)}
+                      disabled={publishLoading || branchesLoading}
+                      title="Where to publish the approved changes"
+                      className="bg-transparent text-[11px] font-medium rounded-md px-2 py-1.5 outline-none cursor-pointer transition-colors hover:bg-white/[0.03] focus:bg-white/[0.04]"
+                      style={{ color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.08)', maxWidth: 220 }}
+                    >
+                      <option value="__new__" style={{ background: '#0d0c16', color: 'rgba(255,255,255,0.9)' }}>
+                        ✨ New branch {repoBranch ? `(from ${repoBranch})` : ''}
+                      </option>
+                      {repoBranches.length > 0 && (
+                        <option disabled style={{ background: '#0d0c16', color: 'rgba(255,255,255,0.3)' }}>
+                          ──── Commit directly to ────
+                        </option>
+                      )}
+                      {repoBranches.map(b => (
+                        <option key={b.name} value={b.name} style={{ background: '#0d0c16', color: 'rgba(255,255,255,0.9)' }}>
+                          {b.name}{b.protected ? ' 🔒' : ''}
+                        </option>
+                      ))}
+                      {branchesLoading && (
+                        <option disabled style={{ background: '#0d0c16', color: 'rgba(255,255,255,0.3)' }}>
+                          Loading branches…
+                        </option>
+                      )}
+                    </select>
+                  </div>
+                  <button
+                    onClick={handleAccept}
+                    disabled={publishLoading}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-medium transition-all hover:bg-green-500/[0.06] active:scale-[0.97]"
+                    style={{ color: 'rgba(34,197,94,0.7)', border: '1px solid transparent', opacity: publishLoading ? 0.5 : 1 }}
+                  >
+                    {publishLoading ? (
+                      <><div className="w-3 h-3 rounded-full animate-spin" style={{ border: '2px solid rgba(34,197,94,0.2)', borderTopColor: 'rgba(34,197,94,0.7)' }} />Publishing approved changes...</>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                        {publishTarget === '__new__' ? 'Publish to new branch' : `Publish to ${publishTarget}`}
+                      </>
+                    )}
+                  </button>
+                </>
               )}
                 <button
                   onClick={handleReject}
