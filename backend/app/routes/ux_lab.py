@@ -41,15 +41,6 @@ def _findings_to_out(findings_raw: list[dict]) -> list[dict]:
             "principle": f.get("principle", ""),
             "principle_explanation": f.get("principle_explanation", ""),
             "recommendation": f.get("recommendation", ""),
-            "requires_competitor_evidence": f.get("requires_competitor_evidence", False),
-            "competitor_evidence": [
-                {
-                    "url": e.get("url", ""),
-                    "screenshot_url": e.get("screenshot_url", ""),
-                    "annotation": e.get("annotation", ""),
-                }
-                for e in f.get("competitor_evidence", [])
-            ],
             "annotation": f.get("annotation", {"xPercent": 50, "yPercent": 50}),
         })
     return findings_out
@@ -92,7 +83,6 @@ async def analyze(req: AnalyzeRequest, db: AsyncSession | None = Depends(get_opt
             result = await run_analysis(
                 req.url,
                 req.page,
-                req.competitor_urls,
                 analysis_only=True,
             )
         except Exception as exc:
@@ -130,7 +120,6 @@ async def analyze(req: AnalyzeRequest, db: AsyncSession | None = Depends(get_opt
         result = await run_analysis(
             req.url,
             req.page,
-            req.competitor_urls,
             analysis_only=req.analysis_only,
         )
 
