@@ -8,6 +8,7 @@ import Footer from '@/components/layout/Footer'
 import InteractiveBackground from '@/components/landing/InteractiveBackground'
 import { useSubscription } from '@/lib/useSubscription'
 import { apiUrl } from '@/lib/api'
+import { BILLING_ENABLED } from '@/lib/billing'
 
 export default function SettingsPage() {
   const { data: session, status } = useSession()
@@ -64,70 +65,72 @@ export default function SettingsPage() {
             </div>
 
             {/* Subscription & Billing */}
-            <SettingsSection title="Subscription & Billing">
-              <SettingsRow
-                label="Current Plan"
-                value={
-                  <span
-                    className="text-[12px] font-semibold px-2.5 py-1 rounded-lg"
-                    style={{
-                      background: isFree ? 'rgba(255,255,255,0.06)' : 'rgba(124,140,255,0.15)',
-                      color: isFree ? 'rgba(255,255,255,0.5)' : '#aab4ff',
-                      border: isFree ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(170,180,255,0.2)',
-                    }}
-                  >
-                    {subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1)}
-                  </span>
-                }
-                action={
-                  <button
-                    onClick={() => router.push('/subscription')}
-                    className="text-[12px] font-medium transition-colors"
-                    style={{ color: '#aab4ff' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = '#c4cbff')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = '#aab4ff')}
-                  >
-                    {isFree ? 'Upgrade' : 'Change plan'}
-                  </button>
-                }
-              />
-              {!isFree && (
+            {BILLING_ENABLED && (
+              <SettingsSection title="Subscription & Billing">
                 <SettingsRow
-                  label="Billing"
+                  label="Current Plan"
                   value={
-                    <span className="text-[13px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                      Managed via Stripe
+                    <span
+                      className="text-[12px] font-semibold px-2.5 py-1 rounded-lg"
+                      style={{
+                        background: isFree ? 'rgba(255,255,255,0.06)' : 'rgba(124,140,255,0.15)',
+                        color: isFree ? 'rgba(255,255,255,0.5)' : '#aab4ff',
+                        border: isFree ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(170,180,255,0.2)',
+                      }}
+                    >
+                      {subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1)}
                     </span>
                   }
                   action={
                     <button
-                      onClick={openBillingPortal}
-                      disabled={portalLoading}
-                      className="text-[12px] font-medium transition-colors disabled:opacity-50"
+                      onClick={() => router.push('/subscription')}
+                      className="text-[12px] font-medium transition-colors"
                       style={{ color: '#aab4ff' }}
                       onMouseEnter={(e) => (e.currentTarget.style.color = '#c4cbff')}
                       onMouseLeave={(e) => (e.currentTarget.style.color = '#aab4ff')}
                     >
-                      {portalLoading ? 'Opening...' : 'Manage'}
+                      {isFree ? 'Upgrade' : 'Change plan'}
                     </button>
                   }
                 />
-              )}
-              {subscription.current_period_end && (
-                <SettingsRow
-                  label="Next billing date"
-                  value={
-                    <span className="text-[13px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                      {new Date(subscription.current_period_end).toLocaleDateString('en-US', {
-                        month: 'long',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })}
-                    </span>
-                  }
-                />
-              )}
-            </SettingsSection>
+                {!isFree && (
+                  <SettingsRow
+                    label="Billing"
+                    value={
+                      <span className="text-[13px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                        Managed via Stripe
+                      </span>
+                    }
+                    action={
+                      <button
+                        onClick={openBillingPortal}
+                        disabled={portalLoading}
+                        className="text-[12px] font-medium transition-colors disabled:opacity-50"
+                        style={{ color: '#aab4ff' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = '#c4cbff')}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = '#aab4ff')}
+                      >
+                        {portalLoading ? 'Opening...' : 'Manage'}
+                      </button>
+                    }
+                  />
+                )}
+                {subscription.current_period_end && (
+                  <SettingsRow
+                    label="Next billing date"
+                    value={
+                      <span className="text-[13px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                        {new Date(subscription.current_period_end).toLocaleDateString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </span>
+                    }
+                  />
+                )}
+              </SettingsSection>
+            )}
 
             {/* Connected Account */}
             <SettingsSection title="Connected Account">

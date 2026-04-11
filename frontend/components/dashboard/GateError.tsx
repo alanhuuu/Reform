@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { BILLING_ENABLED } from '@/lib/billing'
 
 /**
  * Parse a backend error response into a structured gate error.
@@ -92,7 +93,7 @@ export default function GateErrorBanner({ error, fallbackMessage, onDismiss }: G
   const message = error?.message || fallbackMessage
   if (!message) return null
 
-  const showUpgrade = error && UPGRADE_CODES.has(error.code)
+  const showUpgrade = BILLING_ENABLED && error && UPGRADE_CODES.has(error.code)
 
   return (
     <div

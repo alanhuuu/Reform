@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import FlowDemoCard from '@/components/demo/FlowDemoCard'
+import { BILLING_ENABLED } from '@/lib/billing'
 
 const BEFORE_STEPS = [
   { label: 'Navigate to Projects', target: 'sidebar:Workspace', duration: 1200 },
@@ -129,9 +130,11 @@ export default function HeroSection() {
                   <path d="M3 7h8M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </Link>
-              <Link href="/subscription" className="btn-ghost inline-flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-medium">
-                View plans
-              </Link>
+              {BILLING_ENABLED && (
+                <Link href="/subscription" className="btn-ghost inline-flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-medium">
+                  View plans
+                </Link>
+              )}
             </div>
 
             <div className="grid sm:grid-cols-3 gap-3 mb-10">

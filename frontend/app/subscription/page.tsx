@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -10,6 +10,7 @@ import InteractiveBackground from '@/components/landing/InteractiveBackground'
 import { apiUrl } from '@/lib/api'
 import { useSubscription } from '@/lib/useSubscription'
 import { parseResponseError } from '@/components/dashboard/GateError'
+import { BILLING_ENABLED } from '@/lib/billing'
 
 const CHECK_ICON = (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#aab4ff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -28,6 +29,12 @@ interface Plan {
   badge?: string
   stripe_price_id?: string
 }
+
+const STRIPE_PRO_PRICE_ID = process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID
+const STRIPE_MAX_PRICE_ID = process.env.NEXT_PUBLIC_STRIPE_MAX_PRICE_ID
+
+if (!STRIPE_PRO_PRICE_ID) console.error('Missing env: NEXT_PUBLIC_STRIPE_PRO_PRICE_ID')
+if (!STRIPE_MAX_PRICE_ID) console.error('Missing env: NEXT_PUBLIC_STRIPE_MAX_PRICE_ID')
 
 const plans: Plan[] = [
   {
@@ -61,7 +68,7 @@ const plans: Plan[] = [
     cta: 'Upgrade to Pro',
     highlighted: true,
     badge: 'Most Popular',
-    stripe_price_id: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID,
+    stripe_price_id: STRIPE_PRO_PRICE_ID,
   },
   {
     name: 'Team',
@@ -79,7 +86,7 @@ const plans: Plan[] = [
       'Dedicated support channel',
     ],
     cta: 'Start Team Plan',
-    stripe_price_id: process.env.NEXT_PUBLIC_STRIPE_MAX_PRICE_ID,
+    stripe_price_id: STRIPE_MAX_PRICE_ID,
   },
   {
     name: 'Enterprise',
@@ -201,6 +208,12 @@ export default function SubscriptionPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Redirect away when billing is disabled (hackathon mode)
+  useEffect(() => {
+    if (!BILLING_ENABLED) router.replace('/dashboard')
+  }, [router])
+  if (!BILLING_ENABLED) return null
+
   async function startCheckout(priceId: string) {
     setLoading(true)
     setError(null)
@@ -230,6 +243,12 @@ export default function SubscriptionPage() {
 
   async function handleCheckout(priceId: string) {
     if (status === 'loading') return
+
+    if (!priceId) {
+      console.error('Checkout blocked: price ID is undefined. Check NEXT_PUBLIC_STRIPE_PRO_PRICE_ID and NEXT_PUBLIC_STRIPE_MAX_PRICE_ID env variables.')
+      setError('Unable to start checkout — pricing configuration is missing.')
+      return
+    }
 
     if (!session?.githubId) {
       router.push(`/signin?next=${encodeURIComponent(`/subscription?resume=${priceId}`)}`)

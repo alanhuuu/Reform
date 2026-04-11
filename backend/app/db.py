@@ -5,6 +5,7 @@ Uses SQLAlchemy async engine with asyncpg driver for Postgres.
 The get_db dependency provides a session per request.
 """
 
+import logging
 import os
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -13,6 +14,11 @@ from sqlalchemy.orm import DeclarativeBase
 # Railway provides DATABASE_URL with postgresql:// scheme.
 # SQLAlchemy async needs postgresql+asyncpg:// instead.
 _raw_url = os.environ.get("DATABASE_URL", "")
+if not _raw_url:
+    logging.getLogger(__name__).warning(
+        "DATABASE_URL not set — all database operations will fail. "
+        "Set this in your Railway environment."
+    )
 if _raw_url.startswith("postgresql://"):
     DATABASE_URL = _raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 elif _raw_url.startswith("postgres://"):

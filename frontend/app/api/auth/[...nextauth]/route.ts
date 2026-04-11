@@ -1,7 +1,12 @@
 import NextAuth from 'next-auth'
 import GithubProvider from 'next-auth/providers/github'
 
+if (!process.env.GITHUB_CLIENT_ID) console.error('Missing env: GITHUB_CLIENT_ID — GitHub OAuth will not work')
+if (!process.env.GITHUB_CLIENT_SECRET) console.error('Missing env: GITHUB_CLIENT_SECRET — GitHub OAuth will not work')
+if (!process.env.NEXTAUTH_SECRET) console.error('Missing env: NEXTAUTH_SECRET — sessions will not be secure')
+
 const handler = NextAuth({
+  secret: process.env.NEXTAUTH_SECRET,
   providers: [
     GithubProvider({
       clientId: process.env.GITHUB_CLIENT_ID ?? '',

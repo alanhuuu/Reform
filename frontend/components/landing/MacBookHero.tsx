@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react'
 import Link from 'next/link'
 import gsap from 'gsap'
+import { BILLING_ENABLED } from '@/lib/billing'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import MockDashboardBefore from '@/components/demo/MockDashboardBefore'
 import MockDashboardAfter from '@/components/demo/MockDashboardAfter'
@@ -945,12 +946,14 @@ export default function MacBookHero() {
                 />
               </svg>
             </Link>
-            <Link
-              href="/subscription"
-              className="btn-ghost inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-medium"
-            >
-              View plans
-            </Link>
+            {BILLING_ENABLED && (
+              <Link
+                href="/subscription"
+                className="btn-ghost inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-medium"
+              >
+                View plans
+              </Link>
+            )}
           </div>
         </div>
 
