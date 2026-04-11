@@ -283,6 +283,11 @@ export default function EditLabPage() {
     pending: boolean
   } | null>(null)
   const [reverting, setReverting] = useState(false)
+  const [acceptedFiles, setAcceptedFiles] = useState<string[]>([])
+  const [publishing, setPublishing] = useState(false)
+  const [publishResult, setPublishResult] = useState<{ branch_name: string; branch_url: string; files_changed: string[] } | null>(null)
+
+  const githubUserId = (session as unknown as { githubId?: string } | null)?.githubId || ''
 
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const [canvasWidth, setCanvasWidth] = useState(1)
@@ -564,12 +569,66 @@ export default function EditLabPage() {
     triggerHighlight,
   ])
 
-  const handleAcceptEdit = useCallback(() => {
+  const handleAcceptEdit = useCallback(async () => {
     setLastEdit((prev) => (prev ? { ...prev, pending: false } : prev))
+    if (sessionId) {
+      try {
+        const res = await fetch(apiUrl('/edit-lab/accept'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (Array.isArray(data.accepted_files)) {
+            setAcceptedFiles(data.accepted_files)
+          }
+        }
+      } catch {
+        /* non-blocking — accept still succeeded locally */
+      }
+    }
     // Fade the accepted card out after a moment so the right panel returns
     // to its neutral empty state and the user can start a new selection.
     setTimeout(() => setLastEdit(null), 1800)
-  }, [])
+  }, [sessionId])
+
+  const handlePublish = useCallback(async () => {
+    if (!sessionId || !acceptedFiles.length) return
+    const token = (session as unknown as { accessToken?: string } | null)?.accessToken
+    if (!token) {
+      setToast({ kind: 'err', msg: 'Sign in with GitHub to publish changes.' })
+      return
+    }
+    setPublishing(true)
+    setPublishResult(null)
+    try {
+      const res = await fetch(apiUrl('/edit-lab/publish'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          access_token: token,
+          github_user_id: githubUserId,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Publish failed (${res.status})`)
+      }
+      setPublishResult({
+        branch_name: data.branch_name,
+        branch_url: data.branch_url,
+        files_changed: data.files_changed || [],
+      })
+      setToast({ kind: 'ok', msg: `Published to ${data.branch_name}` })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to publish'
+      setToast({ kind: 'err', msg })
+    } finally {
+      setPublishing(false)
+    }
+  }, [sessionId, acceptedFiles, session, githubUserId])
 
   const handleRejectEdit = useCallback(async () => {
     if (!sessionId) return
@@ -867,7 +926,85 @@ export default function EditLabPage() {
             >
               {loading ? 'Loading…' : 'Reload preview'}
             </button>
+            {acceptedFiles.length > 0 && (
+              <button
+                onClick={handlePublish}
+                disabled={publishing}
+                className="text-[11px] px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-40 flex-shrink-0"
+                style={{
+                  background: 'rgba(34,197,94,0.12)',
+                  border: '1px solid rgba(34,197,94,0.3)',
+                  color: 'rgba(187,247,208,0.95)',
+                }}
+                title={`Publish ${acceptedFiles.length} accepted ${acceptedFiles.length === 1 ? 'file' : 'files'} to a new GitHub branch`}
+              >
+                {publishing ? (
+                  <>
+                    <div
+                      className="w-3 h-3 rounded-full animate-spin"
+                      style={{
+                        border: '1.5px solid rgba(187,247,208,0.25)',
+                        borderTopColor: 'rgba(187,247,208,0.95)',
+                      }}
+                    />
+                    Publishing…
+                  </>
+                ) : (
+                  <>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Publish to GitHub · {acceptedFiles.length}
+                  </>
+                )}
+              </button>
+            )}
           </div>
+
+          {publishResult && (
+            <div
+              className="flex items-center justify-between gap-3 px-4 py-2"
+              style={{
+                background: 'rgba(34,197,94,0.06)',
+                borderBottom: '1px solid rgba(34,197,94,0.18)',
+              }}
+            >
+              <div className="flex items-center gap-2 min-w-0 text-[11px]">
+                <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#22c55e' }} />
+                <span style={{ color: 'rgba(187,247,208,0.9)' }}>Published</span>
+                <span className="mono truncate" style={{ color: 'rgba(255,255,255,0.55)' }}>
+                  {publishResult.branch_name}
+                </span>
+                <span style={{ color: 'rgba(255,255,255,0.3)' }}>·</span>
+                <span className="mono" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  {publishResult.files_changed.length} file{publishResult.files_changed.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a
+                  href={publishResult.branch_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] px-2.5 py-1 rounded-md"
+                  style={{
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: 'rgba(255,255,255,0.75)',
+                  }}
+                >
+                  View branch →
+                </a>
+                <button
+                  onClick={() => setPublishResult(null)}
+                  className="text-[11px]"
+                  style={{ color: 'rgba(255,255,255,0.35)' }}
+                  aria-label="Dismiss"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
 
           {payload && payload.available_pages && payload.available_pages.length > 1 && (
             <div

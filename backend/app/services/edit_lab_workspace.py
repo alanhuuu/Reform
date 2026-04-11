@@ -56,6 +56,10 @@ class EditLabSession:
     # and re-renders. Cleared after every successful revert and overwritten
     # on every subsequent apply.
     pending_revert: Optional[dict] = None  # {'target_file': str, 'original_code': str}
+    # Set of file paths (relative to frontend_dir) the user has explicitly
+    # accepted edits on in this session. Used by /edit-lab/publish to know
+    # which files to include in the GitHub publish payload.
+    accepted_files: set[str] = field(default_factory=set)
     last_used: float = field(default_factory=time.time)
 
     @property

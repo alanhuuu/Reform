@@ -12,6 +12,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 from typing import Any, Optional
 
 import anthropic
@@ -338,6 +339,139 @@ def _assign_source_files(
         )
 
 
+_PROMPT_STOPWORDS = {
+    "the", "a", "an", "to", "into", "from", "with", "and", "or", "of",
+    "in", "on", "at", "this", "that", "these", "those", "it", "its",
+    "change", "rename", "replace", "update", "make", "set", "move", "add",
+    "remove", "delete", "edit", "modify", "switch", "turn", "fix", "adjust",
+    "improve", "refine", "simplify", "cleanup", "clean", "polish", "tweak",
+    "word", "words", "text", "label", "button", "section", "block", "area",
+    "more", "less", "bigger", "smaller", "larger", "modern", "old", "new",
+    "please", "just", "now", "very", "really",
+}
+
+
+def _extract_prompt_anchors(prompt: str) -> list[str]:
+    """Pull literal strings the user most likely wants the edit to touch.
+
+    Feeds two things:
+      1. Repo text search → the file that actually contains the string wins
+         the target over whatever source_file the frontend picked.
+      2. A "Literal strings to find and modify" line in the Claude prompt so
+         the model has concrete anchors to look for in the file.
+    """
+    if not prompt:
+        return []
+    anchors: list[str] = []
+
+    # Quoted strings — strongest signal
+    anchors.extend(re.findall(r'"([^"]{2,60})"', prompt))
+    anchors.extend(re.findall(r"'([^']{2,60})'", prompt))
+
+    # "change X to Y" / "rename A to B" / "replace A with B"
+    for verb in ("change", "rename", "replace"):
+        for m in re.finditer(
+            rf"\b{verb}\s+(?:the\s+word\s+)?([A-Za-z][A-Za-z0-9_\- ]{{1,40}}?)\s+(?:to|with|into)\b",
+            prompt,
+            flags=re.IGNORECASE,
+        ):
+            anchors.append(m.group(1))
+            # Also capture the replacement target so we avoid mis-searching for it later
+        # "... to Y" — grab Y as a second anchor
+        for m in re.finditer(
+            rf"\b{verb}\b.*?\b(?:to|with|into)\s+([A-Za-z][A-Za-z0-9_\- ]{{1,40}})",
+            prompt,
+            flags=re.IGNORECASE,
+        ):
+            anchors.append(m.group(1))
+
+    # "word X" patterns
+    anchors.extend(re.findall(r"\bword\s+([A-Za-z][A-Za-z0-9_\-]{1,40})\b", prompt, flags=re.IGNORECASE))
+
+    # Capitalized standalone words (likely proper nouns like brand names)
+    for tok in re.findall(r"\b([A-Z][A-Za-z0-9]{2,})\b", prompt):
+        anchors.append(tok)
+
+    # Clean up: strip, dedup case-insensitively, drop stopwords
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in anchors:
+        a = raw.strip().strip('.,;:!?"\'')
+        if not a or len(a) < 3:
+            continue
+        low = a.lower()
+        if low in _PROMPT_STOPWORDS:
+            continue
+        # Skip very common short words even if Capitalized
+        if low in seen:
+            continue
+        seen.add(low)
+        out.append(a)
+        if len(out) >= 6:
+            break
+    return out
+
+
+def _find_best_file_for_anchors(
+    frontend_dir: str,
+    anchors: list[str],
+    current_target: Optional[str],
+) -> Optional[str]:
+    """Rank source files by how many prompt anchors they literally contain.
+
+    Returns a file path relative to frontend_dir if it's a strictly better
+    match than `current_target`, otherwise None. This is the mechanism that
+    lets "change the word acme to hamza" retarget the edit from the page
+    root file (which only imports <Sidebar />) to components/Sidebar.tsx
+    (which actually contains the literal `Acme`).
+    """
+    if not anchors:
+        return None
+
+    needles = [a.lower() for a in anchors if len(a) >= 3]
+    if not needles:
+        return None
+
+    best_score = 0
+    best_path: Optional[str] = None
+
+    for root, dirs, files in os.walk(frontend_dir):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+        for fname in files:
+            if not fname.endswith(_SOURCE_EXTS):
+                continue
+            fpath = os.path.join(root, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except Exception:
+                continue
+            lower = content.lower()
+            score = 0
+            for n in needles:
+                count = lower.count(n)
+                if count == 0:
+                    continue
+                score += 50 + min(count, 5) * 10
+                # Extra credit if the string appears inside a JSX text node
+                if f">{n}" in lower or f' "{n}"' in lower or f" '{n}'" in lower:
+                    score += 30
+            if score == 0:
+                continue
+            rel = os.path.relpath(fpath, frontend_dir)
+            # Penalize test / story files
+            if rel.endswith((".test.tsx", ".test.jsx", ".test.ts", ".test.js",
+                             ".stories.tsx", ".stories.jsx", ".spec.ts", ".spec.tsx")):
+                score = max(0, score - 100)
+            if score > best_score:
+                best_score = score
+                best_path = rel
+
+    if best_score >= 60 and best_path and best_path != current_target:
+        return best_path
+    return None
+
+
 def _build_discovery_inputs_from_disk(frontend_dir: str) -> tuple[list[dict], list[str]]:
     """Walk the cloned workspace and build (files, file_tree) inputs that match
     the shape `page_discovery.discover_pages` expects."""
@@ -524,6 +658,7 @@ def _build_scoped_prompt(
     section_role: str,
     section_aria_label: str,
     user_prompt: str,
+    prompt_anchors: Optional[list[str]] = None,
 ) -> str:
     identifier_lines = [f'- Label: "{section_label}"']
     if section_tag:
@@ -541,6 +676,11 @@ def _build_scoped_prompt(
         identifier_lines.append(f'- Paragraph snippet: "{section_paragraph}"')
     if section_text and not (section_heading or section_paragraph):
         identifier_lines.append(f'- Visible text: "{section_text[:160]}"')
+    if prompt_anchors:
+        identifier_lines.append(
+            "- Literal strings from the user's prompt to find and modify: "
+            + ", ".join(f'"{a}"' for a in prompt_anchors)
+        )
     identifier = "\n".join(identifier_lines)
 
     return f"""You are a senior frontend engineer editing a single React/JSX file.
@@ -632,6 +772,118 @@ def _locate_target_file(sess: EditLabSession, target_file: str) -> Optional[str]
     return None
 
 
+async def accept_last_edit(session_id: str) -> dict:
+    """Mark the most recent applied edit as accepted. The file path is
+    added to the session's accepted_files set so /edit-lab/publish can
+    include it in the GitHub commit. Clears the pending revert snapshot
+    so the next edit starts fresh."""
+    if not session_id:
+        return {"error": "Missing session_id. Please reload the preview.", "session_expired": True}
+
+    registry = get_registry()
+    registry.sweep()
+    sess = registry.get(session_id)
+    if not sess:
+        return {"error": "Edit Lab session expired. Reloading preview…", "session_expired": True}
+
+    pending = sess.pending_revert
+    if not pending:
+        return {"session_id": sess.id, "accepted_files": list(sess.accepted_files)}
+
+    target_file = pending.get("target_file")
+    if target_file:
+        sess.accepted_files.add(target_file)
+
+    sess.pending_revert = None
+    sess.touch()
+    return {
+        "session_id": sess.id,
+        "accepted_files": sorted(sess.accepted_files),
+    }
+
+
+async def publish_session_edits(
+    session_id: str,
+    access_token: str,
+    github_user_id: str = "",
+) -> dict:
+    """Read every accepted file from the warm workspace and push them to a
+    new branch on the user's GitHub repo via the existing publisher."""
+    if not session_id:
+        return {"error": "Missing session_id. Please reload the preview.", "session_expired": True}
+    if not access_token:
+        return {"error": "GitHub access token is required to publish."}
+
+    registry = get_registry()
+    registry.sweep()
+    sess = registry.get(session_id)
+    if not sess:
+        return {"error": "Edit Lab session expired. Reloading preview…", "session_expired": True}
+
+    if not sess.accepted_files:
+        return {"session_id": sess.id, "error": "No accepted edits to publish yet."}
+
+    # Parse owner/repo from the session's github_url
+    match = re.search(r"github\.com/([^/]+)/([^/.]+)(?:\.git)?/?$", sess.github_url)
+    if not match:
+        return {"session_id": sess.id, "error": f"Could not parse owner/repo from {sess.github_url}"}
+    owner, repo = match.group(1), match.group(2)
+
+    approved_files: list[dict] = []
+    files_missing: list[str] = []
+    for rel in sorted(sess.accepted_files):
+        full = os.path.join(sess.frontend_dir, rel)
+        if not os.path.isfile(full):
+            files_missing.append(rel)
+            continue
+        try:
+            with open(full, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception as e:
+            logger.warning("Edit Lab publish: could not read %s: %s", rel, e)
+            files_missing.append(rel)
+            continue
+
+        # Figure out the path to use in the remote repo. The workspace's
+        # frontend_dir may be nested under the repo root (e.g. frontend/,
+        # apps/web/, packages/site/). Re-derive the repo-relative path by
+        # stripping the workspace tmp_dir prefix.
+        try:
+            repo_rel = os.path.relpath(full, sess.tmp_dir).replace(os.sep, "/")
+        except Exception:
+            repo_rel = rel
+        approved_files.append({"path": repo_rel, "content": content})
+
+    if not approved_files:
+        return {
+            "session_id": sess.id,
+            "error": f"None of the accepted files could be read from the workspace (missing: {', '.join(files_missing)}).",
+        }
+
+    from app.services.github_publisher import publish_approved_branch
+    try:
+        result = await publish_approved_branch(
+            owner=owner,
+            repo=repo,
+            access_token=access_token,
+            approved_files=approved_files,
+            pages_transformed=[f["path"] for f in approved_files],
+            summary_text="The Lab: section edits",
+            base_branch=sess.branch,
+        )
+    except Exception as e:
+        logger.error("Edit Lab publish failed: %s", e, exc_info=True)
+        return {"session_id": sess.id, "error": f"Publish failed: {e}"}
+
+    sess.touch()
+    return {
+        "session_id": sess.id,
+        "branch_name": result.get("branch_name", ""),
+        "branch_url": result.get("branch_url", ""),
+        "files_changed": result.get("files_changed", []),
+    }
+
+
 async def revert_last_edit(session_id: str) -> dict:
     """Restore the most recent pre-edit file snapshot and re-render the
     warm dev server. Clears the pending revert on success so subsequent
@@ -716,6 +968,27 @@ async def apply_section_edit(
         if not target_full:
             return {"error": f"Could not locate {target_file} in the workspace."}
 
+        # Extract literal anchors from the user's prompt and, if a different
+        # source file in the workspace contains them more strongly than the
+        # currently-selected target, retarget the edit. This is the fix for
+        # "change the word acme to hamza" on a custom drag region: the
+        # frontend passes the root page file, but the actual "Acme" text
+        # lives in components/Sidebar.tsx — so we retarget there.
+        prompt_anchors = _extract_prompt_anchors(user_prompt)
+        if prompt_anchors:
+            better = _find_best_file_for_anchors(
+                sess.frontend_dir, prompt_anchors, target_file,
+            )
+            if better:
+                logger.info(
+                    "Edit Lab apply: retargeting %s → %s based on prompt anchors %s",
+                    target_file, better, prompt_anchors,
+                )
+                target_file = better
+                located = _locate_target_file(sess, target_file)
+                if located:
+                    target_full = located
+
         with open(target_full, "r", encoding="utf-8") as f:
             current_code = f.read()
 
@@ -739,6 +1012,7 @@ async def apply_section_edit(
             section_role=section_role,
             section_aria_label=section_aria_label,
             user_prompt=user_prompt,
+            prompt_anchors=prompt_anchors,
         )
 
         client = anthropic.Anthropic(api_key=api_key)
