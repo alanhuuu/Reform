@@ -547,9 +547,16 @@ export default function SimulationPage() {
 
     const repoUrl = sessionStorage.getItem('refineui_repo')
     const repoBranch = sessionStorage.getItem('refineui_branch')
-    const pagesEndpoint = repoUrl
-      ? `${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}${repoBranch ? `&branch=${encodeURIComponent(repoBranch)}` : ''}`
-      : '/api/local-pages'
+
+    if (!repoUrl) {
+      setScreensError('No repository connected.')
+      setScreens([])
+      setSelectedScreen(null)
+      setLoadingScreens(false)
+      return
+    }
+
+    const pagesEndpoint = `${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}${repoBranch ? `&branch=${encodeURIComponent(repoBranch)}` : ''}`
 
     setLoadingScreens(true)
     setScreensError(null)
