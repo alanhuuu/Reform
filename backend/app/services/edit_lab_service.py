@@ -911,7 +911,15 @@ async def revert_last_edit(session_id: str) -> dict:
             f.write(pending["original_code"])
 
         # Wait for HMR to recompile the reverted file before screenshotting.
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(3.0)
+        try:
+            import urllib.request, urllib.error
+            req = urllib.request.Request(sess.base_url)
+            with urllib.request.urlopen(req, timeout=10) as r:
+                _ = r.read(2048)
+        except (urllib.error.URLError, ConnectionRefusedError, OSError):
+            pass
+        await asyncio.sleep(2.0)
 
         screenshot_b64, detection = await _playwright_collect(sess.base_url)
         sections = detection.get("sections", []) or []
@@ -1056,7 +1064,7 @@ async def apply_section_edit(
         # won't be visible. Surface it as an error so the user retries
         # instead of squinting at an unchanged preview.
         len_delta = abs(len(revised_code) - len(current_code)) / max(len(current_code), 1)
-        if len_delta < 0.005:
+        if len_delta < 0.001:
             logger.warning(
                 "Edit Lab apply: revised code is only %.2f%% different (likely no-op)",
                 len_delta * 100,
@@ -1069,6 +1077,10 @@ async def apply_section_edit(
                     "button text-xl with bg-emerald-500')."
                 ),
             }
+        logger.info(
+            "Edit Lab apply: %s diff %+d chars (%.2f%%)",
+            target_file, len(revised_code) - len(current_code), len_delta * 100,
+        )
 
         with open(target_full, "w", encoding="utf-8") as f:
             f.write(revised_code)
@@ -1090,8 +1102,19 @@ async def apply_section_edit(
         except Exception:
             summary = f"Updated {section_label}"
 
-        # Wait for Fast Refresh / HMR to recompile
-        await asyncio.sleep(2.5)
+        # Wait for Fast Refresh / HMR to recompile, then do a warmup GET
+        # on the preview URL to force the dev server to actually serve the
+        # new bundle before Playwright navigates. Otherwise the screenshot
+        # catches a stale render on slow repos.
+        await asyncio.sleep(3.0)
+        try:
+            import urllib.request, urllib.error
+            req = urllib.request.Request(sess.base_url)
+            with urllib.request.urlopen(req, timeout=10) as r:
+                _ = r.read(2048)
+        except (urllib.error.URLError, ConnectionRefusedError, OSError) as warmup_err:
+            logger.debug("warmup GET failed (non-blocking): %s", warmup_err)
+        await asyncio.sleep(2.0)
 
         # Screenshot against the *still-running* dev server — no restart
         screenshot_b64, detection = await _playwright_collect(sess.base_url)
