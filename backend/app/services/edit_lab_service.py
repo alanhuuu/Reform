@@ -21,6 +21,7 @@ from app.services.edit_lab_workspace import (
     create_session,
     get_registry,
 )
+from app.services.page_discovery import discover_pages
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,59 @@ def _assign_source_files(
         )
 
 
+def _build_discovery_inputs_from_disk(frontend_dir: str) -> tuple[list[dict], list[str]]:
+    """Walk the cloned workspace and build (files, file_tree) inputs that match
+    the shape `page_discovery.discover_pages` expects."""
+    files: list[dict] = []
+    file_tree: list[str] = []
+    for root, dirs, fnames in os.walk(frontend_dir):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+        for fname in fnames:
+            if not fname.endswith(_SOURCE_EXTS):
+                continue
+            full = os.path.join(root, fname)
+            rel = os.path.relpath(full, frontend_dir).replace(os.sep, "/")
+            file_tree.append(rel)
+            try:
+                with open(full, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except Exception:
+                content = ""
+            files.append({"path": rel, "content": content, "size": len(content)})
+    return files, file_tree
+
+
+def _discover_available_pages(sess: EditLabSession) -> list[dict]:
+    """Return a list of {name, route, path} dicts for every discoverable page
+    in the session's workspace, using the shared page_discovery logic.
+    Side-effect: populates `sess.page_file_by_route` for navigate lookups."""
+    try:
+        files, file_tree = _build_discovery_inputs_from_disk(sess.frontend_dir)
+        discovered, _framework, _deps = discover_pages(files, file_tree)
+    except Exception as e:
+        logger.warning("Edit Lab: page discovery failed: %s", e)
+        discovered = []
+
+    available: list[dict] = []
+    seen_routes: set[str] = set()
+    for p in discovered:
+        if p.route in seen_routes:
+            continue
+        seen_routes.add(p.route)
+        available.append({"name": p.name, "route": p.route, "path": p.path})
+        sess.page_file_by_route[p.route] = p.path
+
+    # Always guarantee Home at "/"
+    if not any(p["route"] == "/" for p in available):
+        home = {"name": "Home", "route": "/", "path": sess.root_file or ""}
+        available.insert(0, home)
+        if sess.root_file:
+            sess.page_file_by_route["/"] = sess.root_file
+
+    available.sort(key=lambda p: (p["route"] != "/", p["route"]))
+    return available
+
+
 async def _playwright_collect(url: str) -> tuple[str, dict]:
     """Navigate to URL, return (full_page_screenshot_b64, detection_payload)."""
     from playwright.async_api import async_playwright
@@ -251,12 +305,15 @@ async def load_current_preview(
             except Exception as e:
                 logger.warning("Edit Lab: could not read root file: %s", e)
 
+        available_pages = _discover_available_pages(sess)
+
         logger.info("Edit Lab: rendering session %s at %s", sess.id, sess.base_url)
         screenshot_b64, detection = await _playwright_collect(sess.base_url)
         sections = detection.get("sections", []) or []
         document_size = detection.get("document_size", {"width": 1440, "height": 900})
 
-        _assign_source_files(sections, sess.frontend_dir, sess.root_file)
+        page_file_for_root = sess.page_file_by_route.get("/", sess.root_file)
+        _assign_source_files(sections, sess.frontend_dir, page_file_for_root)
 
         return {
             "session_id": sess.id,
@@ -266,11 +323,65 @@ async def load_current_preview(
             "root_file": sess.root_file,
             "root_code": root_code,
             "framework": sess.framework,
+            "available_pages": available_pages,
+            "current_page": "/",
         }
     except Exception as e:
         logger.error("Edit Lab load failed: %s", e, exc_info=True)
         # Session is still alive — leave it in the registry, the client can retry render
         return {"session_id": sess.id, "error": f"Render failed: {e}"}
+
+
+def _normalize_page_path(page_path: str) -> str:
+    """Sanitize a user-supplied route. Returns '/' for empty input."""
+    if not page_path:
+        return "/"
+    path = page_path.strip()
+    if not path.startswith("/"):
+        path = "/" + path
+    # Strip query/fragment and reject traversal
+    path = path.split("#", 1)[0].split("?", 1)[0]
+    if ".." in path:
+        return "/"
+    return path or "/"
+
+
+async def navigate_to_page(session_id: str, page_path: str) -> dict:
+    """Navigate the warm dev server to a new route and re-detect sections.
+    Reuses the existing workspace — no clone, install, or server restart."""
+    if not session_id:
+        return {"error": "Missing session_id. Please reload the preview.", "session_expired": True}
+
+    registry = get_registry()
+    registry.sweep()
+    sess = registry.get(session_id)
+    if not sess:
+        return {"error": "Edit Lab session expired. Reloading preview…", "session_expired": True}
+
+    normalized = _normalize_page_path(page_path)
+    url = sess.base_url.rstrip("/") + normalized
+
+    try:
+        logger.info("Edit Lab: navigating session %s to %s", sess.id, url)
+        screenshot_b64, detection = await _playwright_collect(url)
+        sections = detection.get("sections", []) or []
+        document_size = detection.get("document_size", {"width": 1440, "height": 900})
+
+        page_file = sess.page_file_by_route.get(normalized) or sess.root_file
+        _assign_source_files(sections, sess.frontend_dir, page_file)
+
+        sess.touch()
+        return {
+            "session_id": sess.id,
+            "screenshot": screenshot_b64,
+            "sections": sections,
+            "document_size": document_size,
+            "current_page": normalized,
+            "target_page_file": page_file,
+        }
+    except Exception as e:
+        logger.error("Edit Lab navigate failed: %s", e, exc_info=True)
+        return {"session_id": sess.id, "error": f"Navigate failed: {e}"}
 
 
 def _build_scoped_prompt(

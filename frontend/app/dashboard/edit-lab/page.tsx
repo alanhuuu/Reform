@@ -28,6 +28,12 @@ interface DocumentSize {
   height: number
 }
 
+interface AvailablePage {
+  name: string
+  route: string
+  path: string
+}
+
 interface LoadPayload {
   session_id: string
   screenshot: string
@@ -36,6 +42,19 @@ interface LoadPayload {
   root_file: string | null
   root_code: string
   framework: string
+  available_pages: AvailablePage[]
+  current_page: string
+  error?: string | null
+}
+
+interface NavigatePayload {
+  session_id: string
+  screenshot: string
+  sections: Section[]
+  document_size: DocumentSize
+  current_page: string
+  target_page_file: string | null
+  session_expired?: boolean
   error?: string | null
 }
 
@@ -84,6 +103,9 @@ export default function EditLabPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [promptText, setPromptText] = useState('')
+  const [navigating, setNavigating] = useState(false)
+  const [pageMenuOpen, setPageMenuOpen] = useState(false)
+  const [customPath, setCustomPath] = useState('')
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
   const [justUpdatedId, setJustUpdatedId] = useState<string | null>(null)
   const [lastEdit, setLastEdit] = useState<{
@@ -157,6 +179,70 @@ export default function EditLabPage() {
     if (repoState && !payload && !loading && !error) runLoad()
   }, [repoState, payload, loading, error, runLoad])
 
+  const runNavigate = useCallback(
+    async (route: string) => {
+      if (!sessionId) return
+      const target = route.trim() || '/'
+      setNavigating(true)
+      setError(null)
+      setSelectedId(null)
+      setHoveredId(null)
+      try {
+        const res = await fetch(apiUrl('/edit-lab/navigate'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId, page_path: target }),
+        })
+        if (!res.ok) throw new Error(`Navigate failed (${res.status})`)
+        const data: NavigatePayload = await res.json()
+        if (data.session_expired) {
+          const reloaded = await runLoad({ silent: true })
+          if (!reloaded?.session_id) throw new Error('Session expired and reload failed.')
+          const retry = await fetch(apiUrl('/edit-lab/navigate'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: reloaded.session_id, page_path: target }),
+          })
+          if (!retry.ok) throw new Error(`Navigate failed (${retry.status})`)
+          const retryData: NavigatePayload = await retry.json()
+          if (retryData.error) throw new Error(retryData.error)
+          setPayload((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  screenshot: retryData.screenshot || prev.screenshot,
+                  sections: retryData.sections || [],
+                  document_size: retryData.document_size || prev.document_size,
+                  current_page: retryData.current_page || target,
+                }
+              : prev,
+          )
+          setSessionId(retryData.session_id)
+          return
+        }
+        if (data.error) throw new Error(data.error)
+        setPayload((prev) =>
+          prev
+            ? {
+                ...prev,
+                screenshot: data.screenshot || prev.screenshot,
+                sections: data.sections || [],
+                document_size: data.document_size || prev.document_size,
+                current_page: data.current_page || target,
+              }
+            : prev,
+        )
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to navigate'
+        setToast({ kind: 'err', msg })
+      } finally {
+        setNavigating(false)
+        setPageMenuOpen(false)
+      }
+    },
+    [sessionId, runLoad],
+  )
+
   useEffect(() => {
     const update = () => {
       if (canvasRef.current) setCanvasWidth(canvasRef.current.clientWidth)
@@ -171,6 +257,17 @@ export default function EditLabPage() {
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (!pageMenuOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && target.closest('[data-edit-lab-page-menu]')) return
+      setPageMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [pageMenuOpen])
 
   const scale = payload && payload.document_size.width > 0
     ? canvasWidth / payload.document_size.width
@@ -335,8 +432,103 @@ export default function EditLabPage() {
                 style={{ background: payload && !loading ? '#22c55e' : 'rgba(255,255,255,0.2)' }}
               />
               <span className="truncate">
-                {repoState?.url ? repoState.url.replace('https://github.com/', '') : 'no repo connected'} · /
+                {repoState?.url ? repoState.url.replace('https://github.com/', '') : 'no repo connected'}
               </span>
+              <span style={{ color: 'rgba(255,255,255,0.2)' }}>·</span>
+              <div className="relative" data-edit-lab-page-menu>
+                <button
+                  onClick={() => setPageMenuOpen((v) => !v)}
+                  disabled={!payload || loading || navigating}
+                  className="flex items-center gap-1 px-1.5 py-[2px] rounded transition-colors disabled:opacity-40"
+                  style={{
+                    background: pageMenuOpen ? 'rgba(124,140,255,0.1)' : 'transparent',
+                    color: 'rgba(255,255,255,0.55)',
+                  }}
+                  title="Switch page"
+                >
+                  <span>{payload?.current_page || '/'}</span>
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                {pageMenuOpen && (
+                  <div
+                    className="absolute top-full left-0 mt-1.5 rounded-lg overflow-hidden min-w-[220px] max-h-[320px] z-[400000]"
+                    style={{
+                      background: 'rgba(6,8,13,0.96)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      backdropFilter: 'blur(14px)',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                    }}
+                  >
+                    <div className="max-h-[240px] overflow-y-auto">
+                      {(payload?.available_pages || []).length === 0 && (
+                        <div className="px-3 py-2 text-[10px] mono" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                          No pages discovered
+                        </div>
+                      )}
+                      {(payload?.available_pages || []).map((p) => {
+                        const isCurrent = p.route === payload?.current_page
+                        return (
+                          <button
+                            key={p.route}
+                            onClick={() => runNavigate(p.route)}
+                            className="w-full text-left px-3 py-2 flex items-center justify-between gap-3 transition-colors"
+                            style={{
+                              background: isCurrent ? 'rgba(124,140,255,0.1)' : 'transparent',
+                              color: isCurrent ? 'white' : 'rgba(255,255,255,0.7)',
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!isCurrent) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isCurrent) e.currentTarget.style.background = 'transparent'
+                            }}
+                          >
+                            <span className="text-[12px] font-medium truncate">{p.name}</span>
+                            <span className="text-[10px] mono flex-shrink-0" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                              {p.route}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <div className="border-t px-3 py-2 flex items-center gap-2" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                      <input
+                        type="text"
+                        value={customPath}
+                        onChange={(e) => setCustomPath(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && customPath.trim()) {
+                            runNavigate(customPath.trim())
+                            setCustomPath('')
+                          }
+                        }}
+                        placeholder="/custom/path"
+                        className="flex-1 bg-transparent outline-none text-[11px] mono"
+                        style={{ color: 'white' }}
+                      />
+                      <button
+                        onClick={() => {
+                          if (customPath.trim()) {
+                            runNavigate(customPath.trim())
+                            setCustomPath('')
+                          }
+                        }}
+                        disabled={!customPath.trim()}
+                        className="text-[10px] px-2 py-[3px] rounded disabled:opacity-30"
+                        style={{
+                          background: 'rgba(124,140,255,0.12)',
+                          border: '1px solid rgba(124,140,255,0.2)',
+                          color: 'white',
+                        }}
+                      >
+                        Go
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
               {payload?.framework && payload.framework !== 'unknown' && (
                 <span className="px-1.5 py-[2px] rounded flex-shrink-0" style={{ background: 'rgba(255,255,255,0.04)' }}>
                   {payload.framework}
@@ -498,6 +690,30 @@ export default function EditLabPage() {
                     }}
                   >
                     No sections detected on this page
+                  </div>
+                )}
+
+                {navigating && !applying && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center"
+                    style={{
+                      background: 'rgba(5,7,12,0.68)',
+                      backdropFilter: 'blur(4px)',
+                      zIndex: 300000,
+                    }}
+                  >
+                    <div className="flex flex-col items-center gap-3 text-center">
+                      <div
+                        className="w-6 h-6 rounded-full animate-spin"
+                        style={{ border: '2px solid rgba(124,140,255,0.15)', borderTopColor: '#7c8cff' }}
+                      />
+                      <div className="text-[12px]" style={{ color: 'rgba(255,255,255,0.65)' }}>
+                        Loading {payload?.current_page || 'page'}…
+                      </div>
+                      <div className="text-[10px] mono" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                        Reusing warm dev server
+                      </div>
+                    </div>
                   </div>
                 )}
 

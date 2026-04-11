@@ -8,7 +8,11 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.services.edit_lab_service import apply_section_edit, load_current_preview
+from app.services.edit_lab_service import (
+    apply_section_edit,
+    load_current_preview,
+    navigate_to_page,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/edit-lab")
@@ -43,6 +47,12 @@ class DocumentSize(BaseModel):
     height: int = 900
 
 
+class AvailablePage(BaseModel):
+    name: str
+    route: str
+    path: str = ""
+
+
 class LoadResponse(BaseModel):
     session_id: str = ""
     screenshot: str = ""
@@ -51,6 +61,8 @@ class LoadResponse(BaseModel):
     root_file: str | None = None
     root_code: str = ""
     framework: str = "unknown"
+    available_pages: list[AvailablePage] = []
+    current_page: str = "/"
     error: str | None = None
 
 
@@ -70,6 +82,38 @@ async def load_endpoint(req: LoadRequest):
         return LoadResponse(**result)
     except Exception as e:
         logger.error("edit-lab/load failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class NavigateRequest(BaseModel):
+    session_id: str
+    page_path: str = "/"
+
+
+class NavigateResponse(BaseModel):
+    session_id: str = ""
+    screenshot: str = ""
+    sections: list[SectionPayload] = []
+    document_size: DocumentSize = DocumentSize()
+    current_page: str = "/"
+    target_page_file: str | None = None
+    session_expired: bool = False
+    error: str | None = None
+
+
+@router.post("/navigate", response_model=NavigateResponse)
+async def navigate_endpoint(req: NavigateRequest):
+    try:
+        result = await navigate_to_page(req.session_id, req.page_path)
+        if result.get("error"):
+            return NavigateResponse(
+                session_id=result.get("session_id", ""),
+                error=result["error"],
+                session_expired=bool(result.get("session_expired")),
+            )
+        return NavigateResponse(**result)
+    except Exception as e:
+        logger.error("edit-lab/navigate failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

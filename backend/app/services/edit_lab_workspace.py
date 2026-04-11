@@ -50,6 +50,7 @@ class EditLabSession:
     port: int
     server_proc: subprocess.Popen
     root_file: Optional[str]
+    page_file_by_route: dict[str, str] = field(default_factory=dict)
     last_used: float = field(default_factory=time.time)
 
     @property
