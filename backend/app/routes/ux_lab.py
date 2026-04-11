@@ -81,17 +81,19 @@ async def analyze(req: AnalyzeRequest, db: AsyncSession | None = Depends(get_opt
     if req.analysis_only:
         try:
             result = await run_analysis(
-                req.url,
+                req.repo_url,
+                req.branch,
                 req.page,
+                access_token=req.access_token,
                 analysis_only=True,
             )
         except Exception as exc:
-            logger.error("UX Lab analysis-only run failed for %s: %s", req.url, exc)
+            logger.error("UX Lab analysis-only run failed for %s: %s", req.repo_url, exc)
             raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
 
         return SessionOut(
             id=str(uuid.uuid4()),
-            url=req.url,
+            url=req.repo_url,
             page=req.page,
             before_screenshot_url=f"data:image/png;base64,{result['before_b64']}",
             after_screenshot_url="",
@@ -108,7 +110,7 @@ async def analyze(req: AnalyzeRequest, db: AsyncSession | None = Depends(get_opt
     # Create a pending session immediately so the client can poll
     session = UXLabSessionModel(
         workspace_id=req.workspace_id,
-        url=req.url,
+        url=req.repo_url,
         page=req.page,
         status="pending",
     )
@@ -118,8 +120,10 @@ async def analyze(req: AnalyzeRequest, db: AsyncSession | None = Depends(get_opt
 
     try:
         result = await run_analysis(
-            req.url,
+            req.repo_url,
+            req.branch,
             req.page,
+            access_token=req.access_token,
             analysis_only=req.analysis_only,
         )
 
@@ -137,10 +141,11 @@ async def analyze(req: AnalyzeRequest, db: AsyncSession | None = Depends(get_opt
         session.status = "complete"
 
     except Exception as exc:
-        logger.error("UX Lab analysis failed for %s: %s", req.url, exc)
+        logger.error("UX Lab analysis failed for %s: %s", req.repo_url, exc)
         session.status = "error"
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
+
 
     return _session_to_out(
         session,

@@ -20,11 +20,13 @@ interface Annotation {
 
 
 const ANALYSIS_STAGES: { message: string; duration: number }[] = [
-  { message: 'Capturing screenshot',       duration: 5_000  },
-  { message: 'Analyzing layout patterns',  duration: 12_000 },
-  { message: 'Identifying UX issues',      duration: 10_000 },
+  { message: 'Cloning repository',         duration: 15_000 },
+  { message: 'Installing dependencies',    duration: 90_000 },
+  { message: 'Starting dev server',        duration: 30_000 },
+  { message: 'Capturing screenshot',       duration: 15_000 },
+  { message: 'Analyzing layout patterns',  duration: 20_000 },
+  { message: 'Identifying UX issues',      duration: 15_000 },
   { message: 'Generating recommendations', duration: 10_000 },
-  { message: 'Rendering preview',          duration: 10_000 },
   { message: 'Finalizing...',              duration: Infinity },
 ]
 
@@ -93,14 +95,23 @@ function toImageSrc(image: string) {
   return image.startsWith('data:') ? image : `data:image/png;base64,${image}`
 }
 
-async function analyzeUxLab(url: string, page: string, workspaceId: string, signal?: AbortSignal): Promise<UXLabSession> {
+async function analyzeUxLab(
+  repoUrl: string,
+  branch: string,
+  page: string,
+  accessToken: string,
+  workspaceId: string,
+  signal?: AbortSignal,
+): Promise<UXLabSession> {
   const response = await fetch(apiUrl('/api/ux-lab/analyze'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     signal,
     body: JSON.stringify({
-      url,
+      repo_url: repoUrl,
+      branch,
       page,
+      access_token: accessToken,
       workspace_id: workspaceId,
       analysis_only: true,
     }),
@@ -468,10 +479,6 @@ export default function SimulationPage() {
   const [findings, setFindings] = useState<Finding[]>([])
   const [selectedFindingIds, setSelectedFindingIds] = useState<Set<string>>(new Set())
   const [previewZoom, setPreviewZoom] = useState(1)
-  const [siteUrl, setSiteUrl] = useState<string>(() => {
-    try { return sessionStorage.getItem('refineui_site_url') ?? '' } catch { return '' }
-  })
-
   const handleZoomChange = useCallback((next: number) => {
     setPreviewZoom(Math.max(0.25, Math.min(3, next)))
   }, [])
@@ -600,7 +607,6 @@ export default function SimulationPage() {
     setAnalysis(null)
     setAnalysisError(null)
     setLoadingAnalysis(false)
-    setSelectedFindingIds(new Set())
     setPreviewZoom(1)
 
     const cacheKey = selectedScreen.route
@@ -611,17 +617,23 @@ export default function SimulationPage() {
 
     setLoadingAnalysis(true)
 
-    const base = siteUrl.trim().replace(/\/$/, '')
-    if (!base) {
-      setAnalysisError('Enter your deployed site URL above before running analysis.')
+    const selected = getSelectedRepo()
+    if (!selected?.url) {
+      setAnalysisError('No repository connected.')
       setLoadingAnalysis(false)
       return
     }
-    const targetUrl = `${base}${selectedScreen.route}`
 
     const controller = new AbortController()
 
-    analyzeUxLab(targetUrl, selectedScreen.route, session?.githubId ?? 'anonymous', controller.signal)
+    analyzeUxLab(
+      selected.url,
+      selected.branch,
+      selectedScreen.route,
+      (session as { accessToken?: string } | null)?.accessToken ?? '',
+      (session as { githubId?: string } | null)?.githubId ?? 'anonymous',
+      controller.signal,
+    )
       .then((result) => {
         analysisCache.current[cacheKey] = result
         try {
@@ -696,47 +708,6 @@ export default function SimulationPage() {
     setShelfExpanded(true)
     setPillOrder((prev) => (prev.includes(rawId) ? prev : [...prev, rawId]))
   }, [])
-
-  const handleApplyFinding = useCallback((findingId: string) => {
-    if (!analysis?.id) return
-
-    fetch(apiUrl(`/api/ux-lab/sessions/${analysis.id}/apply`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ finding_id: findingId }),
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        return response.json()
-      })
-      .then(() => {
-        setFindings((prev) =>
-          prev.map((finding) => (finding.id === findingId ? { ...finding, status: 'patched' as const } : finding)),
-        )
-        setAnalysis((prev) => {
-          if (!prev) return prev
-          const next = {
-            ...prev,
-            findings: prev.findings.map((finding) => (
-              finding.id === findingId ? { ...finding, status: 'patched' as const } : finding
-            )),
-          }
-          if (selectedScreen) {
-            analysisCache.current[selectedScreen.route] = next
-            try {
-              sessionStorage.setItem('refineui_analysis_cache', JSON.stringify(analysisCache.current))
-            } catch {
-              // Ignore cache write failures.
-            }
-          }
-          return next
-        })
-      })
-      .catch((error) => {
-        console.error('Failed to apply UX Lab finding:', error)
-      })
-  }, [analysis?.id, selectedScreen])
-
   const handleToggleSelection = useCallback((id: string) => {
     setSelectedFindingIds((prev) => {
       const next = new Set(prev)
@@ -747,11 +718,26 @@ export default function SimulationPage() {
 
   const handleApplySelected = useCallback(() => {
     const ids = new Set(selectedFindingIds)
-    setFindings((prev) =>
-      prev.map((f) => (ids.has(f.id) ? { ...f, status: 'queued' as const } : f)),
-    )
+    setFindings((prev) => {
+      const updated = prev.map((f) => (ids.has(f.id) ? { ...f, status: 'queued' as const } : f))
+      // Sync queued statuses back to the cache so they survive page switches.
+      if (selectedScreen) {
+        const cached = analysisCache.current[selectedScreen.route]
+        if (cached) {
+          const statusMap = new Map(updated.map((f) => [f.id, f.status]))
+          analysisCache.current[selectedScreen.route] = {
+            ...cached,
+            findings: cached.findings.map((f) => ({ ...f, status: statusMap.get(f.id) ?? f.status })),
+          }
+          try {
+            sessionStorage.setItem('refineui_analysis_cache', JSON.stringify(analysisCache.current))
+          } catch { /* ignore */ }
+        }
+      }
+      return updated
+    })
     setSelectedFindingIds(new Set())
-  }, [selectedFindingIds])
+  }, [selectedFindingIds, selectedScreen])
 
   const handleSelectAll = useCallback(() => {
     setSelectedFindingIds(new Set(findings.filter((f) => f.status === 'open').map((f) => f.id)))
@@ -762,10 +748,24 @@ export default function SimulationPage() {
   }, [])
 
   const handleRevertFinding = useCallback((id: string) => {
-    setFindings((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, status: 'open' as const } : f)),
-    )
-  }, [])
+    setFindings((prev) => {
+      const updated = prev.map((f) => (f.id === id ? { ...f, status: 'open' as const } : f))
+      if (selectedScreen) {
+        const cached = analysisCache.current[selectedScreen.route]
+        if (cached) {
+          const statusMap = new Map(updated.map((f) => [f.id, f.status]))
+          analysisCache.current[selectedScreen.route] = {
+            ...cached,
+            findings: cached.findings.map((f) => ({ ...f, status: statusMap.get(f.id) ?? f.status })),
+          }
+          try {
+            sessionStorage.setItem('refineui_analysis_cache', JSON.stringify(analysisCache.current))
+          } catch { /* ignore */ }
+        }
+      }
+      return updated
+    })
+  }, [selectedScreen])
 
   const handleApplyTransformation = useCallback(() => {
     const selected = getSelectedRepo()
@@ -774,7 +774,8 @@ export default function SimulationPage() {
     const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
 
     if (!match) {
-      router.push('/dashboard/transform')
+      // No repo in storage — nothing to transform.
+      setAnalysisError('No repository connected. Go back to Project Discovery to select a repo.')
       return
     }
 
@@ -785,7 +786,8 @@ export default function SimulationPage() {
       if (raw) designIntelligence = JSON.parse(raw)
     } catch { /* ignore */ }
 
-    const queuedFindings = findings
+    const queuedFindings = Object.values(analysisCache.current)
+      .flatMap((session) => session.findings)
       .filter((f) => f.status === 'queued')
       .map((f) => ({
         title: f.title,
@@ -794,6 +796,20 @@ export default function SimulationPage() {
         component: f.component,
         severity: f.severity,
       }))
+
+    // Persist findings so the transform page can pick them up even if navigated
+    // via the nav tab instead of this button.
+    try {
+      if (queuedFindings.length > 0) {
+        sessionStorage.setItem('refineui_ux_lab_findings', JSON.stringify(queuedFindings))
+      } else {
+        sessionStorage.removeItem('refineui_ux_lab_findings')
+      }
+    } catch { /* ignore */ }
+
+    // Clear any stale cached transform so the transform page doesn't skip the
+    // new pipeline run (it initializes pipelineStep as 'complete' if this key exists).
+    sessionStorage.removeItem('refineui_transform')
 
     const promise = fetch(apiUrl('/transform-repo-v2'), {
       method: 'POST',
@@ -821,7 +837,7 @@ export default function SimulationPage() {
       .catch(() => null)
 
     ;(window as Window & { __reformPipelinePromise?: Promise<unknown> }).__reformPipelinePromise = promise
-    router.push('/dashboard/transform')
+    router.push(`/dashboard/transform?repo=${encodeURIComponent(repoUrl)}&branch=${encodeURIComponent(branch)}`)
   }, [findings, session, router])
 
   const handleScrollToAnnotation = useCallback((findingId: string) => {
@@ -882,29 +898,6 @@ export default function SimulationPage() {
           style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
         >
           <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.4)' }}>
-                Site URL
-              </span>
-              <input
-                type="url"
-                value={siteUrl}
-                onChange={(e) => {
-                  setSiteUrl(e.target.value)
-                  try { sessionStorage.setItem('refineui_site_url', e.target.value) } catch { /* ignore */ }
-                }}
-                placeholder="https://yoursite.com"
-                className="rounded-xl py-1.5 text-xs font-medium outline-none"
-                style={{
-                  background: '#1c1a25',
-                  border: `1px solid ${!siteUrl.trim() ? 'rgba(239,68,68,0.35)' : 'rgba(74,68,85,0.3)'}`,
-                  color: 'rgba(230,224,240,0.85)',
-                  paddingLeft: '0.75rem',
-                  paddingRight: '0.75rem',
-                  width: 200,
-                }}
-              />
-            </div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.4)' }}>
                 Screen

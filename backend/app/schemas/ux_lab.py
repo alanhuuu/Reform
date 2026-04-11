@@ -5,8 +5,10 @@ from pydantic import BaseModel
 
 
 class AnalyzeRequest(BaseModel):
-    url: str
-    page: str = "home"
+    repo_url: str
+    branch: str = "main"
+    page: str = "/"
+    access_token: str = ""
     workspace_id: str = "anonymous"
     analysis_only: bool = False
 

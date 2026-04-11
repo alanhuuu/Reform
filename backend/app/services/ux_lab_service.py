@@ -130,11 +130,41 @@ def _normalize_findings(raw_findings: list[dict]) -> list[dict]:
     return findings
 
 
-async def capture_before_screenshot(url: str) -> str:
+async def capture_before_screenshot(repo_url: str, branch: str, route: str, access_token: str = "") -> str:
+    import shutil
+    import tempfile
+
+    from app.services.preview_renderer import (
+        _clone_repo,
+        _find_free_port,
+        _find_frontend_root,
+        _generate_dummy_env,
+        _install_deps,
+        _kill_server,
+        _start_dev_server,
+        _wait_for_server,
+    )
     from app.services.screenshot import take_screenshot_b64
 
-    logger.info("UX Lab: capturing before screenshot for %s", url)
-    return await take_screenshot_b64(url)
+    tmp_dir = tempfile.mkdtemp(prefix="reform_uxlab_")
+    proc = None
+    port = _find_free_port()
+
+    try:
+        _clone_repo(repo_url, branch, tmp_dir, access_token)
+        frontend_dir = _find_frontend_root(tmp_dir)
+        _install_deps(frontend_dir)
+        _generate_dummy_env(frontend_dir)
+        proc = _start_dev_server(frontend_dir, port)
+        if not _wait_for_server(port):
+            raise RuntimeError("Dev server failed to start for UX Lab screenshot")
+        url = f"http://localhost:{port}{route}"
+        logger.info("UX Lab: capturing screenshot for %s", url)
+        return await take_screenshot_b64(url)
+    finally:
+        if proc:
+            _kill_server(proc)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 async def generate_findings(before_b64: str) -> list[dict]:
@@ -198,24 +228,30 @@ async def render_after_preview(url: str, css_patches: list[str]) -> tuple[str | 
 
 
 async def run_analysis(
-    url: str,
+    repo_url: str,
+    branch: str,
     page: str,
+    access_token: str = "",
     analysis_only: bool = False,
 ) -> dict:
     """
     Execute the UX Lab workflow.
 
+    Clones the repo, spins up a local dev server, screenshots the target page,
+    then runs Claude analysis on the screenshot.
+
     analysis_only mode stops after Pass 1 findings generation so Claude analysis
     can be tested without running CSS patching or after preview rendering.
     """
     logger.info(
-        "UX Lab: starting %s run for %s (%s)",
+        "UX Lab: starting %s run for %s @ %s (branch: %s)",
         "analysis-only" if analysis_only else "full",
         page,
-        url,
+        repo_url,
+        branch,
     )
 
-    before_b64 = await capture_before_screenshot(url)
+    before_b64 = await capture_before_screenshot(repo_url, branch, page, access_token)
     findings = await generate_findings(before_b64)
 
     if analysis_only:
@@ -225,8 +261,9 @@ async def run_analysis(
             "after_message": None,
             "findings": findings,
         }
-    findings, css_patches = await generate_css_patches(findings)
-    after_b64, after_message = await render_after_preview(url, css_patches)
+    findings, _ = await generate_css_patches(findings)
+    # After-preview via CSS injection is not supported for the repo-based flow.
+    after_b64, after_message = None, "After preview is not available in this mode."
 
     return {
         "before_b64": before_b64,

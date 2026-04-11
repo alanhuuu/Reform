@@ -745,6 +745,8 @@ function TransformPage() {
   // ── Code Pipeline State ──
   const [pipelineStep, setPipelineStep] = useState<PipelineStep>(() => {
     if (typeof window === 'undefined') return 'idle'
+    // UX Lab findings pending → always start fresh so they get applied.
+    if (sessionStorage.getItem('refineui_ux_lab_findings')) return 'idle'
     if (sessionStorage.getItem('refineui_transform')) return 'complete'
     return 'idle'
   })
@@ -905,9 +907,19 @@ function TransformPage() {
   // user isn't re-prompted to choose the same repo again.
   useEffect(() => {
     if (autoStartedRef.current || pipelineStep !== 'idle' || transformResult) return
-    const selected = getSelectedRepo()
+
+    // Prefer URL params (passed by UX Lab navigation) — more reliable than storage.
+    const paramRepo = searchParams?.get('repo')
+    const paramBranch = searchParams?.get('branch')
+    const selected = paramRepo
+      ? { url: paramRepo, branch: paramBranch || 'main' }
+      : getSelectedRepo()
+
     if (!selected?.url) return
     autoStartedRef.current = true
+
+    // Ensure storage is up to date so other parts of the app find the selection.
+    setSelectedRepo(selected.url, selected.branch)
 
     // Extract owner/repo from URL like https://github.com/owner/repo
     const match = selected.url.match(/github\.com\/([^/]+\/[^/]+)/)
@@ -997,6 +1009,15 @@ function TransformPage() {
 
     setPipelineStep('ingesting')
     try {
+      let uxLabFindings: unknown[] | null = null
+      try {
+        const raw = sessionStorage.getItem('refineui_ux_lab_findings')
+        if (raw) {
+          uxLabFindings = JSON.parse(raw)
+          sessionStorage.removeItem('refineui_ux_lab_findings')
+        }
+      } catch { /* ignore */ }
+
       // Use the v2 multi-page pipeline — one call does everything
       const res = await fetch(apiUrl('/transform-repo-v2'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1008,6 +1029,7 @@ function TransformPage() {
           user_intent: userIntent,
           max_pages: 5,
           github_user_id: session?.githubId,
+          ux_lab_findings: uxLabFindings,
         }),
       })
       if (!res.ok) {
