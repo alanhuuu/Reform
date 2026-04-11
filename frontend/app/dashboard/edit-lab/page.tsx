@@ -770,25 +770,26 @@ export default function EditLabPage() {
         }
       `}</style>
 
-      <div className="mb-6">
+      <div className="mb-8">
         <div
-          className="text-[10px] font-medium uppercase tracking-[0.12em] mb-1.5"
-          style={{ color: '#6B7280', fontFamily: 'var(--font-mono), monospace' }}
+          className="text-[11px] font-medium uppercase tracking-[0.14em]"
+          style={{ color: '#10B981', fontFamily: 'var(--font-mono), monospace' }}
         >
           THE LAB
         </div>
         <h1
-          className="text-[22px] font-semibold leading-[1.15] mb-1"
-          style={{ letterSpacing: '-0.018em', color: '#E5E7EB' }}
+          className="text-[34px] font-semibold text-white mt-2.5"
+          style={{ letterSpacing: '-0.028em', lineHeight: 1.05 }}
         >
           Select a section. Describe the change.
         </h1>
         <p
-          className="text-[13px] max-w-[640px] leading-[1.55]"
-          style={{ color: '#9CA3AF' }}
+          className="text-[14px] mt-3 max-w-[640px] leading-[1.6]"
+          style={{ color: '#A1A1AA' }}
         >
-          Click or drag any region of your repo&apos;s live preview. Reform rewrites that
-          slice against a warm dev server so every edit lands in seconds.
+          The Lab loads your repo&apos;s live website. Click or drag to select any region,
+          describe the change, and Reform rewrites that slice of your source against a warm
+          dev server so every subsequent edit lands in seconds.
         </p>
       </div>
 

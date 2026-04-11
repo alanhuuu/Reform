@@ -6,81 +6,47 @@ import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { ProgressProvider, useProgress } from '@/components/dashboard/ProgressContext'
+import InteractiveBackground from '@/components/landing/InteractiveBackground'
 import AccountMenu from '@/components/layout/AccountMenu'
-import { Spinner, StatusDot } from '@/components/ui'
+import { Spinner } from '@/components/ui'
 import { clearSelectedRepo } from '@/lib/selectedRepo'
 
-interface NavItem {
-  href: string
-  label: string
-  icon: (active: boolean) => React.ReactNode
-}
-
-const NAV_ITEMS: NavItem[] = [
-  {
-    href: '/dashboard/discovery',
-    label: 'Discovery',
-    icon: (active) => (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={active ? '#E5E7EB' : '#9CA3AF'} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="11" cy="11" r="7" />
-        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-      </svg>
-    ),
-  },
-  {
-    href: '/dashboard/simulation',
-    label: 'Analysis',
-    icon: (active) => (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={active ? '#E5E7EB' : '#9CA3AF'} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="18" y1="20" x2="18" y2="10" />
-        <line x1="12" y1="20" x2="12" y2="4" />
-        <line x1="6" y1="20" x2="6" y2="14" />
-      </svg>
-    ),
-  },
-  {
-    href: '/dashboard/transform',
-    label: 'Transform',
-    icon: (active) => (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={active ? '#E5E7EB' : '#9CA3AF'} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="16 3 21 3 21 8" />
-        <line x1="4" y1="20" x2="21" y2="3" />
-        <polyline points="21 16 21 21 16 21" />
-        <line x1="15" y1="15" x2="21" y2="21" />
-        <line x1="4" y1="4" x2="9" y2="9" />
-      </svg>
-    ),
-  },
-  {
-    href: '/dashboard/edit-lab',
-    label: 'The Lab',
-    icon: (active) => (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={active ? '#E5E7EB' : '#9CA3AF'} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="7" height="7" rx="1" />
-        <rect x="14" y="3" width="7" height="7" rx="1" />
-        <rect x="14" y="14" width="7" height="7" rx="1" />
-        <rect x="3" y="14" width="7" height="7" rx="1" />
-      </svg>
-    ),
-  },
+const NAV_ITEMS = [
+  { href: '/dashboard/discovery', label: 'Discovery' },
+  { href: '/dashboard/simulation', label: 'Analysis' },
+  { href: '/dashboard/transform', label: 'Transform' },
+  { href: '/dashboard/edit-lab', label: 'The Lab' },
 ]
 
-function ProgressStripe() {
+function GlobalProgressBar() {
   const { state } = useProgress()
   const pathname = usePathname()
   if (!state.active || pathname === '/dashboard/discovery') return null
   return (
     <div className="fixed top-0 left-0 right-0 z-[100] pointer-events-none">
-      <div className="h-[2px] w-full" style={{ background: '#0A0A0A' }}>
+      <div className="h-[1.5px] w-full bg-white/[0.04]">
         <div
-          className="h-full transition-[width] duration-500 ease-out"
+          className="h-full transition-[width] duration-700 ease-out"
           style={{
             width: `${state.progress}%`,
-            background: '#10B981',
-            boxShadow: '0 0 12px rgba(16,185,129,0.5)',
+            background: 'linear-gradient(90deg, #10B981, #34D399)',
+            boxShadow: '0 0 20px rgba(16,185,129,0.35)',
           }}
         />
       </div>
+      {state.label && (
+        <div
+          className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-[10px] font-medium tracking-[-0.01em]"
+          style={{
+            background: 'rgba(10,10,10,0.9)',
+            color: 'rgba(255,255,255,0.55)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            backdropFilter: 'blur(10px)',
+          }}
+        >
+          {state.label}
+        </div>
+      )}
     </div>
   )
 }
@@ -100,9 +66,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return (
       <div
         className="min-h-screen flex items-center justify-center"
-        style={{ background: '#0D0D0D' }}
+        style={{ background: '#0A0A0A' }}
       >
-        <Spinner size={18} />
+        <Spinner size={20} />
       </div>
     )
   }
@@ -119,83 +85,51 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const { state: progressState } = useProgress()
 
   return (
-    <div className="min-h-screen" style={{ background: '#0D0D0D' }}>
-      <ProgressStripe />
+    <div className="min-h-screen relative" style={{ background: '#0A0A0A' }}>
+      <InteractiveBackground />
+      <GlobalProgressBar />
 
-      {/* ── Sidebar ── */}
-      <aside
-        className="fixed left-0 top-0 bottom-0 z-40 hidden md:flex flex-col"
+      {/* ── Header ── */}
+      <header
+        className="fixed top-0 left-0 right-0 z-50"
         style={{
-          width: 'var(--ui-sidebar-w, 240px)',
-          background: '#0A0A0A',
-          borderRight: '1px solid #1A1A1A',
+          background: 'rgba(10,10,10,0.72)',
+          backdropFilter: 'blur(20px) saturate(140%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          borderBottom: '1px solid rgba(255,255,255,0.05)',
         }}
       >
-        {/* Brand */}
-        <div className="px-4 h-[52px] flex items-center gap-2.5" style={{ borderBottom: '1px solid #161616' }}>
-          <Link href="/" className="flex items-center gap-2.5 group">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 h-[60px] flex items-center justify-between gap-4">
+          {/* Brand */}
+          <Link href="/" className="flex items-center gap-2.5 flex-shrink-0 group">
             <div
-              className="w-6 h-6 rounded-[6px] flex items-center justify-center flex-shrink-0"
+              className="w-7 h-7 rounded-lg flex items-center justify-center transition-transform duration-200 group-hover:scale-105"
               style={{
-                background: '#161616',
-                border: '1px solid #262626',
+                background: '#151518',
+                border: '1px solid rgba(255,255,255,0.08)',
               }}
             >
-              <Image src="/reform_logo.png" alt="Reform" width={14} height={14} className="object-contain opacity-90" />
+              <Image
+                src="/reform_logo.png"
+                alt="Reform"
+                width={16}
+                height={16}
+                className="object-contain opacity-90"
+              />
             </div>
             <span
-              className="text-[13px] font-semibold"
-              style={{ color: '#E5E7EB', letterSpacing: '-0.01em' }}
+              className="text-[14px] font-semibold text-white hidden sm:block"
+              style={{ letterSpacing: '-0.02em' }}
             >
               Reform
             </span>
           </Link>
-          <div className="ml-auto">
-            <StatusDot kind="live" size={5} />
-          </div>
-        </div>
 
-        {/* Workspace context */}
-        <div className="px-3 pt-3 pb-2">
-          <div
-            className="text-[10px] font-medium uppercase tracking-[0.1em] px-2 mb-1.5"
-            style={{ color: '#6B7280' }}
-          >
-            Workspace
-          </div>
-          <div
-            className="flex items-center gap-2 px-2 py-1.5 rounded-[7px] transition-colors"
-            style={{ background: '#111111', border: '1px solid #1F1F1F' }}
-          >
-            <div
-              className="w-5 h-5 rounded-[5px] flex-shrink-0"
-              style={{
-                background: 'linear-gradient(135deg, #10B981 0%, #065F46 100%)',
-              }}
-            />
-            <div className="min-w-0 flex-1">
-              <div
-                className="text-[12px] font-medium truncate"
-                style={{ color: '#E5E7EB', letterSpacing: '-0.01em' }}
-              >
-                Personal
-              </div>
-            </div>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </div>
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto px-3 pt-3">
-          <div
-            className="text-[10px] font-medium uppercase tracking-[0.1em] px-2 mb-1.5"
-            style={{ color: '#6B7280' }}
-          >
-            Product
-          </div>
-          <div className="flex flex-col gap-0.5">
+          {/* Nav */}
+          <nav className="flex items-center gap-0.5 rounded-full p-1 hidden md:flex" style={{
+            background: 'rgba(255,255,255,0.025)',
+            border: '1px solid rgba(255,255,255,0.05)',
+          }}>
             {NAV_ITEMS.map((item) => {
               const isActive = pathname === item.href
               const isLocked =
@@ -205,125 +139,96 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                   key={item.href}
                   href={isLocked ? '#' : item.href}
                   onClick={(e) => isLocked && e.preventDefault()}
-                  className={`group relative flex items-center gap-2.5 h-8 px-2 rounded-[7px] transition-colors duration-150 ${
-                    isLocked ? 'opacity-25 pointer-events-none' : ''
+                  className={`relative px-3.5 py-1.5 rounded-full text-[12.5px] font-medium transition-colors duration-200 ${
+                    isLocked ? 'pointer-events-none opacity-25' : ''
                   }`}
                   style={{
-                    background: isActive ? '#161616' : 'transparent',
-                    border: isActive ? '1px solid #262626' : '1px solid transparent',
+                    color: isActive ? '#FFFFFF' : '#A1A1AA',
+                    background: isActive ? 'rgba(255,255,255,0.06)' : 'transparent',
+                    letterSpacing: '-0.01em',
                   }}
                   onMouseEnter={(e) => {
-                    if (!isActive && !isLocked) e.currentTarget.style.background = '#121212'
+                    if (!isActive && !isLocked)
+                      e.currentTarget.style.color = '#FFFFFF'
                   }}
                   onMouseLeave={(e) => {
-                    if (!isActive && !isLocked) e.currentTarget.style.background = 'transparent'
+                    if (!isActive && !isLocked)
+                      e.currentTarget.style.color = '#A1A1AA'
                   }}
                 >
+                  {item.label}
                   {isActive && (
                     <span
-                      className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 rounded-full"
-                      style={{ background: '#10B981', boxShadow: '0 0 8px rgba(16,185,129,0.6)' }}
+                      className="absolute left-1/2 -translate-x-1/2 -bottom-[7px] w-1 h-1 rounded-full"
+                      style={{
+                        background: '#10B981',
+                        boxShadow: '0 0 8px rgba(16,185,129,0.6)',
+                      }}
                     />
                   )}
-                  <span className="flex-shrink-0">{item.icon(isActive)}</span>
-                  <span
-                    className="text-[12.5px] font-medium"
-                    style={{
-                      color: isActive ? '#E5E7EB' : '#9CA3AF',
-                      letterSpacing: '-0.005em',
-                    }}
-                  >
-                    {item.label}
-                  </span>
                 </Link>
               )
             })}
-          </div>
-        </nav>
+          </nav>
 
-        {/* Bottom */}
-        <div className="px-3 pb-3 pt-3" style={{ borderTop: '1px solid #161616' }}>
-          <button
-            onClick={() => {
-              sessionStorage.removeItem('refineui_analysis')
-              sessionStorage.removeItem('refineui_discovery')
-              sessionStorage.removeItem('refineui_answers')
-              sessionStorage.removeItem('refineui_analysis_cache')
-              sessionStorage.removeItem('refineui_transform')
-              sessionStorage.removeItem('refineui_site_url')
-              clearSelectedRepo()
-              window.location.href = '/dashboard/discovery'
-            }}
-            className="w-full h-8 flex items-center justify-center gap-1.5 rounded-[7px] text-[12px] font-medium transition-colors duration-150"
-            style={{
-              color: '#9CA3AF',
-              background: '#111111',
-              border: '1px solid #1F1F1F',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#161616'
-              e.currentTarget.style.borderColor = '#262626'
-              e.currentTarget.style.color = '#E5E7EB'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#111111'
-              e.currentTarget.style.borderColor = '#1F1F1F'
-              e.currentTarget.style.color = '#9CA3AF'
-            }}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            New analysis
-          </button>
-          <div className="mt-2 pt-2 flex items-center justify-between" style={{ borderTop: '1px solid #161616' }}>
+          {/* Right */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                sessionStorage.removeItem('refineui_analysis')
+                sessionStorage.removeItem('refineui_discovery')
+                sessionStorage.removeItem('refineui_answers')
+                sessionStorage.removeItem('refineui_analysis_cache')
+                sessionStorage.removeItem('refineui_transform')
+                sessionStorage.removeItem('refineui_site_url')
+                clearSelectedRepo()
+                window.location.href = '/dashboard/discovery'
+              }}
+              className="text-[12px] font-medium px-3 py-1.5 rounded-full transition-all duration-200 hidden sm:block"
+              style={{
+                color: '#A1A1AA',
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'transparent',
+                letterSpacing: '-0.01em',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#FFFFFF'
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.16)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#A1A1AA'
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
+              }}
+            >
+              New analysis
+            </button>
             <AccountMenu />
           </div>
         </div>
-      </aside>
+      </header>
 
-      {/* ── Mobile top nav ── */}
-      <header
-        className="fixed top-0 left-0 right-0 z-40 md:hidden flex items-center justify-between h-[52px] px-4"
+      {/* ── Mobile nav ── */}
+      <nav
+        className="fixed top-[60px] left-0 right-0 z-40 md:hidden overflow-x-auto"
         style={{
-          background: 'rgba(10,10,10,0.92)',
-          backdropFilter: 'blur(16px)',
-          borderBottom: '1px solid #1A1A1A',
+          background: 'rgba(10,10,10,0.95)',
+          backdropFilter: 'blur(14px)',
+          borderBottom: '1px solid rgba(255,255,255,0.05)',
         }}
       >
-        <Link href="/" className="flex items-center gap-2">
-          <div
-            className="w-6 h-6 rounded-[6px] flex items-center justify-center"
-            style={{ background: '#161616', border: '1px solid #262626' }}
-          >
-            <Image src="/reform_logo.png" alt="Reform" width={14} height={14} className="object-contain opacity-90" />
-          </div>
-          <span className="text-[13px] font-semibold" style={{ color: '#E5E7EB' }}>
-            Reform
-          </span>
-        </Link>
-        <AccountMenu />
-      </header>
-      <nav
-        className="fixed top-[52px] left-0 right-0 z-30 md:hidden overflow-x-auto"
-        style={{ background: '#0A0A0A', borderBottom: '1px solid #1A1A1A' }}
-      >
-        <div className="flex items-center gap-0.5 px-3 py-1.5 min-w-max">
+        <div className="flex items-center gap-1 px-3 py-2 min-w-max">
           {NAV_ITEMS.map((item) => {
             const isActive = pathname === item.href
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className="flex items-center gap-1.5 h-7 px-2.5 rounded-[6px] text-[12px] font-medium transition-colors whitespace-nowrap"
+                className="px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors whitespace-nowrap"
                 style={{
-                  color: isActive ? '#E5E7EB' : '#9CA3AF',
-                  background: isActive ? '#161616' : 'transparent',
-                  border: isActive ? '1px solid #262626' : '1px solid transparent',
+                  color: isActive ? '#FFFFFF' : '#71717A',
+                  background: isActive ? 'rgba(255,255,255,0.06)' : 'transparent',
                 }}
               >
-                {item.icon(isActive)}
                 {item.label}
               </Link>
             )
@@ -331,15 +236,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
       </nav>
 
-      {/* ── Main content ── */}
-      <main
-        className="min-h-screen relative md:ml-[240px] rw-grid-texture"
-        style={{
-          background: '#0D0D0D',
-          paddingTop: 0,
-        }}
-      >
-        <div className="pt-[100px] md:pt-0 min-h-screen">{children}</div>
+      <main className="pt-[88px] md:pt-[60px] min-h-screen relative" style={{ zIndex: 1 }}>
+        {children}
       </main>
     </div>
   )

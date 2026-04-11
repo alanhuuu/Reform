@@ -521,27 +521,28 @@ function DiscoveryPageInner() {
 
   // ── QUESTIONNAIRE ──
   return (
-    <div className="max-w-[720px] mx-auto px-6 py-8">
-      <div className="mb-6">
-        <div
-          className="text-[10px] font-medium uppercase tracking-[0.12em] mb-1.5"
-          style={{ color: '#6B7280', fontFamily: 'var(--font-mono), monospace' }}
-        >
-          DISCOVERY
+    <div className="flex items-start justify-center min-h-[calc(100vh-60px)] px-4 pt-20 pb-16">
+      <div className="w-full max-w-[540px]">
+        <div className="flex flex-col items-center text-center mb-10">
+          <div
+            className="text-[11px] font-medium uppercase tracking-[0.14em] mb-3"
+            style={{ color: '#10B981', fontFamily: 'var(--font-mono), monospace' }}
+          >
+            PROJECT DISCOVERY
+          </div>
+          <h1
+            className="text-[34px] sm:text-[40px] font-semibold text-white leading-[1.05] mb-3"
+            style={{ letterSpacing: '-0.028em' }}
+          >
+            Tell us what you&apos;re building
+          </h1>
+          <p className="text-[14px] max-w-[420px]" style={{ color: '#A1A1AA' }}>
+            A few answers and Reform finds the best design references in your space.
+          </p>
         </div>
-        <h1
-          className="text-[22px] font-semibold leading-[1.15] mb-1"
-          style={{ letterSpacing: '-0.018em', color: '#E5E7EB' }}
-        >
-          Tell us about your project
-        </h1>
-        <p className="text-[13px] max-w-[560px]" style={{ color: '#9CA3AF' }}>
-          A few answers and Reform finds the best design references in your space.
-        </p>
-      </div>
 
         {/* Progress */}
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-3">
           <span
             className="text-[10px] font-medium uppercase tracking-[0.1em]"
             style={{ color: '#6B7280' }}
@@ -556,29 +557,32 @@ function DiscoveryPageInner() {
           </span>
         </div>
         <div
-          className="w-full h-[2px] mb-6"
-          style={{ background: '#1A1A1A' }}
+          className="w-full h-[2px] rounded-full mb-10"
+          style={{ background: 'rgba(255,255,255,0.05)' }}
         >
           <div
-            className="h-full transition-all duration-300 ease-out"
+            className="h-full rounded-full transition-all duration-500 ease-out"
             style={{
               width: `${((currentStep + 1) / QUESTIONS.length) * 100}%`,
-              background: '#10B981',
+              background: 'linear-gradient(90deg, #10B981, #34D399)',
+              boxShadow: '0 0 12px rgba(16,185,129,0.35)',
             }}
           />
         </div>
 
         {/* Question card */}
         <div
-          className="rounded-[12px] p-5"
+          className="rounded-[20px] p-7"
           style={{
-            background: '#161616',
-            border: '1px solid #262626',
+            background: '#111113',
+            border: '1px solid rgba(255,255,255,0.06)',
+            boxShadow:
+              '0 1px 0 rgba(255,255,255,0.04) inset, 0 24px 56px rgba(0,0,0,0.5)',
           }}
         >
           <label
-            className="block font-medium text-[14px] mb-3"
-            style={{ letterSpacing: '-0.01em', color: '#E5E7EB' }}
+            className="block text-white font-semibold text-[18px] mb-5"
+            style={{ letterSpacing: '-0.018em' }}
           >
             {currentQ.label}
           </label>
@@ -589,42 +593,40 @@ function DiscoveryPageInner() {
             value={answers[currentQ.key] || ''}
             onChange={(e) => setAnswers({ ...answers, [currentQ.key]: e.target.value })}
             onKeyDown={handleKeyDown}
-            className="w-full h-9 rounded-[8px] px-3 text-[13px] outline-none transition-colors duration-150"
+            className="w-full h-12 rounded-[12px] px-4 text-[14px] outline-none transition-all duration-200"
             style={{
-              color: '#E5E7EB',
-              background: '#0D0D0D',
-              border: '1px solid #262626',
-              letterSpacing: '-0.005em',
+              color: '#FFFFFF',
+              background: '#0B0B0E',
+              border: '1px solid rgba(255,255,255,0.08)',
+              letterSpacing: '-0.01em',
             }}
             onFocus={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(16,185,129,0.5)'
-              e.currentTarget.style.boxShadow = '0 0 0 1px rgba(16,185,129,0.25)'
+              e.currentTarget.style.borderColor = 'rgba(16,185,129,0.45)'
+              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(16,185,129,0.15)'
             }}
             onBlur={(e) => {
-              e.currentTarget.style.borderColor = '#262626'
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
               e.currentTarget.style.boxShadow = 'none'
             }}
           />
 
-          <div className="flex items-center gap-1.5 mt-5">
+          <div className="flex items-center gap-2 mt-6">
             {currentStep > 0 && (
               <button
                 onClick={() => setCurrentStep(currentStep - 1)}
-                className="h-8 px-3 rounded-[8px] text-[12px] font-medium transition-colors duration-150"
+                className="h-10 px-4 rounded-[12px] text-[12.5px] font-medium transition-all duration-200"
                 style={{
-                  color: '#9CA3AF',
-                  background: '#1C1C1C',
-                  border: '1px solid #262626',
+                  color: '#A1A1AA',
+                  background: 'transparent',
+                  border: '1px solid rgba(255,255,255,0.08)',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#222222'
-                  e.currentTarget.style.borderColor = '#333333'
-                  e.currentTarget.style.color = '#E5E7EB'
+                  e.currentTarget.style.color = '#FFFFFF'
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.16)'
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#1C1C1C'
-                  e.currentTarget.style.borderColor = '#262626'
-                  e.currentTarget.style.color = '#9CA3AF'
+                  e.currentTarget.style.color = '#A1A1AA'
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
                 }}
               >
                 Back
@@ -633,22 +635,24 @@ function DiscoveryPageInner() {
             <button
               onClick={handleNext}
               disabled={!isOptional && !answers[currentQ.key]?.trim()}
-              className="h-8 px-3.5 rounded-[8px] text-[12px] font-semibold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="h-10 px-5 rounded-[12px] text-[12.5px] font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
                 background: '#10B981',
-                color: '#052E1E',
-                border: '1px solid #10B981',
-                letterSpacing: '-0.005em',
+                color: '#06221B',
+                border: '1px solid rgba(16,185,129,0.6)',
+                boxShadow:
+                  '0 1px 0 rgba(255,255,255,0.16) inset, 0 8px 24px rgba(16,185,129,0.22)',
+                letterSpacing: '-0.01em',
               }}
               onMouseEnter={(e) => {
                 if (!e.currentTarget.disabled) {
                   e.currentTarget.style.background = '#34D399'
-                  e.currentTarget.style.borderColor = '#34D399'
+                  e.currentTarget.style.transform = 'translateY(-1px)'
                 }
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = '#10B981'
-                e.currentTarget.style.borderColor = '#10B981'
+                e.currentTarget.style.transform = 'translateY(0)'
               }}
             >
               {isLastStep ? 'Start discovery' : 'Continue'}
@@ -656,9 +660,9 @@ function DiscoveryPageInner() {
             {isOptional && !answers[currentQ.key]?.trim() && (
               <button
                 onClick={handleNext}
-                className="h-8 px-2 text-[11.5px] font-medium transition-colors"
+                className="text-[11px] font-medium transition-colors"
                 style={{ color: '#6B7280' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = '#9CA3AF')}
+                onMouseEnter={(e) => (e.currentTarget.style.color = '#A1A1AA')}
                 onMouseLeave={(e) => (e.currentTarget.style.color = '#6B7280')}
               >
                 Skip
@@ -666,7 +670,7 @@ function DiscoveryPageInner() {
             )}
             <span
               className="text-[10px] ml-auto font-medium"
-              style={{ color: '#4B5563', fontFamily: 'var(--font-mono), monospace' }}
+              style={{ color: '#3F3F46', fontFamily: 'var(--font-mono), monospace' }}
             >
               ⏎ Enter
             </span>
@@ -697,15 +701,16 @@ function DiscoveryPageInner() {
           </div>
         )}
 
-      {error && (
-        <div className="mt-4">
-          <GateErrorBanner
-            error={null}
-            fallbackMessage={error}
-            onDismiss={() => setError('')}
-          />
-        </div>
-      )}
+        {error && (
+          <div className="mt-4">
+            <GateErrorBanner
+              error={null}
+              fallbackMessage={error}
+              onDismiss={() => setError('')}
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

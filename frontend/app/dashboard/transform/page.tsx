@@ -1253,32 +1253,36 @@ function TransformPage() {
         {pipelineStep === 'complete' && multiPageResult ? (
           <TransformSummaryHeader result={multiPageResult} publishResult={publishResult} />
         ) : (
-          <div className="mb-6">
+          <div className="flex flex-col items-center text-center mb-10">
             <div
-              className="text-[10px] font-medium uppercase tracking-[0.12em] mb-1.5"
-              style={{ color: '#6B7280', fontFamily: 'var(--font-mono), monospace' }}
+              className="text-[11px] font-medium uppercase tracking-[0.14em] mb-3"
+              style={{ color: '#10B981', fontFamily: 'var(--font-mono), monospace' }}
             >
-              TRANSFORM
+              UI TRANSFORMATION
             </div>
             <h1
-              className="text-[22px] font-semibold leading-[1.15] mb-1"
-              style={{ letterSpacing: '-0.018em', color: '#E5E7EB' }}
+              className="text-[40px] sm:text-[44px] font-semibold text-white leading-[1.02] mb-3"
+              style={{ letterSpacing: '-0.03em' }}
             >
               Rebuild the UI. Keep the logic.
             </h1>
-            <div className="flex items-center gap-3 mt-2">
+            <p className="text-[14px] max-w-[520px]" style={{ color: '#A1A1AA' }}>
+              Reform analyses every page in your repo, scores the weak ones, and rewrites
+              them with the patterns your competitors already ship.
+            </p>
+            <div className="flex items-center gap-2 mt-6">
               <div
-                className="flex items-center gap-1.5 h-6 px-2 rounded-[6px]"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full"
                 style={{
-                  background: '#161616',
-                  border: '1px solid #262626',
+                  background: 'rgba(16,185,129,0.06)',
+                  border: '1px solid rgba(16,185,129,0.2)',
                 }}
               >
                 <span
-                  className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                  style={{ background: '#10B981', boxShadow: '0 0 6px rgba(16,185,129,0.6)' }}
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ background: '#10B981', boxShadow: '0 0 8px rgba(16,185,129,0.5)' }}
                 />
-                <span className="text-[11px] font-medium" style={{ color: '#9CA3AF' }}>
+                <span className="text-[11px] font-medium" style={{ color: 'rgba(134,239,172,0.9)' }}>
                   {pipelineStep === 'idle' ? 'Ready' : 'Processing'}
                 </span>
               </div>
@@ -1286,7 +1290,7 @@ function TransformPage() {
                 className="text-[11px]"
                 style={{ color: '#6B7280', fontFamily: 'var(--font-mono), monospace' }}
               >
-                {repoName || `${analysis?.sources?.length || 0} sources`}
+                {repoName || `${analysis?.sources?.length || 0} sources analyzed`}
               </span>
             </div>
           </div>
