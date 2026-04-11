@@ -34,6 +34,10 @@ interface AnalyticsData {
     total_time_minutes: number
     avg_session_seconds: number
   }
+  active: {
+    count: number
+    paths: Record<string, number>
+  }
 }
 
 const PASSWORD = 'password123'
@@ -637,6 +641,68 @@ export default function AnalyticsPage() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
+
+            {/* ── Active Now ────────────────────────────────── */}
+            <section>
+              <div style={{
+                ...card,
+                padding: '28px 24px',
+                position: 'relative',
+                overflow: 'hidden',
+                borderColor: data.active.count > 0 ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
+              }}>
+                {data.active.count > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: 1,
+                    background: 'linear-gradient(90deg, transparent, #22c55e, transparent)',
+                    opacity: 0.5,
+                  }} />
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <div style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      background: data.active.count > 0 ? '#22c55e' : 'rgba(255,255,255,0.15)',
+                      boxShadow: data.active.count > 0 ? '0 0 12px rgba(34,197,94,0.5), 0 0 24px rgba(34,197,94,0.2)' : 'none',
+                      animation: data.active.count > 0 ? 'pulse 2s ease-in-out infinite' : 'none',
+                    }} />
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                        <span style={{ fontSize: 32, fontWeight: 800, color: '#f5f7fb', letterSpacing: '-0.035em' }}>
+                          {data.active.count}
+                        </span>
+                        <span style={{ fontSize: 14, color: 'var(--color-text-secondary, rgba(235,241,255,0.64))' }}>
+                          {data.active.count === 1 ? 'user' : 'users'} online now
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  {Object.keys(data.active.paths).length > 0 && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      {Object.entries(data.active.paths).map(([path, count]) => (
+                        <span key={path} style={{
+                          fontSize: 11,
+                          fontFamily: 'var(--font-mono)',
+                          padding: '4px 10px',
+                          borderRadius: 8,
+                          background: 'rgba(34,197,94,0.06)',
+                          border: '1px solid rgba(34,197,94,0.12)',
+                          color: '#86efac',
+                        }}>
+                          {path} <span style={{ color: 'rgba(255,255,255,0.4)' }}>({count})</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
 
             {/* ── Users ─────────────────────────────────────── */}
             <section>

@@ -2,6 +2,7 @@
 Analytics routes — admin overview of users, usage, and site visits.
 """
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,12 +22,30 @@ from app.models import (
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 ANALYTICS_PASSWORD = "password123"
+ACTIVE_TIMEOUT_SECONDS = 60
+
+# In-memory heartbeat store: {session_id: {last_seen, path, github_user_id}}
+_active_sessions: dict[str, dict] = {}
+
+
+def _clean_stale_sessions() -> None:
+    """Remove sessions that haven't sent a heartbeat within the timeout."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=ACTIVE_TIMEOUT_SECONDS)
+    stale = [sid for sid, info in _active_sessions.items() if info["last_seen"] < cutoff]
+    for sid in stale:
+        del _active_sessions[sid]
 
 
 # ── Request schemas ─────────────────────────────────────────────────────
 
 class TrackVisitRequest(BaseModel):
     duration_seconds: int
+    github_user_id: str | None = None
+    path: str = "/"
+
+
+class HeartbeatRequest(BaseModel):
+    session_id: str
     github_user_id: str | None = None
     path: str = "/"
 
@@ -148,6 +167,14 @@ async def analytics_overview(
         select(func.avg(SiteVisit.duration_seconds))
     )).scalar()
 
+    # ── Active users (in-memory heartbeats) ─────────────────────────────
+    _clean_stale_sessions()
+    active_now = len(_active_sessions)
+    active_paths: dict[str, int] = {}
+    for info in _active_sessions.values():
+        p = info["path"]
+        active_paths[p] = active_paths.get(p, 0) + 1
+
     return {
         "users": {
             "total": total_users,
@@ -173,7 +200,22 @@ async def analytics_overview(
             "total_time_minutes": round(total_time_minutes, 1),
             "avg_session_seconds": round(avg_session, 1) if avg_session else 0,
         },
+        "active": {
+            "count": active_now,
+            "paths": active_paths,
+        },
     }
+
+
+@router.post("/heartbeat")
+async def heartbeat(body: HeartbeatRequest):
+    """Register a heartbeat from an active user session."""
+    _active_sessions[body.session_id] = {
+        "last_seen": datetime.now(timezone.utc),
+        "path": body.path,
+        "github_user_id": body.github_user_id,
+    }
+    return {"ok": True}
 
 
 @router.post("/track-visit")
