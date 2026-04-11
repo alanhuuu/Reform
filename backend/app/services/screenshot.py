@@ -43,7 +43,11 @@ async def take_screenshot_b64(url: str) -> str:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page(viewport={"width": 1440, "height": 900})
         try:
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            # domcontentloaded + settle wait instead of networkidle: many
+            # dev-mode apps keep sockets open (HMR, analytics, long-poll), so
+            # networkidle routinely waits the full 30s on perfectly healthy
+            # pages. The 2s settle below covers everything we actually need.
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(2000)
 
             # Check if the page is blank (white/empty body)
@@ -112,7 +116,10 @@ async def take_screenshot_b64_with_error_check(url: str) -> tuple[str, bool]:
         page.on("pageerror", _on_page_error)
 
         try:
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            # See take_screenshot_b64 for rationale — domcontentloaded + a
+            # deliberate settle wait is dramatically faster and more reliable
+            # than networkidle on dev servers with open HMR/WS connections.
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             # Give the dev server time to surface the overlay after HMR.
             await page.wait_for_timeout(2500)
 
