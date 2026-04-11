@@ -51,6 +51,22 @@ def _is_pages_router_page(path: str) -> bool:
     return True
 
 
+_EXCLUDED_ROUTES = {
+    '/signin', '/signup', '/login', '/register', '/logout',
+    '/auth', '/callback', '/verify', '/reset-password', '/forgot-password',
+    '/settings', '/account', '/subscription', '/billing', '/checkout',
+    '/404', '/500', '/not-found',
+}
+
+_EXCLUDED_PREFIXES = ('/api/', '/auth/')
+
+
+def _is_excluded_route(route: str) -> bool:
+    if route in _EXCLUDED_ROUTES:
+        return True
+    return any(route.startswith(p) for p in _EXCLUDED_PREFIXES)
+
+
 def _segment_label(seg: str) -> str:
     """Title-case a segment, replacing - and _ with spaces."""
     return seg.replace('-', ' ').replace('_', ' ').title()
@@ -144,7 +160,7 @@ def get_repo_pages(
             continue
 
         label, route = result
-        if route not in seen_routes:
+        if route not in seen_routes and not _is_excluded_route(route):
             seen_routes.add(route)
             pages.append({"label": label, "route": route})
 
