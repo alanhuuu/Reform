@@ -467,6 +467,9 @@ export default function SimulationPage() {
   const [findings, setFindings] = useState<Finding[]>([])
   const [selectedFindingIds, setSelectedFindingIds] = useState<Set<string>>(new Set())
   const [previewZoom, setPreviewZoom] = useState(1)
+  const [siteUrl, setSiteUrl] = useState<string>(() => {
+    try { return sessionStorage.getItem('refineui_site_url') ?? '' } catch { return '' }
+  })
 
   const handleZoomChange = useCallback((next: number) => {
     setPreviewZoom(Math.max(0.25, Math.min(3, next)))
@@ -599,8 +602,13 @@ export default function SimulationPage() {
 
     setLoadingAnalysis(true)
 
-    const targetBase = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
-    const targetUrl = `${targetBase}${selectedScreen.route}`
+    const base = siteUrl.trim().replace(/\/$/, '')
+    if (!base) {
+      setAnalysisError('Enter your deployed site URL above before running analysis.')
+      setLoadingAnalysis(false)
+      return
+    }
+    const targetUrl = `${base}${selectedScreen.route}`
 
     const controller = new AbortController()
 
@@ -864,6 +872,29 @@ export default function SimulationPage() {
           style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
         >
           <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.4)' }}>
+                Site URL
+              </span>
+              <input
+                type="url"
+                value={siteUrl}
+                onChange={(e) => {
+                  setSiteUrl(e.target.value)
+                  try { sessionStorage.setItem('refineui_site_url', e.target.value) } catch { /* ignore */ }
+                }}
+                placeholder="https://yoursite.com"
+                className="rounded-xl py-1.5 text-xs font-medium outline-none"
+                style={{
+                  background: '#1c1a25',
+                  border: `1px solid ${!siteUrl.trim() ? 'rgba(239,68,68,0.35)' : 'rgba(74,68,85,0.3)'}`,
+                  color: 'rgba(230,224,240,0.85)',
+                  paddingLeft: '0.75rem',
+                  paddingRight: '0.75rem',
+                  width: 200,
+                }}
+              />
+            </div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.4)' }}>
                 Screen
