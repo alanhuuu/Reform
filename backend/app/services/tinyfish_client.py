@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 _CONCURRENCY_LIMIT = int(os.environ.get("TINYFISH_MAX_CONCURRENT", "10"))
 _semaphore: asyncio.Semaphore | None = None
 
+# Hard wall-clock ceiling for a single agent.run() call. The SDK-level
+# `timeout` on AsyncTinyFish is HTTP-layer — it does not abort a slow end-to-end
+# agent run. Without this cap we've seen individual sites take 10+ minutes,
+# holding the whole competitor batch hostage. On timeout we fall back to a
+# minimal stub so the rest of the analysis still completes.
+_PER_RUN_TIMEOUT = float(os.environ.get("TINYFISH_PER_RUN_TIMEOUT", "150"))
+
 
 def _get_semaphore() -> asyncio.Semaphore:
     global _semaphore
@@ -355,10 +362,21 @@ async def extract_site_data(url: str) -> dict:
         if waited_for > 0.5:
             logger.info("TinyFish: %s waited %.1fs for a slot", url, waited_for)
         try:
-            response = await client.agent.run(
-                url=url,
-                goal=SITE_EXTRACTION_GOAL,
+            response = await asyncio.wait_for(
+                client.agent.run(
+                    url=url,
+                    goal=SITE_EXTRACTION_GOAL,
+                ),
+                timeout=_PER_RUN_TIMEOUT,
             )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "TinyFish: %s exceeded %.0fs wall-clock cap — returning fallback",
+                url, _PER_RUN_TIMEOUT,
+            )
+            fallback = _normalize("", url)
+            # Deliberately do NOT cache — next run should get a fresh shot.
+            return {"url": url, "raw_analysis": fallback, "timed_out": True}
         except Exception as e:
             # TinyFish SDK errors often have empty str(), so include the
             # class name and repr so the log actually tells us something.

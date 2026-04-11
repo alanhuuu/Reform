@@ -10,6 +10,7 @@ export default function BeforeAfterShowcase({
   previewAvailable = true,
   previewUnavailableReason = '',
   afterPulse = false,
+  afterError = '',
 }: {
   beforeScreenshot?: string
   afterScreenshot?: string
@@ -17,6 +18,7 @@ export default function BeforeAfterShowcase({
   previewAvailable?: boolean
   previewUnavailableReason?: string
   afterPulse?: boolean
+  afterError?: string
 }) {
   const [view, setView] = useState<'split' | 'before' | 'after'>('split')
   const [fitWidth, setFitWidth] = useState(true)
@@ -88,11 +90,13 @@ export default function BeforeAfterShowcase({
     screenshot,
     accent = false,
     scrollRef,
+    errorMessage = '',
   }: {
     label: string
     screenshot?: string
     accent?: boolean
     scrollRef?: React.Ref<HTMLDivElement>
+    errorMessage?: string
   }) {
     return (
       <div className="flex flex-col gap-3 flex-1 min-w-0">
@@ -145,7 +149,28 @@ export default function BeforeAfterShowcase({
             className="overflow-y-auto reform-screenshot-scroll"
             style={{ background: '#0d0c16', height: '560px' }}
           >
-            {screenshot ? (
+            {errorMessage ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center px-8 max-w-sm">
+                  <div
+                    className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+                    style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                  </div>
+                  <p className="text-[13px] font-semibold mb-2" style={{ color: '#fbbf24' }}>
+                    Preview could not be generated
+                  </p>
+                  <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                    {errorMessage}
+                  </p>
+                </div>
+              </div>
+            ) : screenshot ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={`data:image/png;base64,${screenshot}`}
@@ -233,12 +258,12 @@ export default function BeforeAfterShowcase({
               </svg>
             </div>
           </div>
-          <ScreenshotFrame label="After" screenshot={afterScreenshot} accent scrollRef={afterScrollRef} />
+          <ScreenshotFrame label="After" screenshot={afterScreenshot} accent scrollRef={afterScrollRef} errorMessage={afterError} />
         </div>
       ) : view === 'before' ? (
         <ScreenshotFrame label="Before" screenshot={beforeScreenshot} scrollRef={beforeScrollRef} />
       ) : (
-        <ScreenshotFrame label="After — Improved" screenshot={afterScreenshot} accent scrollRef={afterScrollRef} />
+        <ScreenshotFrame label="After — Improved" screenshot={afterScreenshot} accent scrollRef={afterScrollRef} errorMessage={afterError} />
       )}
 
       <p className="text-center text-[10px] mt-4" style={{ color: 'rgba(255,255,255,0.2)' }}>

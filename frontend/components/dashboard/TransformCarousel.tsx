@@ -188,6 +188,7 @@ export default function TransformCarousel({
               pageName={current.page_name}
               previewAvailable={true}
               afterPulse={afterPulse}
+              afterError={current.status === 'transformed' || current.status === 'weak' ? current.error : ''}
             />
           </div>
         )}

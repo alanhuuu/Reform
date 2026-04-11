@@ -17,6 +17,7 @@ from app.services.page_discovery import discover_pages
 from app.services.ui_evaluator import evaluate_all_pages
 from app.services.transformation_planner import plan_transformations
 from app.services.transform_validator import validate_transformation
+from app.services.syntax_validator import validate_transformed_code
 from app.services.multi_page_renderer import render_multi_page_previews
 from app.prompts.structural_transform_prompt import (
     build_structural_transform_prompt,
@@ -127,6 +128,10 @@ async def _transform_single_page(
 
     last_error = ""
     retries_used = 0
+    # Feedback from the previous attempt — surfaced to the model so the
+    # retry can fix the *specific* syntax problem rather than re-rolling
+    # blindly.
+    previous_syntax_error = ""
     # Track the best attempt across all retries so we never throw away a
     # genuine improvement just because the model couldn't beat the validator
     # on the last try.
@@ -146,6 +151,7 @@ async def _transform_single_page(
             is_retry=is_retry,
             attempt_number=attempt + 1,
             ux_lab_findings=ux_lab_findings,
+            previous_syntax_error=previous_syntax_error,
         )
 
         logger.info(
@@ -173,6 +179,29 @@ async def _transform_single_page(
             last_error = "Transformation returned empty code"
             retries_used = attempt
             continue
+
+        # Syntax check FIRST — catches Python-style tuples, f-strings,
+        # unbalanced braces, and other Claude slip-ups before we waste a
+        # dev-server render on code that will crash at runtime.
+        syntax_ok, syntax_error = validate_transformed_code(updated_code)
+        if not syntax_ok:
+            logger.warning(
+                "Syntax validation failed for %s on attempt %d: %s",
+                page_path, attempt + 1, syntax_error,
+            )
+            last_error = f"Syntax error in generated code: {syntax_error}"
+            previous_syntax_error = syntax_error
+            retries_used = attempt + 1
+            if attempt < MAX_TRANSFORM_RETRIES:
+                continue
+            # Out of retries with no parseable code — fall through so the
+            # final "all retries exhausted" block can return best_attempt
+            # or a hard error.
+            continue
+
+        # Clear the feedback once we get a syntactically valid attempt —
+        # future retries (if any) are about structural validation, not syntax.
+        previous_syntax_error = ""
 
         # Validate: is this a structural change or just cosmetic?
         validation = validate_transformation(page_code, updated_code)

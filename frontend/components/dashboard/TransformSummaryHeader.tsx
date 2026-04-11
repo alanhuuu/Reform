@@ -1,19 +1,36 @@
 'use client'
 
+import { useState } from 'react'
 import type { MultiPageTransformResult } from './TransformTypes'
 
 export default function TransformSummaryHeader({
   result,
   commitResult,
   publishResult,
+  onRegenerate,
 }: {
   result: MultiPageTransformResult
   commitResult?: { sha: string; url: string } | null
   publishResult?: { branch_name: string; branch_url: string; files_changed: string[] } | null
+  onRegenerate?: () => void | Promise<void>
 }) {
+  const [regenerating, setRegenerating] = useState(false)
   const improved = result.pages.filter(p => p.status === 'transformed')
   const skipped = result.pages.filter(p => p.status === 'high_quality')
   const errors = result.pages.filter(p => p.status === 'error')
+  const hasPreviewErrors = result.pages.some(
+    p => (p.status === 'transformed' || p.status === 'weak') && !!p.error,
+  )
+
+  async function handleClick() {
+    if (!onRegenerate || regenerating) return
+    setRegenerating(true)
+    try {
+      await onRegenerate()
+    } finally {
+      setRegenerating(false)
+    }
+  }
 
   const stats = [
     { label: 'Pages Found', value: result.total_pages_found, color: '#ffffff' },
@@ -40,6 +57,38 @@ export default function TransformSummaryHeader({
             </span>
           </div>
           <span className="text-[12px] font-mono" style={{ color: 'rgba(255,255,255,0.25)' }}>{result.repo_name}</span>
+          {onRegenerate && (
+            <button
+              onClick={handleClick}
+              disabled={regenerating}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                background: hasPreviewErrors ? 'rgba(245,158,11,0.1)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${hasPreviewErrors ? 'rgba(245,158,11,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                color: hasPreviewErrors ? '#fbbf24' : 'rgba(255,255,255,0.7)',
+              }}
+              title="Clear cache and re-run the pipeline from scratch"
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={regenerating ? { animation: 'spin 1s linear infinite' } : undefined}
+              >
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+              <span className="text-[11px] font-medium">
+                {regenerating ? 'Regenerating…' : hasPreviewErrors ? 'Regenerate (errors detected)' : 'Regenerate'}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 

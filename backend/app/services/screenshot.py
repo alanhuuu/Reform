@@ -57,8 +57,33 @@ async def take_screenshot_b64(url: str) -> str:
             await browser.close()
 
 
+_ERROR_SIGNALS = (
+    "Build Error",
+    "Failed to compile",
+    "Syntax Error",
+    "SyntaxError",
+    "Unexpected token",
+    "Module not found",
+    "Cannot find module",
+    "Unhandled Runtime Error",
+    "Application error",
+    "Internal Server Error",
+    "TypeError:",
+    "ReferenceError:",
+)
+
+
 async def take_screenshot_b64_with_error_check(url: str) -> tuple[str, bool]:
     """Take a screenshot and check if the page shows a build/runtime error.
+
+    Next.js renders its dev error overlay inside a `<nextjs-portal>` web
+    component that uses a *closed* shadow root — `inner_text('body')` cannot
+    see the overlay text, so we combine four signals:
+
+      1. Browser console errors (pageerror + console.error listeners).
+      2. Playwright text locators, which pierce most shadow roots.
+      3. Direct body innerText (for non-overlay runtime errors).
+      4. Document title (Next.js sets it to "Build Error" on compile failure).
 
     Returns (base64_screenshot, has_error).
     """
@@ -67,40 +92,76 @@ async def take_screenshot_b64_with_error_check(url: str) -> tuple[str, bool]:
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page(viewport={"width": 1440, "height": 900})
-        try:
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            await page.wait_for_timeout(1500)
 
-            # Check for common error indicators in the page
-            has_error = False
+        console_errors: list[str] = []
+
+        def _on_console(msg):
             try:
-                page_text = await page.inner_text("body")
-                error_signals = [
-                    "Build Error",
-                    "Failed to compile",
-                    "Syntax Error",
-                    "SyntaxError",
-                    "Unexpected token",
-                    "Module not found",
-                    "Cannot find module",
-                    "Unhandled Runtime Error",
-                    "Application error",
-                    "Internal Server Error",
-                    "TypeError:",
-                    "ReferenceError:",
-                ]
-                for signal in error_signals:
-                    if signal in page_text:
-                        logger.warning("Error detected in page: '%s'", signal)
-                        has_error = True
-                        break
+                if msg.type == "error":
+                    console_errors.append(msg.text or "")
             except Exception:
                 pass
+
+        def _on_page_error(err):
+            try:
+                console_errors.append(str(err))
+            except Exception:
+                pass
+
+        page.on("console", _on_console)
+        page.on("pageerror", _on_page_error)
+
+        try:
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            # Give the dev server time to surface the overlay after HMR.
+            await page.wait_for_timeout(2500)
+
+            has_error = await _detect_dev_overlay_error(page, console_errors)
 
             screenshot = await page.screenshot(type="png", full_page=True)
             return base64.b64encode(screenshot).decode("utf-8"), has_error
         finally:
             await browser.close()
+
+
+async def _detect_dev_overlay_error(page, console_errors: list[str]) -> bool:
+    """Return True if the page shows a Next.js / Vite build or runtime error."""
+    # 1. Console errors captured during navigation — Next.js always logs
+    #    "Failed to compile" / "SyntaxError" to the browser console before
+    #    rendering the overlay, so this is the most reliable signal.
+    for text in console_errors:
+        if any(sig in text for sig in _ERROR_SIGNALS):
+            logger.warning("Build error detected via console: %s", text[:200])
+            return True
+
+    # 2. Playwright text locator — pierces open shadow roots and iframes.
+    for sig in _ERROR_SIGNALS:
+        try:
+            if await page.get_by_text(sig, exact=False).count() > 0:
+                logger.warning("Build error detected via text locator: '%s'", sig)
+                return True
+        except Exception:
+            pass
+
+    # 3. Document title — Next.js sets this on compilation failure.
+    try:
+        title = await page.title()
+        if title and any(sig in title for sig in _ERROR_SIGNALS):
+            logger.warning("Build error detected via document title: '%s'", title)
+            return True
+    except Exception:
+        pass
+
+    # 4. Last-resort body innerText.
+    try:
+        body_text = await page.inner_text("body")
+        if any(sig in body_text for sig in _ERROR_SIGNALS):
+            logger.warning("Build error detected via body innerText")
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 async def take_screenshot_with_css_b64(url: str, css_patch: str) -> str:

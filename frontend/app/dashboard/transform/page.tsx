@@ -60,16 +60,18 @@ const PIPELINE_STAGES = [
   { key: 'ingesting', label: 'Analyzing & transforming pages', duration: 240 },
 ]
 
-function PipelineProgress({ step, repoName, targetFile }: { step: PipelineStep; repoName: string; targetFile: string }) {
-  const [elapsed, setElapsed] = useState(0)
-  const startRef = useRef(Date.now())
-
-  useEffect(() => { startRef.current = Date.now(); setElapsed(0) }, [step])
+function PipelineProgress({ step, repoName, targetFile, startedAt }: { step: PipelineStep; repoName: string; targetFile: string; startedAt: number }) {
+  // Elapsed is derived from the persisted startedAt timestamp rather than
+  // component-mount time, so remounts (tab nav, route change) resume the
+  // real clock instead of snapping back to 0s.
+  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
 
   useEffect(() => {
-    const interval = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000)
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+    tick()
+    const interval = setInterval(tick, 1000)
     return () => clearInterval(interval)
-  }, [step])
+  }, [startedAt])
 
   const currentIdx = PIPELINE_STAGES.findIndex(s => s.key === step)
   const currentStage = PIPELINE_STAGES[currentIdx]
@@ -750,6 +752,24 @@ function TransformPage() {
     if (sessionStorage.getItem('refineui_transform')) return 'complete'
     return 'idle'
   })
+  // Persistent start timestamp for the progress timer. Survives unmount so
+  // navigating away mid-run and coming back resumes the real elapsed clock
+  // instead of snapping back to 0s. Stale timestamps (>15min old) are
+  // discarded on mount to protect against crashed/abandoned runs.
+  const [pipelineStartedAt, setPipelineStartedAt] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const raw = localStorage.getItem('refineui_pipeline_started_at')
+      if (!raw) return null
+      const ts = Number(raw)
+      if (!Number.isFinite(ts)) return null
+      if (Date.now() - ts > 15 * 60 * 1000) {
+        localStorage.removeItem('refineui_pipeline_started_at')
+        return null
+      }
+      return ts
+    } catch { return null }
+  })
   const [pipelineError, setPipelineError] = useState('')
   const [gateError, setGateError] = useState<GateErrorData | null>(null)
   const [ingestedFiles, setIngestedFiles] = useState<FileEntry[]>([])
@@ -783,6 +803,18 @@ function TransformPage() {
   const [reRendering, setReRendering] = useState(false)
   const [reRenderStatus, setReRenderStatus] = useState('')
 
+  // Clear the persisted start timestamp whenever the pipeline settles into
+  // a non-running state. Skip if a background promise is still attached —
+  // the rehydrate effect below is about to flip us back into 'ingesting'.
+  useEffect(() => {
+    if (pipelineStep !== 'idle' && pipelineStep !== 'complete') return
+    const hasBgPromise = typeof window !== 'undefined'
+      && !!(window as { __reformPipelinePromise?: unknown }).__reformPipelinePromise
+    if (hasBgPromise) return
+    setPipelineStartedAt(null)
+    try { localStorage.removeItem('refineui_pipeline_started_at') } catch { /* */ }
+  }, [pipelineStep])
+
   useEffect(() => {
     if (session?.accessToken && repos.length === 0 && pipelineStep === 'idle') {
       setLoadingRepos(true)
@@ -806,19 +838,31 @@ function TransformPage() {
     if (bgPromise && !alreadyCached) {
       autoStartedRef.current = true
       setPipelineStep('ingesting')
-      bgPromise.then((result) => {
-        const r = result as MultiPageTransformResult | null
-        if (r) {
-          setMultiPageResult(r)
-          setRepoName(r.repo_name || '')
-          setRepoBranch(r.branch || 'main')
-          setPipelineStep('complete')
-        } else {
+      bgPromise
+        .then((result) => {
+          const r = result as MultiPageTransformResult | null
+          if (r) {
+            setMultiPageResult(r)
+            setRepoName(r.repo_name || '')
+            setRepoBranch(r.branch || 'main')
+            setPipelineStep('complete')
+          } else {
+            autoStartedRef.current = false
+            setPipelineStep('idle')
+          }
+          delete (window as PipelineWindow).__reformPipelinePromise
+        })
+        .catch((e) => {
+          // Original runPipeline already handled its own error state on
+          // the (now-unmounted) prior component. Here we just fail soft:
+          // drop the promise and drop the user back to idle so they can retry.
+          console.warn('Background pipeline promise rejected:', e)
           autoStartedRef.current = false
           setPipelineStep('idle')
-        }
-        delete (window as PipelineWindow).__reformPipelinePromise
-      })
+          setPipelineStartedAt(null)
+          try { localStorage.removeItem('refineui_pipeline_started_at') } catch { /* */ }
+          delete (window as PipelineWindow).__reformPipelinePromise
+        })
       return
     }
 
@@ -945,7 +989,7 @@ function TransformPage() {
 
   const filteredRepos = repos.filter(r => r.full_name.toLowerCase().includes(repoSearch.toLowerCase()))
 
-  async function runPipeline(repo: GithubRepo) {
+  async function runPipeline(repo: GithubRepo, { forceFresh = false }: { forceFresh?: boolean } = {}) {
     setPipelineError(''); setGateError(null); setRepoName(repo.full_name); setRepoBranch(repo.default_branch || 'main')
     const branch = repo.default_branch || 'main'
 
@@ -971,7 +1015,8 @@ function TransformPage() {
 
     // ── Try cached run for this (user, repo, branch, commit). If the DB has
     // a complete run for the same commit SHA, load it and skip the pipeline.
-    if (headSha && session?.githubId) {
+    // Skip this lookup entirely when the caller asked for a forced regeneration.
+    if (!forceFresh && headSha && session?.githubId) {
       try {
         const cacheRes = await fetch(
           apiUrl(`/projects/latest-run?github_user_id=${encodeURIComponent(session.githubId)}`
@@ -1007,6 +1052,12 @@ function TransformPage() {
       } catch { /* non-fatal — fall through to fresh run */ }
     }
 
+    // Stamp a persistent start time so the progress timer resumes after
+    // tab-switches / component remounts instead of snapping back to 0s.
+    const pipelineStartTs = Date.now()
+    setPipelineStartedAt(pipelineStartTs)
+    try { localStorage.setItem('refineui_pipeline_started_at', String(pipelineStartTs)) } catch { /* */ }
+
     setPipelineStep('ingesting')
     try {
       let uxLabFindings: unknown[] | null = null
@@ -1018,26 +1069,52 @@ function TransformPage() {
         }
       } catch { /* ignore */ }
 
-      // Use the v2 multi-page pipeline — one call does everything
-      const res = await fetch(apiUrl('/transform-repo-v2'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          github_url: `https://github.com/${repo.full_name}`,
-          branch: repo.default_branch || 'main',
-          access_token: session?.accessToken || null,
-          design_intelligence: analysis || null,
-          user_intent: userIntent,
-          max_pages: 5,
-          github_user_id: session?.githubId,
-          ux_lab_findings: uxLabFindings,
-        }),
-      })
-      if (!res.ok) {
-        const { gate, message } = await parseResponseError(res)
-        if (gate) { setGateError(gate); setPipelineStep('idle'); return }
-        throw new Error(message || 'Transform failed')
+      // Kick off the pipeline as a window-scoped promise so a tab-switch or
+      // in-app navigation that unmounts this component can still rehydrate
+      // from the in-flight run via the mount effect above. The server-side
+      // pipeline runs to completion regardless of whether this tab stays
+      // mounted; we just need a handle to its result.
+      type PipelineWindow = Window & { __reformPipelinePromise?: Promise<MultiPageTransformResult | null> }
+      const pipelinePromise: Promise<MultiPageTransformResult | null> = (async () => {
+        const res = await fetch(apiUrl('/transform-repo-v2'), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            github_url: `https://github.com/${repo.full_name}`,
+            branch: repo.default_branch || 'main',
+            access_token: session?.accessToken || null,
+            design_intelligence: analysis || null,
+            user_intent: userIntent,
+            max_pages: 5,
+            github_user_id: session?.githubId,
+            ux_lab_findings: uxLabFindings,
+          }),
+        })
+        if (!res.ok) {
+          const { gate, message } = await parseResponseError(res)
+          const err = new Error(message || 'Transform failed') as Error & { __gate?: GateErrorData | null }
+          err.__gate = gate
+          throw err
+        }
+        return await res.json() as MultiPageTransformResult
+      })()
+      ;(window as PipelineWindow).__reformPipelinePromise = pipelinePromise
+
+      let result: MultiPageTransformResult
+      try {
+        const parsed = await pipelinePromise
+        if (!parsed) throw new Error('Transform returned no result')
+        result = parsed
+      } catch (e) {
+        const err = e as Error & { __gate?: GateErrorData | null }
+        if (err.__gate) { setGateError(err.__gate); setPipelineStep('idle'); return }
+        throw e
+      } finally {
+        // Only clear if still pointing at our promise — the rehydrate effect
+        // may have already cleared it after consuming the result.
+        if ((window as PipelineWindow).__reformPipelinePromise === pipelinePromise) {
+          delete (window as PipelineWindow).__reformPipelinePromise
+        }
       }
-      const result = await res.json()
 
       setMultiPageResult(result)
       setPipelineStep('complete')
@@ -1088,6 +1165,34 @@ function TransformPage() {
         setCommits(prev => [newCommit, ...prev])
       }
     } catch (e) { setPipelineError(e instanceof Error ? e.message : 'Transform failed'); setPipelineStep('idle') }
+  }
+
+  async function handleRegenerate() {
+    if (!repoName) return
+    // Clear every cache layer so the pipeline runs fresh.
+    sessionStorage.removeItem('refineui_transform')
+    sessionStorage.removeItem('refineui_ux_lab_findings')
+    setMultiPageResult(null)
+    setTransformResult(null)
+    setPublishResult(null)
+    autoStartedRef.current = true
+    setPipelineStep('idle')
+    // Reconstruct a minimal GithubRepo from the current state so runPipeline
+    // has what it needs; forceFresh bypasses the DB cache lookup.
+    await runPipeline(
+      {
+        id: 0,
+        full_name: repoName,
+        name: repoName.split('/')[1] || repoName,
+        private: false,
+        language: null,
+        updated_at: '',
+        default_branch: repoBranch || 'main',
+        homepage: null,
+        html_url: `https://github.com/${repoName}`,
+      },
+      { forceFresh: true },
+    )
   }
 
   async function handleAccept() {
@@ -1272,7 +1377,7 @@ function TransformPage() {
 
         {/* ── HEADER ── */}
         {pipelineStep === 'complete' && multiPageResult ? (
-          <TransformSummaryHeader result={multiPageResult} publishResult={publishResult} />
+          <TransformSummaryHeader result={multiPageResult} publishResult={publishResult} onRegenerate={handleRegenerate} />
         ) : (
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-white mb-3">UI Transformation</h1>
@@ -1339,7 +1444,7 @@ function TransformPage() {
 
         {/* ── PIPELINE PROGRESS ── */}
         {(pipelineStep === 'ingesting' || pipelineStep === 'analyzing' || pipelineStep === 'transforming') && (
-          <PipelineProgress step={pipelineStep} repoName={repoName} targetFile={selectedTarget} />
+          <PipelineProgress step={pipelineStep} repoName={repoName} targetFile={selectedTarget} startedAt={pipelineStartedAt ?? Date.now()} />
         )}
 
         {/* ── RE-RENDER PROGRESS BAR ── */}

@@ -8,6 +8,8 @@ import logging
 import os
 import shutil
 import tempfile
+import urllib.request
+import urllib.error
 
 from app.services.preview_renderer import (
     _find_free_port,
@@ -24,6 +26,37 @@ from app.services.preview_renderer import (
 from app.services.screenshot import take_screenshot_b64, take_screenshot_b64_with_error_check
 
 logger = logging.getLogger(__name__)
+
+_PREVIEW_ERROR_MESSAGE = (
+    "The transformed code contained a syntax error and could not be rendered. "
+    "Showing the original preview instead — try Refine Further to regenerate."
+)
+
+_HTTP_ERROR_MARKERS = (
+    "Build Error",
+    "Failed to compile",
+    "SyntaxError",
+    "Unexpected token",
+    "Module not found",
+    "__next_error__",
+)
+
+
+def _probe_url_for_build_error(url: str) -> bool:
+    """Fetch the raw HTML once and scan for dev-server error markers.
+
+    Runs in addition to the Playwright-based check because Next.js often
+    embeds the error in the initial HTML response even when the overlay
+    lives inside a closed shadow root.
+    """
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "reform-renderer/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read(200_000).decode("utf-8", errors="replace")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        logger.debug("HTTP probe failed for %s: %s", url, e)
+        return False
+    return any(marker in body for marker in _HTTP_ERROR_MARKERS)
 
 
 async def render_multi_page_previews(
@@ -144,16 +177,34 @@ async def render_multi_page_previews(
                 # Wait for HMR
                 await asyncio.sleep(4)
 
-                # Screenshot AFTER (with error detection)
+                # Screenshot AFTER (with error detection). We probe the URL
+                # first to catch build errors embedded in the raw HTML, then
+                # let Playwright's error-aware screenshot run as a second
+                # check. Either signal trips the fallback.
                 logger.info("Screenshotting AFTER: %s", preview_url)
+                preview_error = ""
                 try:
-                    after_b64, has_error = await take_screenshot_b64_with_error_check(preview_url)
-                    if has_error:
-                        logger.warning("AFTER screenshot shows build error for %s — using BEFORE", page_path)
+                    http_error = await asyncio.to_thread(_probe_url_for_build_error, preview_url)
+                    if http_error:
+                        logger.warning("HTTP probe detected build error for %s — skipping AFTER capture", page_path)
                         after_b64 = before_b64
+                        preview_error = _PREVIEW_ERROR_MESSAGE
+                    else:
+                        after_b64, has_error = await take_screenshot_b64_with_error_check(preview_url)
+                        if has_error:
+                            logger.warning("AFTER screenshot shows build error for %s — using BEFORE", page_path)
+                            after_b64 = before_b64
+                            preview_error = _PREVIEW_ERROR_MESSAGE
                 except Exception as e:
                     logger.warning("AFTER screenshot failed for %s: %s", page_path, e)
                     after_b64 = before_b64
+                    preview_error = _PREVIEW_ERROR_MESSAGE
+
+                # Defense in depth: if the AFTER image ended up byte-identical
+                # to the BEFORE (silent fallback somewhere upstream), surface
+                # it as a preview error so the UI can explain the emptiness.
+                if not preview_error and after_b64 and after_b64 == before_b64:
+                    preview_error = _PREVIEW_ERROR_MESSAGE
 
                 # Restore original file (so next page's BEFORE is clean)
                 with open(target_full_path, "w", encoding="utf-8") as f:
@@ -165,7 +216,7 @@ async def render_multi_page_previews(
                 results[page_path] = {
                     "before_screenshot": before_b64,
                     "after_screenshot": after_b64,
-                    "preview_error": "",
+                    "preview_error": preview_error,
                 }
 
             except Exception as e:
