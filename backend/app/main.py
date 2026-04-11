@@ -44,7 +44,12 @@ async def startup():
     logging.getLogger(__name__).info("Database tables created/verified")
 
 # CORS: allow origins from env or sensible defaults
-_default_origins = "http://localhost:3000,https://refineui-chi.vercel.app"
+_default_origins = (
+    "http://localhost:3000,"
+    "https://refineui-chi.vercel.app,"
+    "https://reformui.ca,"
+    "https://www.reformui.ca"
+)
 _allowed_origins = os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",")
 
 app.add_middleware(
