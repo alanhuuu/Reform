@@ -27,10 +27,15 @@ from app.services.screenshot import take_screenshot_b64, take_screenshot_b64_wit
 
 logger = logging.getLogger(__name__)
 
-_PREVIEW_ERROR_MESSAGE = (
-    "The transformed code contained a syntax error and could not be rendered. "
-    "Showing the original preview instead — try Refine Further to regenerate."
-)
+# Intentionally empty. With the esbuild-backed JSX parser validation and
+# bumped retry count upstream, real preview-render failures should be rare.
+# When they do happen, we silently fall back to showing the BEFORE screenshot
+# in the AFTER pane rather than surfacing a scary amber error banner — the
+# user already has a retry affordance via the regenerate button. Keeping the
+# constant around (rather than deleting it) preserves the assignment-shaped
+# flow below so a future change can reinstate a soft message without
+# rewiring every call site.
+_PREVIEW_ERROR_MESSAGE = ""
 
 _HTTP_ERROR_MARKERS = (
     "Build Error",

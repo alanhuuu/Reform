@@ -18,6 +18,7 @@ from app.services.ui_evaluator import evaluate_all_pages
 from app.services.transformation_planner import plan_transformations
 from app.services.transform_validator import validate_transformation
 from app.services.syntax_validator import validate_transformed_code
+from app.services.js_parser_validator import validate_jsx_parseable
 from app.services.multi_page_renderer import render_multi_page_previews
 from app.prompts.structural_transform_prompt import (
     build_structural_transform_prompt,
@@ -26,10 +27,12 @@ from app.prompts.structural_transform_prompt import (
 
 logger = logging.getLogger(__name__)
 
-# Maximum retries when a transform is detected as cosmetic-only.
-# Total attempts = 1 + MAX_TRANSFORM_RETRIES. Each retry escalates the
-# pressure on the model (see structural_transform_prompt.is_retry).
-MAX_TRANSFORM_RETRIES = 2
+# Maximum retries when a transform is detected as cosmetic-only or
+# produces code that fails syntax / parser validation. Total attempts =
+# 1 + MAX_TRANSFORM_RETRIES. Each retry escalates the pressure on the
+# model (see structural_transform_prompt.is_retry). Bumped from 2 → 4
+# to give the parser-validator feedback loop room to converge.
+MAX_TRANSFORM_RETRIES = 4
 
 
 def _extract_json(text: str) -> dict:
@@ -180,13 +183,13 @@ async def _transform_single_page(
             retries_used = attempt
             continue
 
-        # Syntax check FIRST — catches Python-style tuples, f-strings,
-        # unbalanced braces, and other Claude slip-ups before we waste a
-        # dev-server render on code that will crash at runtime.
+        # Layer 1: regex smell-test — catches Python-style tuples, f-strings,
+        # unbalanced braces, and other obvious Claude slip-ups before we even
+        # bother invoking esbuild or the dev server.
         syntax_ok, syntax_error = validate_transformed_code(updated_code)
         if not syntax_ok:
             logger.warning(
-                "Syntax validation failed for %s on attempt %d: %s",
+                "Regex syntax validation failed for %s on attempt %d: %s",
                 page_path, attempt + 1, syntax_error,
             )
             last_error = f"Syntax error in generated code: {syntax_error}"
@@ -199,8 +202,25 @@ async def _transform_single_page(
             # or a hard error.
             continue
 
-        # Clear the feedback once we get a syntactically valid attempt —
-        # future retries (if any) are about structural validation, not syntax.
+        # Layer 2: real TSX parser — esbuild catches JSX/TS errors the regex
+        # can't see (malformed tags, unterminated strings inside braces, bad
+        # TS generics). Feeds its own line-numbered error back as retry
+        # feedback, same channel as the regex validator.
+        parse_ok, parse_error = validate_jsx_parseable(updated_code)
+        if not parse_ok:
+            logger.warning(
+                "JSX parser validation failed for %s on attempt %d: %s",
+                page_path, attempt + 1, parse_error,
+            )
+            last_error = f"JSX/TSX parse error: {parse_error}"
+            previous_syntax_error = parse_error
+            retries_used = attempt + 1
+            if attempt < MAX_TRANSFORM_RETRIES:
+                continue
+            continue
+
+        # Clear the feedback once we get a parseable attempt — future retries
+        # (if any) are about structural validation, not syntax.
         previous_syntax_error = ""
 
         # Validate: is this a structural change or just cosmetic?

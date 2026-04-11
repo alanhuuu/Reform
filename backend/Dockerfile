@@ -15,6 +15,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
   && apt-get install -y nodejs \
   && rm -rf /var/lib/apt/lists/*
 
+# esbuild is used by app/services/js_parser_validator.py to parse-check
+# model-generated TSX before we hand it to the Next.js dev server. Global
+# install keeps it on PATH as a standalone binary.
+RUN npm install -g esbuild@0.25.0
+
 WORKDIR /app
 
 COPY requirements.txt .
