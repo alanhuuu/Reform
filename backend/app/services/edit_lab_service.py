@@ -75,6 +75,10 @@ SECTION_DETECTION_SCRIPT = r"""
     const paragraph = paragraphEl ? (paragraphEl.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160) : '';
     const fullText = ((el.textContent || '').trim().replace(/\s+/g, ' ')).slice(0, 280);
 
+    const classesRaw = (el.className && el.className.toString ? el.className.toString() : '').trim().slice(0, 240);
+    const role = el.getAttribute('role') || '';
+    const elementId = el.getAttribute('id') || '';
+
     sections.push({
       id: 'section-' + idx,
       tag,
@@ -83,6 +87,10 @@ SECTION_DETECTION_SCRIPT = r"""
       heading,
       paragraph,
       text: fullText,
+      classes: classesRaw,
+      role,
+      aria_label: ariaLabel,
+      element_id: elementId,
     });
   });
 
@@ -103,6 +111,43 @@ _SKIP_DIRS = {"node_modules", ".next", "dist", "build", ".git", "out", "coverage
 # Section → file mapping scoring thresholds
 _MIN_ACCEPT_SCORE = 40
 
+# Tailwind / utility class prefixes we never treat as meaningful component hints.
+_UTIL_CLASS_PREFIXES = (
+    "p-", "m-", "px-", "py-", "mx-", "my-", "pt-", "pb-", "pl-", "pr-",
+    "mt-", "mb-", "ml-", "mr-", "w-", "h-", "min-", "max-", "text-",
+    "bg-", "border-", "rounded-", "gap-", "space-", "flex-", "grid-",
+    "items-", "justify-", "content-", "place-", "self-", "order-",
+    "col-", "row-", "hover:", "focus:", "active:", "group-", "sm:",
+    "md:", "lg:", "xl:", "2xl:", "dark:", "ring-", "shadow-", "opacity-",
+    "z-", "overflow-", "top-", "bottom-", "left-", "right-", "inset-",
+    "scale-", "rotate-", "translate-", "duration-", "ease-", "transition-",
+)
+_UTIL_CLASS_EXACT = {
+    "flex", "grid", "block", "inline", "inline-block", "hidden", "visible",
+    "absolute", "relative", "fixed", "sticky", "static", "container",
+    "mono", "italic", "underline", "uppercase", "lowercase", "truncate",
+    "whitespace-nowrap", "text-left", "text-center", "text-right",
+    "cursor-pointer", "cursor-default",
+}
+
+
+def _distinctive_classes(classes: str) -> list[str]:
+    """Keep only component/BEM-ish class names, drop Tailwind utilities."""
+    if not classes:
+        return []
+    out: list[str] = []
+    for c in classes.split():
+        if not c or len(c) < 4:
+            continue
+        if c in _UTIL_CLASS_EXACT:
+            continue
+        if any(c.startswith(p) for p in _UTIL_CLASS_PREFIXES):
+            continue
+        out.append(c)
+        if len(out) >= 6:
+            break
+    return out
+
 
 def _score_file_for_section(
     rel_path: str,
@@ -110,6 +155,9 @@ def _score_file_for_section(
     heading: str,
     paragraph: str,
     section_label: str,
+    classes: str = "",
+    role: str = "",
+    aria_label: str = "",
 ) -> int:
     """Higher = better match. Returns 0 if no signal."""
     if not content:
@@ -144,6 +192,28 @@ def _score_file_for_section(
                     or f'"{label_slug}"' in lower):
                 score += 15
 
+    # Distinctive class names — strong signal that this file renders the section
+    for cls in _distinctive_classes(classes):
+        cl = cls.lower()
+        if cl in lower:
+            score += 20
+            if (f'classname="{cl}' in lower or f"classname='{cl}" in lower
+                    or f'"{cl}"' in lower or f"'{cl}'" in lower):
+                score += 30
+        # Filename match for component-like class names
+        if cl in rel_path.lower():
+            score += 15
+
+    if aria_label and len(aria_label) >= 4:
+        al = aria_label.lower()
+        if al in lower:
+            score += 45
+
+    if role and len(role) >= 4 and role not in ("button", "link", "text"):
+        rl = role.lower()
+        if f'role="{rl}"' in lower or f"role='{rl}'" in lower:
+            score += 30
+
     # Penalize files that are clearly not source components
     if rel_path.endswith((".test.tsx", ".test.jsx", ".test.ts", ".test.js",
                          ".stories.tsx", ".stories.jsx", ".spec.ts", ".spec.tsx")):
@@ -157,10 +227,14 @@ def _find_best_source_file(
     heading: str,
     paragraph: str,
     section_label: str,
+    classes: str,
+    role: str,
+    aria_label: str,
     fallback: Optional[str],
 ) -> Optional[str]:
     """Rank candidate source files and return the highest-scoring one."""
-    if not any([heading, paragraph, section_label]):
+    has_any_signal = any([heading, paragraph, section_label, classes, role, aria_label])
+    if not has_any_signal:
         return fallback
 
     best_score = 0
@@ -179,10 +253,12 @@ def _find_best_source_file(
             except Exception:
                 continue
             rel = os.path.relpath(fpath, frontend_dir)
-            score = _score_file_for_section(rel, content, heading, paragraph, section_label)
+            score = _score_file_for_section(
+                rel, content, heading, paragraph, section_label,
+                classes=classes, role=role, aria_label=aria_label,
+            )
             if score <= 0:
                 continue
-            # Higher score wins; on tie, prefer shorter path (more likely top-level component)
             if score > best_score or (score == best_score and (best_path_len == 0 or len(rel) < best_path_len)):
                 best_score = score
                 best_path = rel
@@ -205,6 +281,9 @@ def _assign_source_files(
             heading=sec.get("heading") or "",
             paragraph=sec.get("paragraph") or "",
             section_label=sec.get("label") or "",
+            classes=sec.get("classes") or "",
+            role=sec.get("role") or "",
+            aria_label=sec.get("aria_label") or "",
             fallback=fallback,
         )
 
@@ -390,11 +469,24 @@ def _build_scoped_prompt(
     section_heading: str,
     section_paragraph: str,
     section_text: str,
+    section_tag: str,
+    section_classes: str,
+    section_role: str,
+    section_aria_label: str,
     user_prompt: str,
 ) -> str:
     identifier_lines = [f'- Label: "{section_label}"']
+    if section_tag:
+        identifier_lines.append(f"- HTML tag: <{section_tag}>")
+    if section_aria_label:
+        identifier_lines.append(f'- aria-label: "{section_aria_label}"')
+    if section_role:
+        identifier_lines.append(f'- role: "{section_role}"')
+    distinctive = _distinctive_classes(section_classes)
+    if distinctive:
+        identifier_lines.append(f'- CSS class names to match: {" ".join(distinctive)}')
     if section_heading:
-        identifier_lines.append(f'- Heading: "{section_heading}"')
+        identifier_lines.append(f'- Heading text: "{section_heading}"')
     if section_paragraph:
         identifier_lines.append(f'- Paragraph snippet: "{section_paragraph}"')
     if section_text and not (section_heading or section_paragraph):
@@ -406,19 +498,25 @@ def _build_scoped_prompt(
 ## File to modify
 {current_code}
 
-## The user has selected ONE section of the rendered page
-Identify the JSX that renders the section described below (match by visible text content):
+## The user has selected ONE region of the rendered page
+Identify the JSX that renders the element described below. Match by ANY available signal — tag, class names, aria-label, role, or visible text:
 {identifier}
 
-## User's requested change for that section
+## User's requested change for that region
 "{user_prompt}"
 
 ---
 
+## HOW TO SCOPE THE EDIT
+- Your primary target is the JSX element identified above.
+- If the user's change is inherently container-level — background color, padding, margin, border, corner radius, layout direction, gap, alignment — you MAY modify the className or style of the identified element and its DIRECT wrapping container (the nearest enclosing `<div>`, `<nav>`, `<aside>`, `<section>`, `<main>`, `<header>`, or `<footer>` in this file). That wrapping container edit is allowed even when it also contains unrelated siblings, AS LONG AS the siblings themselves are not modified.
+- If the user's change is content-level — copy, headings, button labels, spacing between children of the target — modify ONLY the JSX inside the identified element.
+- Never modify JSX that sits outside the identified element's direct wrapping container. Never modify imports or exports unless the change strictly requires it (e.g. a new Tailwind class is added — that needs no import).
+
 ## CRITICAL RULES
-1. Modify ONLY the JSX that renders the identified section. Leave every other section of this file untouched.
-2. The change MUST be visibly different when the page re-renders. Do not return an unchanged file.
-3. If the section's JSX is rendered via a child component imported from another file, apply the user's change by restructuring the usage in THIS file (replace the component with inline JSX that achieves the change) rather than editing any other file.
+1. The change MUST be visibly different when the page re-renders. Do not return an unchanged file.
+2. If the element's JSX is imported from another file (i.e. this file only renders `<SomeComponent />`), replace that usage inline in THIS file with JSX that achieves the user's change rather than editing any other file. Inline JSX beats unreachable edits.
+3. When the user mentions a color, background, border, or spacing, apply it via Tailwind classes (e.g. `bg-white`, `border-gray-200`, `p-6`, `rounded-lg`) if the surrounding code uses Tailwind; otherwise match the styling convention already present in the file (inline style, CSS modules, etc.).
 4. Preserve all imports, exports, hooks, state, event handlers, and unrelated markup.
 5. Return the COMPLETE updated file — not a diff, not a snippet.
 6. Return ONLY code — no explanation, no markdown fences, no commentary.
@@ -492,6 +590,10 @@ async def apply_section_edit(
     section_paragraph: str,
     section_text: str,
     user_prompt: str,
+    section_tag: str = "",
+    section_classes: str = "",
+    section_role: str = "",
+    section_aria_label: str = "",
 ) -> dict:
     """Patch the target file in the live session workspace, trigger HMR, re-screenshot."""
     if not session_id:
@@ -519,11 +621,15 @@ async def apply_section_edit(
 
         prompt = _build_scoped_prompt(
             current_code,
-            section_label,
-            section_heading,
-            section_paragraph,
-            section_text,
-            user_prompt,
+            section_label=section_label,
+            section_heading=section_heading,
+            section_paragraph=section_paragraph,
+            section_text=section_text,
+            section_tag=section_tag,
+            section_classes=section_classes,
+            section_role=section_role,
+            section_aria_label=section_aria_label,
+            user_prompt=user_prompt,
         )
 
         client = anthropic.Anthropic(api_key=api_key)

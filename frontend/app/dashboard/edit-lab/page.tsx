@@ -20,6 +20,10 @@ interface Section {
   heading: string
   paragraph: string
   text: string
+  classes?: string
+  role?: string
+  aria_label?: string
+  element_id?: string
   source_file?: string | null
 }
 
@@ -90,6 +94,10 @@ interface EditSelection {
   heading: string
   paragraph: string
   text: string
+  tag: string
+  classes: string
+  role: string
+  aria_label: string
   rect: Rect
   source_file: string | null
   memberIds: string[]
@@ -132,6 +140,10 @@ function sectionToSelection(s: Section): EditSelection {
     heading: s.heading,
     paragraph: s.paragraph,
     text: s.text,
+    tag: s.tag || '',
+    classes: s.classes || '',
+    role: s.role || '',
+    aria_label: s.aria_label || '',
     rect: { ...s.rect },
     source_file: s.source_file || null,
     memberIds: [s.id],
@@ -151,6 +163,10 @@ function buildRectSelection(
       heading: '',
       paragraph: '',
       text: '',
+      tag: '',
+      classes: '',
+      role: '',
+      aria_label: '',
       rect,
       source_file: rootFile,
       memberIds: [],
@@ -181,6 +197,21 @@ function buildRectSelection(
     .join(' ')
     .slice(0, 400)
 
+  const classSet = new Set<string>()
+  for (const s of included) {
+    if (s.classes) {
+      for (const c of s.classes.split(/\s+/)) {
+        if (c) classSet.add(c)
+        if (classSet.size >= 12) break
+      }
+    }
+    if (classSet.size >= 12) break
+  }
+  const combinedClasses = Array.from(classSet).join(' ')
+  const firstRole = included.find((s) => s.role)?.role || ''
+  const firstAriaLabel = included.find((s) => s.aria_label)?.aria_label || ''
+  const primaryTag = included[0]?.tag || ''
+
   const fileCounts: Record<string, number> = {}
   for (const s of included) {
     if (s.source_file) fileCounts[s.source_file] = (fileCounts[s.source_file] || 0) + 1
@@ -194,6 +225,10 @@ function buildRectSelection(
     heading,
     paragraph,
     text,
+    tag: primaryTag,
+    classes: combinedClasses,
+    role: firstRole,
+    aria_label: firstAriaLabel,
     rect: unionRects(included.map((s) => s.rect)),
     source_file,
     memberIds: included.map((s) => s.id),
@@ -417,6 +452,10 @@ export default function EditLabPage() {
           section_heading: selection.heading,
           section_paragraph: selection.paragraph,
           section_text: selection.text,
+          section_tag: selection.tag,
+          section_classes: selection.classes,
+          section_role: selection.role,
+          section_aria_label: selection.aria_label,
           prompt: promptText.trim(),
         }),
       })

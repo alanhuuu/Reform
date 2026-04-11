@@ -39,6 +39,10 @@ class SectionPayload(BaseModel):
     heading: str = ""
     paragraph: str = ""
     text: str = ""
+    classes: str = ""
+    role: str = ""
+    aria_label: str = ""
+    element_id: str = ""
     source_file: str | None = None
 
 
@@ -124,6 +128,10 @@ class ApplyRequest(BaseModel):
     section_heading: str = ""
     section_paragraph: str = ""
     section_text: str = ""
+    section_tag: str = ""
+    section_classes: str = ""
+    section_role: str = ""
+    section_aria_label: str = ""
     prompt: str
 
 
@@ -150,6 +158,10 @@ async def apply_endpoint(req: ApplyRequest):
             section_heading=req.section_heading,
             section_paragraph=req.section_paragraph,
             section_text=req.section_text,
+            section_tag=req.section_tag,
+            section_classes=req.section_classes,
+            section_role=req.section_role,
+            section_aria_label=req.section_aria_label,
             user_prompt=req.prompt,
         )
         if result.get("error"):
