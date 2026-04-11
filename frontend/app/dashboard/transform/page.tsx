@@ -1173,13 +1173,53 @@ function TransformPage() {
             ux_lab_findings: uxLabFindings,
           }),
         })
+        // Non-2xx — gate errors (402/429) and pre-stream failures still
+        // come back as real HTTP errors, not stream messages.
         if (!res.ok) {
           const { gate, message } = await parseResponseError(res)
           const err = new Error(message || 'Transform failed') as Error & { __gate?: GateErrorData | null }
           err.__gate = gate
           throw err
         }
-        return await res.json() as MultiPageTransformResult
+        // NDJSON stream: `{type: "heartbeat"}` lines keep the socket warm
+        // across mobile carriers / proxies that would otherwise kill a
+        // 3-8 minute idle HTTPS connection (this was breaking the run for
+        // users on aggressive-NAT networks). The single `result` line is
+        // the real payload; any `error` line surfaces as a thrown Error.
+        if (!res.body) throw new Error('Transform returned no stream body')
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let finalResult: MultiPageTransformResult | null = null
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          let newlineIdx = buffer.indexOf('\n')
+          while (newlineIdx !== -1) {
+            const line = buffer.slice(0, newlineIdx).trim()
+            buffer = buffer.slice(newlineIdx + 1)
+            newlineIdx = buffer.indexOf('\n')
+            if (!line) continue
+            let msg: { type: string; data?: MultiPageTransformResult; detail?: string }
+            try {
+              msg = JSON.parse(line)
+            } catch {
+              console.warn('Skipping non-JSON stream line:', line.slice(0, 120))
+              continue
+            }
+            if (msg.type === 'heartbeat') continue
+            if (msg.type === 'error') {
+              throw new Error(msg.detail || 'Transform failed')
+            }
+            if (msg.type === 'result' && msg.data) {
+              finalResult = msg.data
+            }
+          }
+        }
+        if (!finalResult) throw new Error('Stream ended without a result')
+        return finalResult
       })()
       ;(window as PipelineWindow).__reformPipelinePromise = pipelinePromise
 
