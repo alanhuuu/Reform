@@ -12,9 +12,13 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@monaco-editor/react": "^4.7.0",
     "clsx": "^2.1.1",
     "elevenlabs": "^1.59.0",
+    "framer-motion": "^12.38.0",
     "gsap": "^3.14.2",
     "lucide-react": "^0.376.0",
     "next": "14.2.13",

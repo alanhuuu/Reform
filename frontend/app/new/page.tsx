@@ -25,6 +25,7 @@ interface GithubRepo {
   private: boolean
   language: string | null
   updated_at: string
+  default_branch: string
 }
 
 function GitHubIcon({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
@@ -234,7 +235,7 @@ export default function NewPage() {
                     {session && !loadingRepos && filteredRepos.map((repo) => (
                       <Link
                         key={repo.id}
-                        href={`/dashboard?repo=${encodeURIComponent(`https://github.com/${repo.full_name}`)}`}
+                        href={`/dashboard?repo=${encodeURIComponent(`https://github.com/${repo.full_name}`)}&branch=${encodeURIComponent(repo.default_branch || 'main')}`}
                         className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-white/[0.03]"
                         style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
                       >

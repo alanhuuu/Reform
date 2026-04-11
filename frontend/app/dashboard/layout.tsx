@@ -1,10 +1,10 @@
 'use client'
 
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { useEffect } from 'react'
 import { ProgressProvider, useProgress } from '@/components/dashboard/ProgressContext'
 import InteractiveBackground from '@/components/landing/InteractiveBackground'
 import ProjectsDrawer from '@/components/layout/ProjectsDrawer'
@@ -12,9 +12,23 @@ import AccountMenu from '@/components/layout/AccountMenu'
 
 const NAV_ITEMS = [
   { href: '/dashboard/discovery', label: 'Project Discovery' },
-  { href: '/dashboard/transform', label: 'UI Transformation' },
   { href: '/dashboard/simulation', label: 'UX Analysis' },
+  { href: '/dashboard/transform', label: 'UI Transformation' },
 ]
+
+type NavBounds = {
+  left: number
+  width: number
+  opacity: number
+}
+
+type NavMetric = {
+  href: string
+  left: number
+  width: number
+  center: number
+  disabled: boolean
+}
 
 function GlobalProgressBar() {
   const { state } = useProgress()
@@ -111,34 +125,12 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
               </div>
             </Link>
 
-            <nav className="hidden sm:flex items-center gap-1 rounded-2xl p-1" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-              {NAV_ITEMS.map((item) => {
-                const isActive = pathname === item.href
-                const isLocked = item.href === '/dashboard/discovery' && progressState.active
-                return isLocked ? (
-                  <div key={item.href} className="px-3 py-2 text-[12px] font-medium opacity-20" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                    {item.label}
-                  </div>
-                ) : (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className="px-3 py-2 rounded-xl text-[12px] font-medium transition-all duration-150"
-                    style={
-                      isActive
-                        ? {
-                            background: 'rgba(124,140,255,0.14)',
-                            color: 'white',
-                            boxShadow: 'inset 0 0 0 1px rgba(170,180,255,0.12)',
-                          }
-                        : { color: 'rgba(255,255,255,0.38)' }
-                    }
-                  >
-                    {item.label}
-                  </Link>
-                )
-              })}
-            </nav>
+            <DashboardNav
+              pathname={pathname}
+              progressActive={progressState.active}
+              className="relative hidden sm:flex items-center gap-1 rounded-[20px] p-1.5 overflow-hidden"
+              itemClassName="block px-4 py-2.5 rounded-2xl text-[12px] font-medium transition-colors duration-200 whitespace-nowrap"
+            />
           </div>
 
           <div className="flex items-center gap-3">
@@ -150,6 +142,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                 sessionStorage.removeItem('refineui_analysis_cache')
                 sessionStorage.removeItem('refineui_transform')
                 sessionStorage.removeItem('refineui_repo')
+                sessionStorage.removeItem('refineui_branch')
                 window.location.href = '/dashboard/discovery'
               }}
               className="btn-ghost px-3 sm:px-4 py-2 rounded-xl text-[10px] sm:text-[11px] font-medium"
@@ -164,29 +157,19 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
       <div
         className="fixed top-[73px] left-0 right-0 z-40 sm:hidden overflow-x-auto"
         style={{
-          background: 'rgba(5,7,12,0.95)',
-          backdropFilter: 'blur(16px)',
+          background: 'rgba(5,7,12,0.96)',
           borderBottom: '1px solid rgba(255,255,255,0.06)',
         }}
       >
-        <div className="flex items-center gap-2 px-3 py-2.5">
-          {NAV_ITEMS.map((item) => {
-            const isActive = pathname === item.href
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="px-3 py-2 rounded-xl text-[11px] font-medium transition-colors whitespace-nowrap flex-shrink-0"
-                style={
-                  isActive
-                    ? { background: 'rgba(124,140,255,0.14)', color: 'white' }
-                    : { color: 'rgba(255,255,255,0.35)' }
-                }
-              >
-                {item.label}
-              </Link>
-            )
-          })}
+        <div className="px-3 py-2.5">
+          <DashboardNav
+            pathname={pathname}
+            progressActive={progressState.active}
+            className="relative flex items-center gap-1 rounded-[18px] p-1 overflow-hidden min-w-max"
+            itemClassName="block px-3 py-2 rounded-[14px] text-[11px] font-medium transition-colors duration-200 whitespace-nowrap"
+            indicatorInset={3}
+            compact
+          />
         </div>
       </div>
 
@@ -194,5 +177,307 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
         {children}
       </main>
     </div>
+  )
+}
+
+function DashboardNav({
+  pathname,
+  progressActive,
+  className,
+  itemClassName,
+  indicatorInset = 4,
+  compact = false,
+}: {
+  pathname: string
+  progressActive: boolean
+  className: string
+  itemClassName: string
+  indicatorInset?: number
+  compact?: boolean
+}) {
+  const router = useRouter()
+  const containerRef = useRef<HTMLElement | null>(null)
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const metricsRef = useRef<NavMetric[]>([])
+  const dragSessionRef = useRef<{ pointerId: number; startX: number; isDragging: boolean } | null>(null)
+  const suppressClickRef = useRef(false)
+  const activeHref = useMemo(() => NAV_ITEMS.find(item => item.href === pathname)?.href ?? NAV_ITEMS[0].href, [pathname])
+  const [bounds, setBounds] = useState<NavBounds>({ left: 0, width: 0, opacity: 0 })
+  const [dragBounds, setDragBounds] = useState<NavBounds | null>(null)
+  const [dragPreviewHref, setDragPreviewHref] = useState<string | null>(null)
+
+  const visibleHref = dragPreviewHref ?? activeHref
+
+  const measureMetrics = () => {
+    const nextMetrics = NAV_ITEMS.map((item) => {
+      const node = itemRefs.current[item.href]
+      const disabled = item.href === '/dashboard/discovery' && progressActive
+      if (!node) return null
+      return {
+        href: item.href,
+        left: node.offsetLeft,
+        width: node.offsetWidth,
+        center: node.offsetLeft + node.offsetWidth / 2,
+        disabled,
+      }
+    }).filter((metric): metric is NavMetric => metric !== null && metric.width > 0)
+
+    metricsRef.current = nextMetrics
+    return nextMetrics
+  }
+
+  useEffect(() => {
+    const updateMeasurements = () => {
+      const nextMetrics = measureMetrics()
+      const activeMetric = nextMetrics.find(metric => metric.href === activeHref)
+
+      if (!activeMetric) {
+        setBounds(current => ({ ...current, opacity: 0 }))
+        return
+      }
+
+      setBounds({
+        left: activeMetric.left + indicatorInset,
+        width: Math.max(activeMetric.width - indicatorInset * 2, 0),
+        opacity: 1,
+      })
+    }
+
+    const frame = window.requestAnimationFrame(updateMeasurements)
+    window.addEventListener('resize', updateMeasurements)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', updateMeasurements)
+    }
+  }, [activeHref, indicatorInset, progressActive])
+
+  const clearDrag = () => {
+    dragSessionRef.current = null
+    setDragBounds(null)
+    setDragPreviewHref(null)
+  }
+
+  const getNearestMetric = (clientX: number, sourceMetrics: NavMetric[] = metricsRef.current.filter(metric => !metric.disabled)) => {
+    const container = containerRef.current
+    if (!container || sourceMetrics.length === 0) return null
+
+    const { left: containerLeft, width: containerWidth } = container.getBoundingClientRect()
+    const localX = Math.max(0, Math.min(clientX - containerLeft, containerWidth))
+
+    return sourceMetrics.reduce((closest, metric) =>
+      Math.abs(metric.center - localX) < Math.abs(closest.center - localX) ? metric : closest
+    )
+  }
+
+  const getInterpolatedBounds = (clientX: number, sourceMetrics: NavMetric[] = metricsRef.current.filter(metric => !metric.disabled)) => {
+    const container = containerRef.current
+    if (!container || sourceMetrics.length === 0) return null
+
+    const { left: containerLeft, width: containerWidth } = container.getBoundingClientRect()
+    const localX = Math.max(0, Math.min(clientX - containerLeft, containerWidth))
+    const nearestMetric = getNearestMetric(clientX, sourceMetrics)
+
+    if (!nearestMetric) return null
+    if (sourceMetrics.length === 1 || localX <= sourceMetrics[0].center) {
+      return {
+        left: sourceMetrics[0].left + indicatorInset,
+        width: Math.max(sourceMetrics[0].width - indicatorInset * 2, 0),
+        opacity: 1,
+        href: nearestMetric.href,
+      }
+    }
+
+    const lastMetric = sourceMetrics[sourceMetrics.length - 1]
+    if (localX >= lastMetric.center) {
+      return {
+        left: lastMetric.left + indicatorInset,
+        width: Math.max(lastMetric.width - indicatorInset * 2, 0),
+        opacity: 1,
+        href: nearestMetric.href,
+      }
+    }
+
+    for (let index = 0; index < sourceMetrics.length - 1; index += 1) {
+      const current = sourceMetrics[index]
+      const next = sourceMetrics[index + 1]
+      if (localX > next.center) continue
+
+      const distance = next.center - current.center || 1
+      const progress = Math.max(0, Math.min((localX - current.center) / distance, 1))
+      const interpolatedLeft = current.left + (next.left - current.left) * progress
+      const interpolatedWidth = current.width + (next.width - current.width) * progress
+
+      return {
+        left: interpolatedLeft + indicatorInset,
+        width: Math.max(interpolatedWidth - indicatorInset * 2, 0),
+        opacity: 1,
+        href: nearestMetric.href,
+      }
+    }
+
+    return {
+      left: lastMetric.left + indicatorInset,
+      width: Math.max(lastMetric.width - indicatorInset * 2, 0),
+      opacity: 1,
+      href: nearestMetric.href,
+    }
+  }
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    if ((event.target as HTMLElement).closest('[data-locked="true"]')) return
+
+    const nextMetrics = measureMetrics().filter(metric => !metric.disabled)
+    if (nextMetrics.length === 0) return
+
+    dragSessionRef.current = { pointerId: event.pointerId, startX: event.clientX, isDragging: false }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const session = dragSessionRef.current
+    if (!session || session.pointerId !== event.pointerId) return
+
+    const nextBounds = getInterpolatedBounds(event.clientX)
+    if (!nextBounds) return
+
+    if (Math.abs(event.clientX - session.startX) > 4) {
+      session.isDragging = true
+    }
+
+    setDragBounds({
+      left: nextBounds.left,
+      width: nextBounds.width,
+      opacity: nextBounds.opacity,
+    })
+    setDragPreviewHref(nextBounds.href)
+  }
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    const session = dragSessionRef.current
+    if (!session || session.pointerId !== event.pointerId) return
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    const nearestMetric = getNearestMetric(event.clientX)
+    const clickedButton = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-href]')
+
+    if (session.isDragging) {
+      suppressClickRef.current = true
+      window.requestAnimationFrame(() => {
+        suppressClickRef.current = false
+      })
+    }
+
+    if (session.isDragging && nearestMetric && nearestMetric.href !== pathname) {
+      router.push(nearestMetric.href)
+    } else if (!session.isDragging && !clickedButton && nearestMetric && nearestMetric.href !== pathname) {
+      router.push(nearestMetric.href)
+    }
+
+    clearDrag()
+  }
+
+  const handlePointerCancel = (event: React.PointerEvent<HTMLElement>) => {
+    const session = dragSessionRef.current
+    if (!session || session.pointerId !== event.pointerId) return
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    clearDrag()
+  }
+
+  const displayedBounds = dragBounds ?? bounds
+
+  return (
+    <nav
+      ref={containerRef}
+      className={className}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      style={{
+        background: compact
+          ? 'rgba(13,17,25,0.98)'
+          : 'rgba(13,17,25,0.96)',
+        border: compact ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(255,255,255,0.08)',
+        boxShadow: compact ? 'inset 0 1px 0 rgba(255,255,255,0.03)' : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+        touchAction: 'none',
+        userSelect: 'none',
+      }}
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute rounded-[18px]"
+        style={{
+          top: indicatorInset,
+          bottom: indicatorInset,
+          left: 0,
+          width: displayedBounds.width,
+          opacity: displayedBounds.opacity,
+          transform: `translateX(${displayedBounds.left}px)`,
+          transition: dragBounds
+            ? 'none'
+            : 'transform 300ms cubic-bezier(0.22, 1, 0.36, 1), width 300ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease',
+          background: compact
+            ? 'rgba(124,140,255,0.16)'
+            : 'rgba(124,140,255,0.18)',
+          border: '1px solid rgba(170,180,255,0.18)',
+          boxShadow: compact
+            ? '0 8px 18px rgba(86,102,245,0.12)'
+            : '0 10px 22px rgba(86,102,245,0.14)',
+        }}
+      />
+
+      {NAV_ITEMS.map((item) => {
+        const isActive = item.href === visibleHref
+        const isLocked = item.href === '/dashboard/discovery' && progressActive
+        return (
+          <div
+            key={item.href}
+            ref={node => {
+              itemRefs.current[item.href] = node
+            }}
+            className="relative z-[1] flex-shrink-0"
+          >
+            {isLocked ? (
+              <div
+                data-locked="true"
+                className={itemClassName}
+                style={{ color: isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.42)', opacity: 0.72 }}
+              >
+                {item.label}
+              </div>
+            ) : (
+              <button
+                type="button"
+                data-href={item.href}
+                className={itemClassName}
+                onClick={() => {
+                  if (suppressClickRef.current) {
+                    suppressClickRef.current = false
+                    return
+                  }
+                  if (item.href !== pathname) router.push(item.href)
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: isActive ? 'rgba(255,255,255,0.98)' : 'rgba(255,255,255,0.56)',
+                }}
+              >
+                {item.label}
+              </button>
+            )}
+          </div>
+        )
+      })}
+    </nav>
   )
 }

@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { useProgress } from '@/components/dashboard/ProgressContext'
 import { apiUrl } from '@/lib/api'
 import GateErrorBanner, { type GateErrorData } from '@/components/dashboard/GateError'
@@ -63,11 +64,14 @@ function DiscoveryPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const repo = searchParams.get('repo')
+  const branch = searchParams.get('branch')
+  const { data: session } = useSession()
   const { startProgress, updateProgress, finishProgress } = useProgress()
 
   useEffect(() => {
     if (repo) sessionStorage.setItem('refineui_repo', repo)
-  }, [repo])
+    if (branch) sessionStorage.setItem('refineui_branch', branch)
+  }, [repo, branch])
 
   useEffect(() => {
     const storedDiscovery = sessionStorage.getItem('refineui_discovery')
@@ -190,6 +194,10 @@ function DiscoveryPageInner() {
   }
 
   // ── COMPLETED ──
+  function handleViewReport() {
+    router.push('/dashboard/simulation')
+  }
+
   if (completed && discovery) {
     return (
       <div className="flex items-start justify-center px-4 sm:px-6 py-8 sm:py-12">
@@ -277,10 +285,10 @@ function DiscoveryPageInner() {
               </div>
 
               <button
-                onClick={() => router.push('/dashboard/transform')}
+                onClick={handleViewReport}
                 className="btn-primary w-full py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
               >
-                View Transformation →
+                View UI/UX Analysis Report →
               </button>
             </div>
           </div>

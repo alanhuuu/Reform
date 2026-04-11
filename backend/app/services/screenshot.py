@@ -1,7 +1,56 @@
 import base64
+import io
 import logging
 
 logger = logging.getLogger(__name__)
+
+_MAX_IMAGE_BYTES = 4 * 1024 * 1024   # 4 MB — stay safely under Claude's 5 MB limit
+_MAX_DIMENSION   = 7000               # stay under Claude's 8000 px per-dimension limit
+
+
+def _compress_to_jpeg(png_bytes: bytes, quality: int = 85) -> bytes:
+    """Convert PNG bytes to JPEG, downscaling if needed to stay within Claude limits."""
+    from PIL import Image
+    img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+
+    # Downscale if either dimension exceeds the limit
+    w, h = img.size
+    if w > _MAX_DIMENSION or h > _MAX_DIMENSION:
+        ratio = min(_MAX_DIMENSION / w, _MAX_DIMENSION / h)
+        img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+
+    # Encode as JPEG, reducing quality until under the byte limit
+    for q in (quality, 75, 60, 45):
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=q, optimize=True)
+        data = buf.getvalue()
+        if len(data) <= _MAX_IMAGE_BYTES:
+            return data
+
+    # Last resort: scale down to half size
+    img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=45, optimize=True)
+    return buf.getvalue()
+
+
+async def take_competitor_screenshot_b64(url: str) -> str:
+    """Take a viewport-only screenshot of a competitor URL, compressed to stay within Claude limits."""
+    logger.info("Taking competitor screenshot of %s", url)
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page(viewport={"width": 1440, "height": 900})
+        try:
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.wait_for_timeout(2000)
+            # Viewport-only (no full_page) to avoid multi-thousand-pixel heights
+            png_bytes = await page.screenshot(type="png", full_page=False)
+        finally:
+            await browser.close()
+
+    jpeg_bytes = _compress_to_jpeg(png_bytes)
+    return base64.b64encode(jpeg_bytes).decode("utf-8")
 
 
 async def take_screenshot_b64(url: str) -> str:

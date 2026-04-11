@@ -122,3 +122,19 @@ class PageResult(Base):
     retries_used = Column(Integer, default=0)
 
     run = relationship("TransformRun", back_populates="page_results")
+
+
+class UXLabSession(Base):
+    """A UX analysis session: screenshot a URL, identify issues, generate CSS patches."""
+    __tablename__ = "ux_lab_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    workspace_id = Column(String, nullable=False, index=True)  # github_user_id
+    url = Column(String, nullable=False)
+    page = Column(String, nullable=False, default="home")
+    before_screenshot_key = Column(String, nullable=True)   # S3 key
+    after_screenshot_key = Column(String, nullable=True)    # S3 key
+    findings_json = Column(JSON, nullable=False, default=list)
+    competitor_evidence_json = Column(JSON, nullable=False, default=dict)
+    status = Column(String, nullable=False, default="pending")  # pending / complete / error
+    created_at = Column(DateTime(timezone=True), default=_utcnow)

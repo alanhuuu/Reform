@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
+import FindingsShelf from '@/components/uxlab/FindingsShelf'
 import { apiUrl } from '@/lib/api'
+import type { Finding, FindingSeverity, FindingType, UXLabSession } from '@/types/uxlab'
 
-// ── Types ───────────────────────────────────────────────────────────
 interface Annotation {
   id: string
   label: string
@@ -14,71 +17,315 @@ interface Annotation {
   zone: { x: number; y: number; w: number; h: number }
 }
 
-interface AnalysisResult {
-  screenshot_b64: string
-  before: { annotations: Annotation[]; ux_score: number }
-  after: { annotations: Annotation[]; ux_score: number; ai_forecast: number }
-  analytics: { roi: string; engagement_change: string; confidence: string; insight: string }
-  after_screenshot_b64?: string
-}
 
-// ── UX Simulation data ─────────────────────────────────────────────
-const DEFAULT_SCREENS = [
-  { label: 'Home', route: '/' },
-  { label: 'Dashboard', route: '/dashboard' },
-  { label: 'Settings', route: '/settings' },
-  { label: 'Pricing', route: '/pricing' },
-  { label: 'Onboarding', route: '/onboarding' },
+const ANALYSIS_STAGES: { message: string; duration: number }[] = [
+  { message: 'Capturing screenshot',       duration: 5_000  },
+  { message: 'Analyzing layout patterns',  duration: 12_000 },
+  { message: 'Identifying UX issues',      duration: 10_000 },
+  { message: 'Generating recommendations', duration: 10_000 },
+  { message: 'Rendering preview',          duration: 10_000 },
+  { message: 'Finalizing...',              duration: Infinity },
 ]
 
-const HEATMAP_TYPES = [
-  { key: 'attention', label: 'Attention' },
-  { key: 'click', label: 'Click' },
-  { key: 'scroll', label: 'Content Density' },
-]
-
-
-// ── Annotation colours ─────────────────────────────────────────────
 const ANNOTATION_COLORS = {
-  positive: { pin: '#22c55e',  ring: 'rgba(34,197,94,0.25)',  border: 'rgba(34,197,94,0.5)',  zoneBorder: 'rgba(34,197,94,0.45)',  label: '#86efac' },
-  issue:    { pin: '#ef4444',  ring: 'rgba(239,68,68,0.25)',   border: 'rgba(239,68,68,0.5)',   zoneBorder: 'rgba(239,68,68,0.45)',   label: '#fca5a5' },
-  warning:  { pin: '#f59e0b',  ring: 'rgba(245,158,11,0.25)', border: 'rgba(245,158,11,0.5)', zoneBorder: 'rgba(245,158,11,0.45)', label: '#fcd34d' },
-  insight:  { pin: '#6366f1',  ring: 'rgba(99,102,241,0.25)', border: 'rgba(99,102,241,0.5)', zoneBorder: 'rgba(99,102,241,0.45)', label: '#a5b4fc' },
+  positive: { pin: '#4ade80', ring: 'rgba(74,222,128,0.28)', glow: 'rgba(74,222,128,0.55)',  border: 'rgba(34,197,94,0.5)',  zoneBorder: 'rgba(34,197,94,0.45)',  label: '#86efac' },
+  issue:    { pin: '#ff5555', ring: 'rgba(255,85,85,0.28)',   glow: 'rgba(255,85,85,0.55)',   border: 'rgba(239,68,68,0.5)',  zoneBorder: 'rgba(239,68,68,0.45)', label: '#fca5a5' },
+  warning:  { pin: '#fbbf24', ring: 'rgba(251,191,36,0.28)',  glow: 'rgba(251,191,36,0.55)',  border: 'rgba(245,158,11,0.5)', zoneBorder: 'rgba(245,158,11,0.45)', label: '#fcd34d' },
+  insight:  { pin: '#818cf8', ring: 'rgba(129,140,248,0.28)', glow: 'rgba(129,140,248,0.55)', border: 'rgba(99,102,241,0.5)', zoneBorder: 'rgba(99,102,241,0.45)', label: '#a5b4fc' },
 }
 
 const CARD_W = 224
-const CARD_H = 116 // approximate rendered height
+const CARD_H = 116
 
-// ── Annotated preview ──────────────────────────────────────────────
+function buildAnnotationId(prefix: 'before' | 'after', route: string, annotationId: string, index: number) {
+  return `${prefix}:${route}:${annotationId || index}`
+}
+
+function findingToAnnotationType(type: FindingType): Annotation['type'] {
+  switch (type) {
+    case 'ISSUE':
+      return 'issue'
+    case 'WARNING':
+      return 'warning'
+    default:
+      return 'positive'
+  }
+}
+
+function severityToConfidence(severity: FindingSeverity): number {
+  switch (severity) {
+    case 'critical':
+      return 0.92
+    case 'major':
+      return 0.8
+    default:
+      return 0.68
+  }
+}
+
+function buildZone(xPercent: number, yPercent: number) {
+  const width = 18
+  const height = 12
+  const x = Math.max(2, Math.min(xPercent - width / 2, 98 - width))
+  const y = Math.max(2, Math.min(yPercent - height / 2, 98 - height))
+  return { x, y, w: width, h: height }
+}
+
+function buildAnnotationsFromFindings(
+  findings: Finding[],
+  prefix: 'before' | 'after',
+  route: string,
+): Annotation[] {
+  return findings.map((finding, index) => ({
+    id: buildAnnotationId(prefix, route, finding.id, index),
+    label: finding.title,
+    detail: finding.recommendation,
+    type: findingToAnnotationType(finding.type),
+    principle: finding.principle,
+    confidence: severityToConfidence(finding.severity),
+    zone: buildZone(finding.annotation.xPercent, finding.annotation.yPercent),
+  }))
+}
+
+function toImageSrc(image: string) {
+  if (!image) return image
+  return image.startsWith('data:') ? image : `data:image/png;base64,${image}`
+}
+
+function getCompetitorUrls(): string[] {
+  try {
+    const raw = sessionStorage.getItem('refineui_discovery')
+    if (!raw) return []
+    const data = JSON.parse(raw)
+    return Array.isArray(data?.selected_for_analysis) ? data.selected_for_analysis.slice(0, 3) : []
+  } catch {
+    return []
+  }
+}
+
+async function analyzeUxLab(url: string, page: string, signal?: AbortSignal): Promise<UXLabSession> {
+  const response = await fetch(apiUrl('/api/ux-lab/analyze'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({
+      url,
+      page,
+      competitor_urls: getCompetitorUrls(),
+      workspace_id: 'local',
+      analysis_only: true,
+    }),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`UX Lab analysis failed (${response.status}): ${text}`)
+  }
+
+  const data = await response.json()
+  return {
+    id: data.id,
+    url: data.url,
+    page: data.page,
+    beforeScreenshotUrl: data.before_screenshot_url ?? '',
+    findings: (data.findings ?? []).map((finding: Record<string, unknown>) => ({
+      id: String(finding.id ?? ''),
+      type: finding.type as FindingType,
+      severity: finding.severity as FindingSeverity,
+      status: (finding.status as Finding['status']) ?? 'open',
+      component: String(finding.component ?? ''),
+      title: String(finding.title ?? ''),
+      description: String(finding.description ?? ''),
+      principle: String(finding.principle ?? ''),
+      principleExplanation: String(finding.principle_explanation ?? ''),
+      recommendation: String(finding.recommendation ?? ''),
+      requiresCompetitorEvidence: Boolean(finding.requires_competitor_evidence),
+      competitorEvidence: ((finding.competitor_evidence as Record<string, unknown>[] | undefined) ?? []).map((evidence) => ({
+        url: String(evidence.url ?? ''),
+        screenshotUrl: String(evidence.screenshot_url ?? ''),
+        annotation: String(evidence.annotation ?? ''),
+      })),
+      annotation: {
+        xPercent: Number((finding.annotation as { xPercent?: number } | undefined)?.xPercent ?? 50),
+        yPercent: Number((finding.annotation as { yPercent?: number } | undefined)?.yPercent ?? 50),
+      },
+    })),
+    createdAt: data.created_at,
+    status: data.status,
+  }
+}
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="relative flex-shrink-0 transition-all duration-200"
+      style={{
+        width: '36px',
+        height: '20px',
+        borderRadius: '10px',
+        background: checked ? 'rgba(124,58,237,0.8)' : 'rgba(54,51,63,0.8)',
+        border: checked ? '1px solid rgba(124,58,237,0.9)' : '1px solid rgba(74,68,85,0.4)',
+      }}
+    >
+      <span
+        className="absolute top-[2px] transition-all duration-200"
+        style={{
+          width: '14px',
+          height: '14px',
+          borderRadius: '50%',
+          background: 'white',
+          left: checked ? '18px' : '2px',
+          display: 'block',
+        }}
+      />
+    </button>
+  )
+}
+
+function PreviewPlaceholder({
+  title,
+  message,
+}: {
+  title: string
+  message: string
+}) {
+  return (
+    <div
+      className="flex h-full min-h-[280px] items-center justify-center px-6 text-center"
+      style={{ color: 'rgba(204,195,216,0.42)' }}
+    >
+      <div className="space-y-2">
+        <div className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.32)' }}>
+          {title}
+        </div>
+        <div className="text-sm">{message}</div>
+      </div>
+    </div>
+  )
+}
+
+const SKELETON_COLOR = 'rgba(255,255,255,0.06)'
+const SKELETON_GRADIENT = 'linear-gradient(90deg, rgba(255,255,255,0.04), rgba(167,139,250,0.12), rgba(255,255,255,0.04))'
+
+function SkeletonBlock({ width = '100%', height, delay = 0 }: { width?: string; height: string; delay?: number }) {
+  return (
+    <div
+      className="ai-shimmer"
+      style={{
+        width,
+        height,
+        borderRadius: '4px',
+        background: SKELETON_GRADIENT,
+        backgroundSize: '200% 100%',
+        animationDelay: `${delay}ms`,
+      }}
+    />
+  )
+}
+
+function PreviewLoadingState({ stage, progress }: { title: string; stage?: string; progress?: number }) {
+  return (
+    <div style={{ width: '100%', height: '100%', minHeight: '280px', padding: '0', display: 'flex', flexDirection: 'column', background: '#0d0c16' }}>
+      {/* Nav bar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: `1px solid ${SKELETON_COLOR}` }}>
+        <SkeletonBlock width="72px" height="12px" />
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <SkeletonBlock width="40px" height="8px" delay={80} />
+          <SkeletonBlock width="40px" height="8px" delay={140} />
+          <SkeletonBlock width="40px" height="8px" delay={200} />
+        </div>
+        <SkeletonBlock width="56px" height="24px" delay={100} />
+      </div>
+
+      {/* Hero — replaced with inline status */}
+      <div style={{ padding: '28px 20px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="status-dot-pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(168,85,247,0.7)', display: 'inline-block', flexShrink: 0 }} />
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(204,195,216,0.55)', letterSpacing: '0.02em' }}>
+            {stage ?? 'Initializing…'}
+          </span>
+        </div>
+        <div style={{ width: '40%', height: 2, borderRadius: 999, background: 'rgba(255,255,255,0.05)' }}>
+          <div style={{
+            height: '100%', borderRadius: 999,
+            background: 'linear-gradient(90deg, rgba(124,58,237,0.6), rgba(168,85,247,0.6))',
+            width: `${progress ?? 0}%`,
+            transition: progress === 100 ? 'width 300ms ease-out' : 'width 150ms linear',
+          }} />
+        </div>
+      </div>
+
+      {/* Content rows */}
+      <div style={{ flex: 1, padding: '4px 20px 20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <SkeletonBlock width="100%" height="72px" delay={100} />
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <SkeletonBlock width="50%" height="52px" delay={150} />
+          <SkeletonBlock width="50%" height="52px" delay={200} />
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <SkeletonBlock width="33%" height="40px" delay={180} />
+          <SkeletonBlock width="33%" height="40px" delay={230} />
+          <SkeletonBlock width="33%" height="40px" delay={280} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AnnotatedPreview({
   screenshotB64,
   annotations,
   showAnnotations,
+  activeId,
+  zoom = 1,
+  onZoomChange,
+  onSelect,
+  children,
 }: {
   screenshotB64: string
   annotations: Annotation[]
   showAnnotations: boolean
+  activeId?: string | null
+  zoom?: number
+  onZoomChange?: (next: number) => void
+  onSelect?: (id: string) => void
+  children?: React.ReactNode
 }) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const outerRef = useRef<HTMLDivElement>(null)
+  const frameRef = useRef<HTMLDivElement>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [cardPos, setCardPos] = useState<{ left: number; top: number } | null>(null)
 
-  const hoveredAnn = annotations.find(a => a.id === hoveredId) ?? null
+  const hoveredAnn = annotations.find((annotation) => annotation.id === hoveredId) ?? null
 
-  const handleEnter = useCallback((ann: Annotation) => {
-    setHoveredId(ann.id)
-    if (!containerRef.current) return
-    const { width, height } = containerRef.current.getBoundingClientRect()
-    const cx = (ann.zone.x + ann.zone.w / 2) / 100 * width
-    const cy = (ann.zone.y + ann.zone.h / 2) / 100 * height
+  // Trackpad pinch-to-zoom: ctrl+wheel fires continuously on macOS
+  useEffect(() => {
+    const el = outerRef.current
+    if (!el || !onZoomChange) return
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      onZoomChange(Math.max(0.25, Math.min(3, zoom - e.deltaY * 0.008)))
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [zoom, onZoomChange])
+
+  const handleEnter = useCallback((annotation: Annotation) => {
+    setHoveredId(annotation.id)
+    if (!frameRef.current) return
+    const { width, height } = frameRef.current.getBoundingClientRect()
+    const cx = ((annotation.zone.x + annotation.zone.w / 2) / 100) * width
+    const cy = ((annotation.zone.y + annotation.zone.h / 2) / 100) * height
     const gap = 10
 
-    // Horizontal: prefer right of pin, flip left if it would overflow
     let left = cx + gap
     if (left + CARD_W > width) left = cx - CARD_W - gap
     left = Math.max(4, Math.min(left, width - CARD_W - 4))
 
-    // Vertical: align top of card to pin, clamp so bottom doesn't overflow
     let top = cy - 9
     top = Math.max(4, Math.min(top, height - CARD_H - 4))
 
@@ -96,79 +343,95 @@ function AnnotatedPreview({
 
   return (
     <div
-      ref={containerRef}
-      style={{ position: 'relative', width: '100%', background: '#0d0c16' }}
+      ref={outerRef}
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        background: '#0d0c16',
+        overflow: 'auto',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+      }}
     >
-      {/* Screenshot — clipped independently so annotations can overflow */}
-      <div style={{ overflow: 'hidden', borderRadius: 'inherit' }}>
+      <div
+        ref={frameRef}
+        style={{
+          position: 'relative',
+          width: `${zoom * 100}%`,
+          flexShrink: 0,
+          transition: 'width 80ms ease-out',
+        }}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={`data:image/png;base64,${screenshotB64}`}
+          src={toImageSrc(screenshotB64)}
           alt="Page screenshot"
-          style={{ width: '100%', height: 'auto', display: 'block' }}
+          style={{
+            width: '100%',
+            height: 'auto',
+            display: 'block',
+          }}
         />
-      </div>
 
-      {/* Annotation layer — not clipped, can overflow container */}
-      <div style={{ position: 'absolute', inset: 0, overflow: 'visible', display: showAnnotations ? 'block' : 'none' }}>
-
-        {annotations.map((ann, idx) => {
-          const colors = ANNOTATION_COLORS[ann.type] ?? ANNOTATION_COLORS.insight
-          const isHovered = hoveredId === ann.id
-          const cx = ann.zone.x + ann.zone.w / 2
-          const cy = ann.zone.y + ann.zone.h / 2
+        <style>{`
+          @keyframes annotation-pulse {
+            0%, 100% { box-shadow: 0 0 0 3px var(--pulse-ring), 0 0 5px 1px var(--pulse-glow); }
+            50%       { box-shadow: 0 0 0 4px var(--pulse-ring), 0 0 7px 1px var(--pulse-glow); }
+          }
+        `}</style>
+        <div style={{ position: 'absolute', inset: 0, overflow: 'visible', display: showAnnotations ? 'block' : 'none' }}>
+        {annotations.map((annotation, index) => {
+          const colors = ANNOTATION_COLORS[annotation.type] ?? ANNOTATION_COLORS.insight
+          const isHovered = hoveredId === annotation.id
+          const isActive = activeId === annotation.id
+          const cx = annotation.zone.x + annotation.zone.w / 2
+          const cy = annotation.zone.y + annotation.zone.h / 2
 
           return (
-            <div key={ann.id}>
-              {/* Zone bounding box */}
-              <div
-                onMouseEnter={() => handleEnter(ann)}
-                onMouseLeave={handleLeave}
-                style={{
-                  position: 'absolute',
-                  left: `${ann.zone.x}%`,
-                  top: `${ann.zone.y}%`,
-                  width: `${ann.zone.w}%`,
-                  height: `${ann.zone.h}%`,
-                  border: `1.5px solid ${colors.zoneBorder}`,
-                  background: isHovered ? `${colors.pin}12` : 'transparent',
-                  transition: 'background 0.15s',
-                  cursor: 'default',
-                }}
-              />
-              {/* Numbered pin at zone center */}
-              <div
-                onMouseEnter={() => handleEnter(ann)}
-                onMouseLeave={handleLeave}
-                style={{
-                  position: 'absolute',
-                  left: `${cx}%`,
-                  top: `${cy}%`,
-                  transform: 'translate(-50%, -50%)',
-                  width: '18px',
-                  height: '18px',
-                  borderRadius: '50%',
-                  background: colors.pin,
-                  boxShadow: `0 0 0 ${isHovered ? '5px' : '3px'} ${colors.ring}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '8px',
-                  fontWeight: 800,
-                  color: 'white',
-                  cursor: 'default',
-                  zIndex: 20,
-                  transition: 'box-shadow 0.15s',
-                  userSelect: 'none',
-                }}
-              >
-                {idx + 1}
-              </div>
-            </div>
+            <button
+              key={annotation.id}
+              type="button"
+              aria-label={`Select annotation ${index + 1}: ${annotation.label}`}
+              onClick={() => onSelect?.(annotation.id)}
+              onMouseEnter={() => handleEnter(annotation)}
+              onMouseLeave={handleLeave}
+              style={{
+                position: 'absolute',
+                left: `${cx}%`,
+                top: `${cy}%`,
+                transform: 'translate(-50%, -50%)',
+                width: '18px',
+                height: '18px',
+                padding: 0,
+                border: 'none',
+                borderRadius: '50%',
+                background: colors.pin,
+                boxShadow: `0 0 0 ${isHovered || isActive ? '5px' : '3px'} ${colors.ring}, 0 0 ${isHovered || isActive ? '10px' : '6px'} 1px ${colors.glow}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '8px',
+                fontWeight: 800,
+                color: 'white',
+                cursor: onSelect ? 'pointer' : 'default',
+                zIndex: 20,
+                transition: 'box-shadow 0.15s',
+                userSelect: 'none',
+                ['--pulse-ring' as string]: colors.ring,
+                ['--pulse-glow' as string]: colors.glow,
+                animation: isHovered || isActive ? 'none' : 'annotation-pulse 1.6s ease-in-out infinite',
+                animationDelay: `${index * 0.3}s`,
+              }}
+            >
+              {index + 1}
+            </button>
           )
         })}
 
-        {/* Expanded card — rendered at container level with pixel-clamped position */}
+        {children}
+
         {hoveredAnn && hoveredColors && cardPos && (
           <div
             style={{
@@ -196,138 +459,157 @@ function AnnotatedPreview({
             </p>
           </div>
         )}
-
+      </div>
       </div>
     </div>
   )
 }
 
-// ── Loading placeholder ────────────────────────────────────────────
-function AnalysisLoadingWindow({ label }: { label: string }) {
-  const isAfter = label === 'After'
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full" style={{ background: isAfter ? '#a855f7' : 'rgba(255,255,255,0.2)' }} />
-        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.5)' }}>{label}</span>
-      </div>
-      <div
-        className="relative rounded-xl overflow-hidden flex items-center justify-center"
-        style={{
-          background: '#201e2a',
-          border: '1px solid rgba(74,68,85,0.15)',
-          aspectRatio: '16/9',
-        }}
-      >
-        <div className="flex flex-col items-center gap-3">
-          {/* Spinner */}
-          <div
-            style={{
-              width: '28px',
-              height: '28px',
-              border: '2px solid rgba(74,68,85,0.3)',
-              borderTop: '2px solid #d2bbff',
-              borderRadius: '50%',
-              animation: 'spin 0.8s linear infinite',
-            }}
-          />
-          <span className="text-xs font-medium" style={{ color: 'rgba(204,195,216,0.5)' }}>Running UX analysis...</span>
-        </div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    </div>
-  )
-}
-
-// ── Empty placeholder ──────────────────────────────────────────────
-function AnalysisEmptyWindow({ label }: { label: string }) {
-  const isAfter = label === 'After'
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full" style={{ background: isAfter ? '#a855f7' : 'rgba(255,255,255,0.2)' }} />
-        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.5)' }}>{label}</span>
-      </div>
-      <div
-        className="relative rounded-xl overflow-hidden flex items-center justify-center"
-        style={{
-          background: '#201e2a',
-          border: '1px solid rgba(74,68,85,0.15)',
-          aspectRatio: '16/9',
-        }}
-      >
-        <span className="text-xs" style={{ color: 'rgba(204,195,216,0.3)' }}>Select a screen to begin analysis</span>
-      </div>
-    </div>
-  )
-}
-
-// ── Main page ──────────────────────────────────────────────────────
 export default function SimulationPage() {
-  const [screens, setScreens] = useState<{ label: string; route: string }[]>(DEFAULT_SCREENS)
+  const router = useRouter()
+  const { data: session } = useSession()
+  const [screens, setScreens] = useState<{ label: string; route: string }[]>([])
   const [selectedScreen, setSelectedScreen] = useState<{ label: string; route: string } | null>(null)
-  const [selectedHeatmap, setSelectedHeatmap] = useState('attention')
-const [loadingScreens, setLoadingScreens] = useState(true)
-  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
+  const [loadingScreens, setLoadingScreens] = useState(true)
+  const [screensError, setScreensError] = useState<string | null>(null)
+  const [analysis, setAnalysis] = useState<UXLabSession | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [loadingStage, setLoadingStage] = useState('')
+  const [loadingProgress, setLoadingProgress] = useState(0)
+  const stageTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   const [showAnnotations, setShowAnnotations] = useState(true)
-  const [showFrictionInfo, setShowFrictionInfo] = useState(false)
-  const analysisCache = useRef<Record<string, AnalysisResult>>(
+  const [activeFindingId, setActiveFindingId] = useState<string | null>(null)
+  const [shelfExpanded, setShelfExpanded] = useState(false)
+  const [pillOrder, setPillOrder] = useState<string[]>([])
+  const [findings, setFindings] = useState<Finding[]>([])
+  const [selectedFindingIds, setSelectedFindingIds] = useState<Set<string>>(new Set())
+  const [previewZoom, setPreviewZoom] = useState(1)
+
+  const handleZoomChange = useCallback((next: number) => {
+    setPreviewZoom(Math.max(0.25, Math.min(3, next)))
+  }, [])
+  const analysisCache = useRef<Record<string, UXLabSession>>(
     (() => {
       try {
         const stored = sessionStorage.getItem('refineui_analysis_cache')
         return stored ? JSON.parse(stored) : {}
-      } catch { return {} }
-    })()
+      } catch {
+        return {}
+      }
+    })(),
   )
 
   useEffect(() => {
-    // If transform data exists, use that route as the screen
+    stageTimers.current.forEach(clearTimeout)
+    stageTimers.current = []
+
+    if (!loadingAnalysis) {
+      if (loadingProgress > 0) {
+        setLoadingProgress(100)
+        const t = setTimeout(() => {
+          setLoadingStage('')
+          setLoadingProgress(0)
+        }, 400)
+        stageTimers.current.push(t)
+      }
+      return
+    }
+
+    const totalFinite = ANALYSIS_STAGES.reduce((sum, s) => sum + (isFinite(s.duration) ? s.duration : 0), 0)
+    const startTime = Date.now()
+
+    // Advance stage labels at their scheduled times
+    let elapsed = 0
+    ANALYSIS_STAGES.forEach((stage) => {
+      const t = setTimeout(() => setLoadingStage(stage.message), elapsed)
+      stageTimers.current.push(t)
+      if (isFinite(stage.duration)) elapsed += stage.duration
+    })
+
+    // Continuously update progress based on real elapsed time
+    const interval = setInterval(() => {
+      const ms = Date.now() - startTime
+      setLoadingProgress(Math.min(90, Math.round((ms / totalFinite) * 90)))
+    }, 100)
+
+    return () => {
+      stageTimers.current.forEach(clearTimeout)
+      stageTimers.current = []
+      clearInterval(interval)
+    }
+  }, [loadingAnalysis]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     const storedTransform = sessionStorage.getItem('refineui_transform')
     if (storedTransform) {
       try {
-        const t = JSON.parse(storedTransform)
-        const route = t.result?.preview_route || '/'
-        const label = route === '/' ? 'Home' : route.replace(/^\//, '').replace(/\//g, ' / ').replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
+        const transform = JSON.parse(storedTransform)
+        const route = transform.result?.preview_route || '/'
+        const label = route === '/'
+          ? 'Home'
+          : route
+              .replace(/^\//, '')
+              .replace(/\//g, ' / ')
+              .replace(/-/g, ' ')
+              .replace(/\b\w/g, (char: string) => char.toUpperCase())
         const screen = { label, route }
         setScreens([screen])
         setSelectedScreen(screen)
         setLoadingScreens(false)
         return
-      } catch { /* fall through */ }
+      } catch {
+        // Fall through to repo page discovery.
+      }
     }
 
     const repoUrl = sessionStorage.getItem('refineui_repo')
-    if (repoUrl) {
-      setLoadingScreens(true)
-      fetch(`${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}`)
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          return res.json()
-        })
-        .then((data: { pages: { label: string; route: string }[] }) => {
+    const repoBranch = sessionStorage.getItem('refineui_branch')
+    const pagesEndpoint = repoUrl
+      ? `${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}${repoBranch ? `&branch=${encodeURIComponent(repoBranch)}` : ''}`
+      : '/api/local-pages'
+
+    setLoadingScreens(true)
+    setScreensError(null)
+    const accessToken = session?.accessToken
+    fetch(pagesEndpoint, accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then((data: { pages: { label: string; route: string }[] }) => {
+        if (!data.pages.length) {
+          setScreensError('No pages found.')
+          setScreens([])
+          setSelectedScreen(null)
+        } else {
           setScreens(data.pages)
           setSelectedScreen(data.pages[0])
-        })
-        .catch(() => {
-          setScreens(DEFAULT_SCREENS)
-          setSelectedScreen(DEFAULT_SCREENS[0])
-        })
-        .finally(() => {
-          setLoadingScreens(false)
-        })
-    } else {
-      setScreens(DEFAULT_SCREENS)
-      setSelectedScreen(DEFAULT_SCREENS[0] ?? null)
-      setLoadingScreens(false)
-    }
+        }
+      })
+      .catch(() => {
+        setScreensError('Could not load pages.')
+        setScreens([])
+        setSelectedScreen(null)
+      })
+      .finally(() => {
+        setLoadingScreens(false)
+      })
   }, [])
 
-  // Trigger AI analysis whenever selected screen or heatmap changes
   useEffect(() => {
     if (!selectedScreen) return
 
-    const cacheKey = `${selectedScreen.route}:${selectedHeatmap}`
+    // Reset stale state from previous page before any async work.
+    // React 18 batches these with the subsequent setAnalysis call, so
+    // cached pages never flash a null state.
+    setAnalysis(null)
+    setAnalysisError(null)
+    setLoadingAnalysis(false)
+    setSelectedFindingIds(new Set())
+    setPreviewZoom(1)
+
+    const cacheKey = selectedScreen.route
     if (analysisCache.current[cacheKey]) {
       setAnalysis(analysisCache.current[cacheKey])
       return
@@ -335,358 +617,402 @@ const [loadingScreens, setLoadingScreens] = useState(true)
 
     setLoadingAnalysis(true)
 
-    // Check if transform screenshots exist — use them for the selected route
-    const storedTransform = sessionStorage.getItem('refineui_transform')
-    let transformScreenshots: { before: string; after: string } | null = null
-    if (storedTransform) {
-      try {
-        const t = JSON.parse(storedTransform)
-        if (t.result?.before_screenshot && t.result?.after_screenshot) {
-          transformScreenshots = { before: t.result.before_screenshot, after: t.result.after_screenshot }
+    const targetBase = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+    const targetUrl = `${targetBase}${selectedScreen.route}`
+
+    const controller = new AbortController()
+
+    analyzeUxLab(targetUrl, selectedScreen.route, controller.signal)
+      .then((result) => {
+        analysisCache.current[cacheKey] = result
+        try {
+          sessionStorage.setItem('refineui_analysis_cache', JSON.stringify(analysisCache.current))
+        } catch {
+          // Ignore cache write failures.
         }
-      } catch { /* */ }
+        setAnalysis(result)
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        console.error('Analysis failed:', error)
+        setAnalysis(null)
+        setAnalysisError(error instanceof Error ? error.message : 'Analysis failed for this screen.')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingAnalysis(false)
+      })
+
+    return () => { controller.abort() }
+  }, [selectedScreen])
+
+  const beforeAnnotations = useMemo(
+    () => buildAnnotationsFromFindings(findings, 'before', selectedScreen?.route ?? '/'),
+    [findings, selectedScreen?.route],
+  )
+
+  // Reconstruct the full annotation ID for pin highlighting on the screenshot.
+  // activeFindingId is always the raw finding ID; beforeAnnotations use the prefixed format.
+  const activeAnnotationId = useMemo(
+    () => activeFindingId
+      ? (beforeAnnotations.find((a) => a.id.endsWith(':' + activeFindingId))?.id ?? null)
+      : null,
+    [activeFindingId, beforeAnnotations],
+  )
+  useEffect(() => {
+    const sessionFindings = analysis?.findings ?? []
+    if (!sessionFindings.length) {
+      setFindings([])
+      setPillOrder([])
+      setActiveFindingId(null)
+      setShelfExpanded(false)
+      return
     }
 
-    // Use the repo URL from session or fall back to localhost
-    const repoUrl = sessionStorage.getItem('refineui_repo') || ''
-    const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
-    const repoName = match ? match[1].split('/')[1] : ''
-    const deployedBase = repoName ? `https://${repoName}.vercel.app` : ''
-    const targetUrl = `${deployedBase}${selectedScreen.route}`
+    setFindings((prev) => {
+      const previousStatuses = new Map(prev.map((finding) => [finding.id, finding.status]))
+      return sessionFindings.map((finding) => ({
+        ...finding,
+        status: previousStatuses.get(finding.id) ?? finding.status,
+      }))
+    })
 
-    fetch(apiUrl('/analyze-page'), {
+    setPillOrder((prev) => {
+      const nextIds = sessionFindings.map((finding) => finding.id)
+      if (!prev.length) return nextIds
+      const preserved = prev.filter((id) => nextIds.includes(id))
+      const missing = nextIds.filter((id) => !preserved.includes(id))
+      return [...preserved, ...missing]
+    })
+
+    setActiveFindingId((prev) => (prev && sessionFindings.some((finding) => finding.id === prev) ? prev : sessionFindings[0].id))
+  }, [analysis])
+
+  const handleSelectFinding = useCallback((annotationOrFindingId: string) => {
+    // AnnotatedPreview calls back with full annotation IDs ("before:/route:rawId").
+    // Strip the prefix so activeFindingId always holds the raw finding ID,
+    // which is what FindingsShelf uses for triage row highlighting.
+    const parts = annotationOrFindingId.split(':')
+    const rawId = parts.length >= 3 ? parts.slice(2).join(':') : annotationOrFindingId
+    setActiveFindingId(rawId)
+    setShelfExpanded(true)
+    setPillOrder((prev) => (prev.includes(rawId) ? prev : [...prev, rawId]))
+  }, [])
+
+  const handleApplyFinding = useCallback((findingId: string) => {
+    if (!analysis?.id) return
+
+    fetch(apiUrl(`/api/ux-lab/sessions/${analysis.id}/apply`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ finding_id: findingId }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return response.json()
+      })
+      .then(() => {
+        setFindings((prev) =>
+          prev.map((finding) => (finding.id === findingId ? { ...finding, status: 'patched' as const } : finding)),
+        )
+        setAnalysis((prev) => {
+          if (!prev) return prev
+          const next = {
+            ...prev,
+            findings: prev.findings.map((finding) => (
+              finding.id === findingId ? { ...finding, status: 'patched' as const } : finding
+            )),
+          }
+          if (selectedScreen) {
+            analysisCache.current[selectedScreen.route] = next
+            try {
+              sessionStorage.setItem('refineui_analysis_cache', JSON.stringify(analysisCache.current))
+            } catch {
+              // Ignore cache write failures.
+            }
+          }
+          return next
+        })
+      })
+      .catch((error) => {
+        console.error('Failed to apply UX Lab finding:', error)
+      })
+  }, [analysis?.id, selectedScreen])
+
+  const handleToggleSelection = useCallback((id: string) => {
+    setSelectedFindingIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }, [])
+
+  const handleApplySelected = useCallback(() => {
+    const ids = new Set(selectedFindingIds)
+    setFindings((prev) =>
+      prev.map((f) => (ids.has(f.id) ? { ...f, status: 'queued' as const } : f)),
+    )
+    setSelectedFindingIds(new Set())
+  }, [selectedFindingIds])
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedFindingIds(new Set(findings.filter((f) => f.status === 'open').map((f) => f.id)))
+  }, [findings])
+
+  const handleDeselectAll = useCallback(() => {
+    setSelectedFindingIds(new Set())
+  }, [])
+
+  const handleRevertFinding = useCallback((id: string) => {
+    setFindings((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, status: 'open' as const } : f)),
+    )
+  }, [])
+
+  const handleApplyTransformation = useCallback(() => {
+    const repoUrl = sessionStorage.getItem('refineui_repo') ?? ''
+    const branch = sessionStorage.getItem('refineui_branch') ?? 'main'
+    const match = repoUrl.match(/github\.com\/([^/]+\/[^/]+)/)
+
+    if (!match) {
+      router.push('/dashboard/transform')
+      return
+    }
+
+    const fullName = match[1].replace(/\.git$/, '')
+    let designIntelligence: unknown = null
+    try {
+      const raw = sessionStorage.getItem('refineui_analysis')
+      if (raw) designIntelligence = JSON.parse(raw)
+    } catch { /* ignore */ }
+
+    const queuedFindings = findings
+      .filter((f) => f.status === 'queued')
+      .map((f) => ({
+        title: f.title,
+        description: f.description,
+        recommendation: f.recommendation,
+        component: f.component,
+        severity: f.severity,
+      }))
+
+    const promise = fetch(apiUrl('/transform-repo-v2'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        url: targetUrl,
-        heatmap_type: selectedHeatmap,
+        github_url: `https://github.com/${fullName}`,
+        branch,
+        access_token: (session as { accessToken?: string } | null)?.accessToken ?? null,
+        design_intelligence: designIntelligence,
+        user_intent: '',
+        max_pages: 5,
+        github_user_id: session?.user?.id ?? '',
+        ux_lab_findings: queuedFindings.length > 0 ? queuedFindings : null,
       }),
     })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.json() as Promise<AnalysisResult>
-      })
+      .then((r) => { if (!r.ok) throw new Error(`Transform failed: ${r.status}`); return r.json() })
       .then((result) => {
-        // If we have real transform screenshots, use them instead of the analysis screenshots
-        if (transformScreenshots) {
-          result.screenshot_b64 = transformScreenshots.before
-          result.after_screenshot_b64 = transformScreenshots.after
-        }
-        analysisCache.current[cacheKey] = result
-        try { sessionStorage.setItem('refineui_analysis_cache', JSON.stringify(analysisCache.current)) } catch {}
-        setAnalysis(result)
+        sessionStorage.setItem('refineui_transform', JSON.stringify({
+          multiPageResult: result,
+          repoName: fullName,
+          branch,
+        }))
+        return result
       })
-      .catch((err) => {
-        console.error('Analysis failed:', err)
-        setAnalysis(null)
-      })
-      .finally(() => {
-        setLoadingAnalysis(false)
-      })
-  }, [selectedScreen, selectedHeatmap])
+      .catch(() => null)
 
-  const insightValue = analysis?.analytics.insight ?? null
+    ;(window as Window & { __reformPipelinePromise?: Promise<unknown> }).__reformPipelinePromise = promise
+    router.push('/dashboard/transform')
+  }, [findings, session, router])
 
-  // Friction Index — derived entirely from Claude's annotation types
-  const calcFriction = (anns: Annotation[]) => {
-    if (!anns.length) return null
-    const bad = anns.filter(a => a.type === 'issue' || a.type === 'warning').length
-    return Math.round((bad / anns.length) * 100)
-  }
-  const frictionBefore = analysis ? calcFriction(analysis.before.annotations) : null
-  const frictionAfter  = analysis ? calcFriction(analysis.after.annotations)  : null
-  const frictionDelta  = frictionBefore !== null && frictionAfter !== null ? frictionBefore - frictionAfter : null
+  const handleScrollToAnnotation = useCallback((findingId: string) => {
+    const finding = findings.find((entry) => entry.id === findingId)
+    if (!finding) return
+    const panel = document.getElementById('before-panel')
+    if (!panel) return
+    panel.scrollTo({
+      top: (finding.annotation.yPercent / 100) * panel.scrollHeight,
+      behavior: 'smooth',
+    })
+  }, [findings])
 
-  const beforeScore = analysis?.before.ux_score ?? null
-  const afterScore  = analysis?.after.ux_score  ?? null
-  const scoreDelta  = beforeScore !== null && afterScore !== null ? afterScore - beforeScore : null
+  const shelfStatus = loadingAnalysis ? 'loading' : analysisError ? 'error' : analysis ? 'ready' : 'idle'
+  const shelfStatusMessage =
+    loadingAnalysis
+      ? `Analyzing ${selectedScreen?.label ?? 'this screen'}. Findings will appear here when the UX Lab run finishes.`
+      : analysisError
+        ? `We couldn't complete analysis for ${selectedScreen?.label ?? 'this screen'}. ${analysisError}`
+        : !analysis && loadingScreens
+          ? 'Loading screens for this project now. The shelf will populate once a screen is ready for analysis.'
+          : !analysis
+            ? 'Choose a screen and run analysis to populate findings, principles, and recommendations in this shelf.'
+            : undefined
 
   return (
-    <div className="px-4 sm:px-8 py-4">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-2 mt-3">
-        <span className="text-xs" style={{ color: 'rgba(204,195,216,0.5)' }}>AI Predicted Metrics</span>
-      </div>
-      <h1 className="text-2xl font-extrabold tracking-tight text-white mb-4">UX Lab</h1>
+    <div
+      className="flex h-[calc(100vh-124px)] flex-col gap-1.5 px-4 py-2 sm:h-[calc(100vh-88px)] sm:px-8"
+      style={
+        {
+          '--topbar-height': '88px',
+          '--toolbar-height': '56px',
+        } as React.CSSProperties
+      }
+    >
+      <section className="flex min-h-[42px] items-start justify-start px-1 pt-0 pb-0.5 -mb-1">
+        <div className="flex flex-col items-start justify-center text-left -translate-y-[8px]">
+          <div className="text-[28px] font-mono font-medium uppercase tracking-[-0.08em] leading-none text-white scale-x-[1.24] scale-y-[0.9] origin-left">UX Lab</div>
+          <p
+            className="mt-1 max-w-2xl text-[14px] font-mono leading-[1.05] font-medium tracking-[-0.01em]"
+            style={{ color: 'rgba(204,195,216,0.46)' }}
+          >
+            Instant teardown against best-in-class UX.
+          </p>
+        </div>
+      </section>
 
-      <div>
-        {/* Controls row */}
-        <div className="flex flex-wrap items-center gap-4 mb-3">
-          {/* Screen dropdown */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.4)' }}>Screen</span>
-            <select
-              value={selectedScreen?.label ?? ''}
-              onChange={(e) => setSelectedScreen(screens.find(s => s.label === e.target.value) ?? screens[0])}
-              disabled={loadingScreens}
-              className="text-xs font-medium rounded-lg px-3 py-1.5 outline-none cursor-pointer"
-              style={{ background: '#1c1a25', border: '1px solid rgba(74,68,85,0.3)', color: loadingScreens ? 'rgba(230,224,240,0.35)' : 'rgba(230,224,240,0.85)' }}
-            >
-              {loadingScreens
-                ? <option value="">Loading pages...</option>
-                : screens.map((s) => (
-                    <option key={s.label} value={s.label}>{s.label}</option>
-                  ))
-              }
-            </select>
-          </div>
-
-          {/* Divider */}
-          <div className="w-px h-5" style={{ background: 'rgba(74,68,85,0.3)' }} />
-
-          {/* Heatmap type pills */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.4)' }}>Analysis Mode</span>
-            <div className="flex items-center gap-1 flex-wrap">
-              {HEATMAP_TYPES.map((h) => (
-                <button
-                  key={h.key}
-                  onClick={() => setSelectedHeatmap(h.key)}
-                  className="px-3 py-1 rounded-full text-[11px] font-semibold transition-all"
-                  style={selectedHeatmap === h.key
-                    ? { background: 'rgba(124,58,237,0.3)', border: '1px solid rgba(124,58,237,0.5)', color: '#d2bbff' }
-                    : { background: 'rgba(54,51,63,0.3)', border: '1px solid rgba(74,68,85,0.2)', color: 'rgba(204,195,216,0.4)' }
-                  }
-                >
-                  {h.label}
-                </button>
-              ))}
+      <section
+        className="flex flex-1 flex-col overflow-hidden rounded-[28px] border"
+        style={{
+          background: 'rgba(16,14,24,0.92)',
+          borderColor: 'rgba(255,255,255,0.07)',
+          boxShadow: '0 16px 60px rgba(8,6,18,0.34)',
+        }}
+      >
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-5"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+        >
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.4)' }}>
+                Screen
+              </span>
+              <select
+                value={selectedScreen?.label ?? ''}
+                onChange={(event) => setSelectedScreen(screens.find((screen) => screen.label === event.target.value) ?? null)}
+                disabled={loadingScreens || !!screensError || !screens.length}
+                className="rounded-xl py-1.5 text-xs font-medium outline-none"
+                style={{
+                  background: '#1c1a25',
+                  border: `1px solid ${screensError ? 'rgba(239,68,68,0.4)' : 'rgba(74,68,85,0.3)'}`,
+                  color: loadingScreens || screensError
+                    ? 'rgba(230,224,240,0.35)'
+                    : 'rgba(230,224,240,0.85)',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  paddingLeft: '0.75rem',
+                  paddingRight: '2rem',
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(204%2C195%2C216%2C0.45)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 10px center',
+                }}
+              >
+                {loadingScreens
+                  ? <option value="">Loading pages...</option>
+                  : screensError
+                    ? <option value="">{screensError}</option>
+                    : screens.map((screen) => (
+                        <option key={screen.label} value={screen.label}>{screen.label}</option>
+                      ))
+                }
+              </select>
             </div>
           </div>
-
-          {/* Divider */}
-          <div className="w-px h-5" style={{ background: 'rgba(74,68,85,0.3)' }} />
-
-          {/* Annotations toggle */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.4)' }}>Annotations</span>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.4)' }}>
+                Annotations
+              </span>
+              <Toggle checked={showAnnotations} onChange={setShowAnnotations} />
+            </div>
             <button
-              onClick={() => setShowAnnotations(!showAnnotations)}
-              className="relative flex-shrink-0 transition-all duration-200"
-              style={{
-                width: '36px',
-                height: '20px',
-                borderRadius: '10px',
-                background: showAnnotations ? 'rgba(124,58,237,0.8)' : 'rgba(54,51,63,0.8)',
-                border: showAnnotations ? '1px solid rgba(124,58,237,0.9)' : '1px solid rgba(74,68,85,0.4)',
-              }}
+              onClick={handleApplyTransformation}
+              className="btn-primary px-4 py-2 rounded-xl text-xs font-semibold transition-all active:scale-[0.98]"
             >
-              <span
-                className="absolute top-[2px] transition-all duration-200"
-                style={{
-                  width: '14px',
-                  height: '14px',
-                  borderRadius: '50%',
-                  background: 'white',
-                  left: showAnnotations ? '18px' : '2px',
-                  display: 'block',
-                }}
-              />
+              Apply Transformation →
             </button>
           </div>
         </div>
 
-        {/* Main area */}
-        <div className="space-y-4">
-          {/* Side-by-side comparison windows */}
-          <div className="space-y-2">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Before window */}
-              {loadingAnalysis ? (
-                <AnalysisLoadingWindow label="Before" />
-              ) : analysis ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.2)' }} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.5)' }}>Before</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg" style={{ background: 'rgba(15,13,24,0.6)', border: '1px solid rgba(74,68,85,0.3)' }}>
-                      <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.4)' }}>UX Score</span>
-                      <span className="text-xs font-black" style={{ color: '#d2bbff' }}>{analysis.before.ux_score}</span>
-                    </div>
+        <div className="flex flex-1 min-h-0 flex-col lg:flex-row">
+          <div
+            className="canvas-panel"
+            style={{
+              flex: 1,
+              borderColor: 'rgba(255,255,255,0.06)',
+            }}
+          >
+            <div className="panel-header">
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.2)' }} />
+                <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.5)' }}>
+                  Preview
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {analysis && (
+                  <div className="flex items-center" style={{ background: 'rgba(15,13,24,0.7)', border: '1px solid rgba(74,68,85,0.28)', borderRadius: 6, overflow: 'hidden' }}>
+                    <button
+                      onClick={() => handleZoomChange(previewZoom - 0.15)}
+                      style={{ padding: '2px 7px', fontSize: 13, lineHeight: 1, color: 'rgba(204,195,216,0.5)', background: 'none', border: 'none', cursor: 'pointer' }}
+                      title="Zoom out"
+                    >−</button>
+                    <button
+                      onClick={() => setPreviewZoom(1)}
+                      style={{ padding: '2px 4px', fontSize: 9, fontWeight: 700, letterSpacing: '0.04em', color: previewZoom !== 1 ? 'rgba(168,85,247,0.8)' : 'rgba(204,195,216,0.4)', background: 'none', border: 'none', cursor: 'pointer', minWidth: 32, textAlign: 'center' }}
+                      title="Reset zoom"
+                    >{Math.round(previewZoom * 100)}%</button>
+                    <button
+                      onClick={() => handleZoomChange(previewZoom + 0.15)}
+                      style={{ padding: '2px 7px', fontSize: 13, lineHeight: 1, color: 'rgba(204,195,216,0.5)', background: 'none', border: 'none', cursor: 'pointer' }}
+                      title="Zoom in"
+                    >+</button>
                   </div>
-                  <div className="relative rounded-xl" style={{ background: '#201e2a', border: '1px solid rgba(74,68,85,0.15)' }}>
-                    <AnnotatedPreview
-                      screenshotB64={analysis.screenshot_b64}
-                      annotations={analysis.before.annotations}
-                      showAnnotations={showAnnotations}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <AnalysisEmptyWindow label="Before" />
-              )}
-
-              {/* After window */}
-              {loadingAnalysis ? (
-                <AnalysisLoadingWindow label="After" />
-              ) : analysis ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a855f7' }} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.5)' }}>After</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg" style={{ background: 'rgba(15,13,24,0.6)', border: '1px solid rgba(74,68,85,0.3)' }}>
-                        <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.4)' }}>UX Score</span>
-                        <span className="text-xs font-black" style={{ color: '#d2bbff' }}>{analysis.after.ux_score}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="relative rounded-xl" style={{ background: '#201e2a', border: '1px solid rgba(74,68,85,0.15)' }}>
-                    <AnnotatedPreview
-                      screenshotB64={analysis.after_screenshot_b64 ?? analysis.screenshot_b64}
-                      annotations={analysis.after.annotations}
-                      showAnnotations={showAnnotations}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <AnalysisEmptyWindow label="After" />
-              )}
+                )}
+                <span className="rounded-md px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em]" style={{ background: 'rgba(15,13,24,0.7)', color: 'rgba(204,195,216,0.42)', border: '1px solid rgba(74,68,85,0.28)' }}>
+                  {selectedScreen?.label ?? 'Screen'}
+                </span>
+              </div>
             </div>
 
-            {/* Legend */}
-            <div className="flex justify-between items-center px-1 pt-1">
-              <p className="text-xs" style={{ color: 'rgba(204,195,216,0.4)' }}>
-                {HEATMAP_TYPES.find(h => h.key === selectedHeatmap)?.label} · {selectedScreen?.label ?? ''}
-              </p>
-              <div className="flex items-center gap-3">
-                {(['positive', 'warning', 'issue'] as const).map((t) => (
-                  <div key={t} className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-sm" style={{ background: ANNOTATION_COLORS[t].pin }} />
-                    <span className="text-[10px] uppercase font-bold" style={{ color: 'rgba(204,195,216,0.5)' }}>{t}</span>
-                  </div>
-                ))}
-              </div>
+            <div id="before-panel" className="panel-screenshot">
+              {loadingAnalysis || loadingProgress > 0 ? (
+                <PreviewLoadingState title="Preview" stage={loadingStage} progress={loadingProgress} />
+              ) : analysis ? (
+                <AnnotatedPreview
+                  screenshotB64={analysis.beforeScreenshotUrl}
+                  annotations={beforeAnnotations}
+                  showAnnotations={showAnnotations}
+                  activeId={activeAnnotationId}
+                  zoom={previewZoom}
+                  onZoomChange={handleZoomChange}
+                  onSelect={handleSelectFinding}
+                />
+              ) : (
+                <PreviewPlaceholder title="Preview" message="Select a screen to begin analysis." />
+              )}
             </div>
           </div>
-
-          {/* Stats row — below windows, horizontal layout */}
-          {analysis && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-
-              {/* Friction Index */}
-              <div className="rounded-xl p-4" style={{ background: '#1c1a25', border: '1px solid rgba(74,68,85,0.15)' }}>
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.5)' }}>Friction Index</span>
-                  <div className="relative">
-                    <button
-                      onMouseEnter={() => setShowFrictionInfo(true)}
-                      onMouseLeave={() => setShowFrictionInfo(false)}
-                      className="flex items-center justify-center rounded-full text-[10px] font-bold"
-                      style={{ width: '16px', height: '16px', background: 'rgba(74,68,85,0.4)', color: 'rgba(204,195,216,0.5)' }}
-                    >
-                      ?
-                    </button>
-                    {showFrictionInfo && (
-                      <div className="absolute z-[200] rounded-xl p-4" style={{ width: '220px', bottom: '22px', right: '0', background: 'rgba(13,12,22,0.97)', border: '1px solid rgba(74,68,85,0.3)', backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
-                        <p className="text-[11px] font-bold mb-2" style={{ color: '#d2bbff' }}>What is Friction Index?</p>
-                        <p className="text-[10px] leading-relaxed" style={{ color: 'rgba(204,195,216,0.65)' }}>
-                          Friction Index measures the proportion of UX annotations flagged as issues or warnings out of all annotations identified.
-                        </p>
-                        <p className="text-[10px] leading-relaxed mt-2" style={{ color: 'rgba(204,195,216,0.65)' }}>
-                          A lower score means fewer friction points. The delta shows how much the proposed changes reduce friction.
-                        </p>
-                        <p className="text-[10px] mt-2 font-mono" style={{ color: 'rgba(204,195,216,0.35)' }}>
-                          (issues + warnings) / total annotations
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {frictionBefore !== null && frictionAfter !== null ? (
-                  <div className="space-y-3">
-                    <div>
-                      <div className="flex justify-between items-end mb-1">
-                        <span className="text-[10px]" style={{ color: 'rgba(204,195,216,0.4)' }}>Before</span>
-                        <span className="text-xs font-black text-white">{frictionBefore}%</span>
-                      </div>
-                      <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(54,51,63,1)' }}>
-                        <div className="h-full rounded-full" style={{ width: `${frictionBefore}%`, background: 'rgba(239,68,68,0.7)' }} />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex justify-between items-end mb-1">
-                        <span className="text-[10px]" style={{ color: 'rgba(204,195,216,0.4)' }}>After</span>
-                        <span className="text-xs font-black" style={{ color: '#d2bbff' }}>{frictionAfter}%</span>
-                      </div>
-                      <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(54,51,63,1)' }}>
-                        <div className="h-full rounded-full" style={{ width: `${frictionAfter}%`, background: 'rgba(124,58,237,0.7)' }} />
-                      </div>
-                    </div>
-                    {frictionDelta !== null && (
-                      <div className="flex items-center justify-between rounded-lg px-3 py-2 mt-1" style={{ background: frictionDelta > 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${frictionDelta > 0 ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}` }}>
-                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.4)' }}>Reduction</span>
-                        <span className="text-base font-black" style={{ color: frictionDelta > 0 ? '#86efac' : '#fca5a5' }}>
-                          {frictionDelta > 0 ? '−' : '+'}{Math.abs(frictionDelta)}% pts
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-[11px]" style={{ color: 'rgba(204,195,216,0.3)' }}>Run an analysis to see data.</p>
-                )}
-              </div>
-
-              {/* UX Score */}
-              <div className="rounded-xl p-4" style={{ background: '#1c1a25', border: '1px solid rgba(74,68,85,0.15)' }}>
-                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.5)' }}>UX Score</span>
-                {beforeScore !== null && afterScore !== null ? (
-                  <div className="mt-4 space-y-3">
-                    {/* Delta hero */}
-                    {scoreDelta !== null && (
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-black" style={{ color: scoreDelta >= 0 ? '#86efac' : '#fca5a5' }}>
-                          {scoreDelta >= 0 ? '+' : ''}{scoreDelta}
-                        </span>
-                        <span className="text-[10px] font-medium" style={{ color: 'rgba(204,195,216,0.35)' }}>pts improvement</span>
-                      </div>
-                    )}
-                    {/* Stacked bar */}
-                    <div className="relative w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(54,51,63,1)' }}>
-                      {/* Before fill */}
-                      <div className="absolute left-0 top-0 h-full rounded-full" style={{ width: `${beforeScore}%`, background: 'rgba(255,255,255,0.15)' }} />
-                      {/* After fill */}
-                      <div className="absolute left-0 top-0 h-full rounded-full transition-all duration-700" style={{ width: `${afterScore}%`, background: 'linear-gradient(90deg, rgba(124,58,237,0.6), #a855f7)' }} />
-                    </div>
-                    {/* Labels */}
-                    <div className="flex justify-between">
-                      <span className="text-[10px]" style={{ color: 'rgba(204,195,216,0.35)' }}>Before <span className="font-bold text-white">{beforeScore}</span></span>
-                      <span className="text-[10px]" style={{ color: 'rgba(204,195,216,0.35)' }}>After <span className="font-bold" style={{ color: '#d2bbff' }}>{afterScore}</span></span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-[11px] mt-4" style={{ color: 'rgba(204,195,216,0.3)' }}>Run an analysis to see data.</p>
-                )}
-              </div>
-
-              {/* AI Insight */}
-              <div className="rounded-xl p-4" style={{ background: '#1c1a25', border: '1px solid rgba(74,68,85,0.15)' }}>
-                <div className="flex items-center gap-1.5">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    {/* Big star */}
-                    <path d="M9 2L10.5 7.5L16 9L10.5 10.5L9 16L7.5 10.5L2 9L7.5 7.5L9 2Z" fill="rgba(168,85,247,0.9)"/>
-                    {/* Small star top-right */}
-                    <path d="M18 2L18.9 4.6L21.5 5.5L18.9 6.4L18 9L17.1 6.4L14.5 5.5L17.1 4.6L18 2Z" fill="rgba(168,85,247,0.7)"/>
-                    {/* Small star bottom-right */}
-                    <path d="M18 14L18.7 16.3L21 17L18.7 17.7L18 20L17.3 17.7L15 17L17.3 16.3L18 14Z" fill="rgba(168,85,247,0.6)"/>
-                  </svg>
-                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(204,195,216,0.5)' }}>AI Insight</span>
-                </div>
-                <div className="mt-3 p-3 rounded-lg" style={{ background: 'rgba(54,51,63,0.4)' }}>
-                  <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(204,195,216,0.6)' }}>
-                    {insightValue ?? 'Run an analysis to see insights.'}
-                  </p>
-                </div>
-              </div>
-
-            </div>
-          )}
         </div>
-      </div>
+
+        <FindingsShelf
+          findings={findings}
+          activeFindingId={activeFindingId}
+          setActiveFindingId={setActiveFindingId}
+          expanded={shelfExpanded}
+          setExpanded={setShelfExpanded}
+          pillOrder={pillOrder}
+          setPillOrder={setPillOrder}
+          onScrollToAnnotation={handleScrollToAnnotation}
+          selectedFindingIds={selectedFindingIds}
+          onToggleSelection={handleToggleSelection}
+          onSelectAll={handleSelectAll}
+          onDeselectAll={handleDeselectAll}
+          onApplySelected={handleApplySelected}
+          onRevertFinding={handleRevertFinding}
+          status={shelfStatus}
+          statusMessage={shelfStatusMessage}
+        />
+      </section>
     </div>
   )
 }

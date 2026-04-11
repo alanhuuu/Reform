@@ -742,7 +742,11 @@ function TransformPage() {
   const { canAutofix, isFree } = useSubscription()
 
   // ── Code Pipeline State ──
-  const [pipelineStep, setPipelineStep] = useState<PipelineStep>('idle')
+  const [pipelineStep, setPipelineStep] = useState<PipelineStep>(() => {
+    if (typeof window === 'undefined') return 'idle'
+    if (sessionStorage.getItem('refineui_transform')) return 'complete'
+    return 'idle'
+  })
   const [pipelineError, setPipelineError] = useState('')
   const [gateError, setGateError] = useState<GateErrorData | null>(null)
   const [ingestedFiles, setIngestedFiles] = useState<FileEntry[]>([])
@@ -757,7 +761,12 @@ function TransformPage() {
   const [repoSearch, setRepoSearch] = useState('')
   const [publishLoading, setPublishLoading] = useState(false)
   const [publishResult, setPublishResult] = useState<{ branch_name: string; branch_url: string; files_changed: string[] } | null>(null)
-  const [multiPageResult, setMultiPageResult] = useState<MultiPageTransformResult | null>(null)
+  const [multiPageResult, setMultiPageResult] = useState<MultiPageTransformResult | null>(() => {
+    if (typeof window === 'undefined') return null
+    const stored = sessionStorage.getItem('refineui_transform')
+    if (!stored) return null
+    try { return JSON.parse(stored).multiPageResult ?? null } catch { return null }
+  })
   const [reRendering, setReRendering] = useState(false)
   const [reRenderStatus, setReRenderStatus] = useState('')
 
@@ -777,23 +786,47 @@ function TransformPage() {
   const autoStartedRef = useRef(false)
 
   useEffect(() => {
+    type PipelineWindow = Window & { __reformPipelinePromise?: Promise<unknown> }
+    const bgPromise = (window as PipelineWindow).__reformPipelinePromise
+    const alreadyCached = !!sessionStorage.getItem('refineui_transform')
+
+    if (bgPromise && !alreadyCached) {
+      autoStartedRef.current = true
+      setPipelineStep('ingesting')
+      bgPromise.then((result) => {
+        const r = result as MultiPageTransformResult | null
+        if (r) {
+          setMultiPageResult(r)
+          setRepoName(r.repo_name || '')
+          setRepoBranch(r.branch || 'main')
+          setPipelineStep('complete')
+        } else {
+          autoStartedRef.current = false
+          setPipelineStep('idle')
+        }
+        delete (window as PipelineWindow).__reformPipelinePromise
+      })
+      return
+    }
+
+    delete (window as PipelineWindow).__reformPipelinePromise
+
     const stored = sessionStorage.getItem('refineui_analysis')
     if (stored) { try { setAnalysis(JSON.parse(stored)) } catch { /* */ } }
     const storedTransform = sessionStorage.getItem('refineui_transform')
     if (storedTransform) {
       try {
+        autoStartedRef.current = true
         const t = JSON.parse(storedTransform)
         setTransform(JSON.parse(storedTransform))
         setTransformResult(t.result); setCodeAnalysis(t.codeAnalysis)
         setSelectedTarget(t.target); setRepoName(t.repoName)
         setRepoBranch(t.branch || 'main'); setPipelineStep('complete')
         // Derive multi-page result for new UI
-        if (t.result) {
-          if (t.multiPageResult) {
-            setMultiPageResult(t.multiPageResult)
-          } else {
-            setMultiPageResult(adaptLegacyResult(t.result, t.repoName || '', t.target || ''))
-          }
+        if (t.multiPageResult) {
+          setMultiPageResult(t.multiPageResult)
+        } else if (t.result) {
+          setMultiPageResult(adaptLegacyResult(t.result, t.repoName || '', t.target || ''))
         }
       } catch { /* */ }
     }
