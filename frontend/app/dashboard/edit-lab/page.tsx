@@ -63,6 +63,16 @@ interface NavigatePayload {
   error?: string | null
 }
 
+interface RevertPayload {
+  session_id: string
+  screenshot: string
+  sections: Section[]
+  document_size: DocumentSize
+  target_file: string | null
+  session_expired?: boolean
+  error?: string | null
+}
+
 interface ApplyPayload {
   session_id: string
   screenshot: string
@@ -270,7 +280,9 @@ export default function EditLabPage() {
     afterDocumentSize: DocumentSize
     afterScreenshot: string
     newSectionId: string | null
+    pending: boolean
   } | null>(null)
+  const [reverting, setReverting] = useState(false)
 
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const [canvasWidth, setCanvasWidth] = useState(1)
@@ -532,8 +544,9 @@ export default function EditLabPage() {
         afterDocumentSize: data.document_size,
         afterScreenshot: data.screenshot,
         newSectionId,
+        pending: true,
       })
-      setToast({ kind: 'ok', msg: data.summary || `Updated ${beforeSnapshot.label}` })
+      // No toast — the Accept/Reject card is the primary confirmation.
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to apply change'
       setToast({ kind: 'err', msg })
@@ -550,6 +563,50 @@ export default function EditLabPage() {
     runLoad,
     triggerHighlight,
   ])
+
+  const handleAcceptEdit = useCallback(() => {
+    setLastEdit((prev) => (prev ? { ...prev, pending: false } : prev))
+    // Fade the accepted card out after a moment so the right panel returns
+    // to its neutral empty state and the user can start a new selection.
+    setTimeout(() => setLastEdit(null), 1800)
+  }, [])
+
+  const handleRejectEdit = useCallback(async () => {
+    if (!sessionId) return
+    setReverting(true)
+    try {
+      const res = await fetch(apiUrl('/edit-lab/revert'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      })
+      if (!res.ok) throw new Error(`Revert failed (${res.status})`)
+      const data: RevertPayload = await res.json()
+      if (data.session_expired) {
+        setToast({ kind: 'err', msg: 'Session expired. Reload the preview and try again.' })
+        return
+      }
+      if (data.error) throw new Error(data.error)
+      setPayload((prev) =>
+        prev
+          ? {
+              ...prev,
+              screenshot: data.screenshot || prev.screenshot,
+              sections: data.sections || [],
+              document_size: data.document_size || prev.document_size,
+            }
+          : prev,
+      )
+      setLastEdit(null)
+      setSelection(null)
+      setJustUpdatedId(null)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to revert change'
+      setToast({ kind: 'err', msg })
+    } finally {
+      setReverting(false)
+    }
+  }, [sessionId])
 
   const onCanvasPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -656,13 +713,13 @@ export default function EditLabPage() {
 
       <div className="mb-6">
         <div className="text-[11px] mono uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          Edit Lab
+          The Lab
         </div>
         <h1 className="text-[28px] font-semibold text-white mt-1" style={{ letterSpacing: '-0.02em' }}>
           Select a section. Describe the change.
         </h1>
         <p className="text-[13px] mt-1.5 max-w-[620px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
-          Edit Lab loads the current website from your repo. Click a section, write a short prompt, and Reform applies the change to that part of your source — the dev server stays warm, so repeat edits are fast.
+          The Lab loads the current website from your repo. Click or drag to select any region, write a short prompt, and Reform applies the change to that part of your source — the dev server stays warm, so repeat edits are fast.
         </p>
       </div>
 
@@ -811,6 +868,48 @@ export default function EditLabPage() {
               {loading ? 'Loading…' : 'Reload preview'}
             </button>
           </div>
+
+          {payload && payload.available_pages && payload.available_pages.length > 1 && (
+            <div
+              className="flex items-center gap-1 px-3 py-2 overflow-x-auto"
+              style={{
+                background: 'rgba(255,255,255,0.015)',
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+              }}
+            >
+              <span
+                className="text-[10px] mono uppercase tracking-wider pr-2 flex-shrink-0"
+                style={{ color: 'rgba(255,255,255,0.3)' }}
+              >
+                Pages
+              </span>
+              {payload.available_pages.map((p) => {
+                const isCurrent = p.route === payload.current_page
+                return (
+                  <button
+                    key={p.route}
+                    onClick={() => !navigating && !applying && runNavigate(p.route)}
+                    disabled={navigating || applying || isCurrent}
+                    className="text-[11px] px-2.5 py-1 rounded-md whitespace-nowrap transition-colors flex-shrink-0"
+                    style={{
+                      background: isCurrent ? 'rgba(124,140,255,0.14)' : 'transparent',
+                      color: isCurrent ? 'white' : 'rgba(255,255,255,0.5)',
+                      border: isCurrent
+                        ? '1px solid rgba(170,180,255,0.25)'
+                        : '1px solid rgba(255,255,255,0.06)',
+                      cursor: isCurrent ? 'default' : navigating || applying ? 'not-allowed' : 'pointer',
+                    }}
+                    title={p.path || p.route}
+                  >
+                    {p.name}
+                    <span className="mono ml-1.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                      {p.route}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           <div ref={canvasRef} className="relative w-full" style={{ minHeight: 500 }}>
             {!repoState && !loading && (
@@ -1088,6 +1187,9 @@ export default function EditLabPage() {
             <LastEditCard
               lastEdit={lastEdit}
               onDismiss={() => setLastEdit(null)}
+              onAccept={handleAcceptEdit}
+              onReject={handleRejectEdit}
+              reverting={reverting}
             />
           )}
 
@@ -1125,8 +1227,8 @@ export default function EditLabPage() {
                   </div>
                 )}
                 {selection.kind === 'rect' && selection.memberIds.length === 0 && (
-                  <div className="text-[11px] mt-1" style={{ color: 'rgba(234,179,8,0.7)' }}>
-                    No detected content inside this rectangle — the edit will target the page root file.
+                  <div className="text-[11px] mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    Custom region — Reform will interpret this area by visible content and edit the page root file.
                   </div>
                 )}
                 {selection.source_file && (
@@ -1199,7 +1301,16 @@ export default function EditLabPage() {
                 {applying ? 'Applying…' : 'Apply change'}
               </button>
 
-              {lastEdit && <LastEditCard lastEdit={lastEdit} onDismiss={() => setLastEdit(null)} compact />}
+              {lastEdit && (
+                <LastEditCard
+                  lastEdit={lastEdit}
+                  onDismiss={() => setLastEdit(null)}
+                  onAccept={handleAcceptEdit}
+                  onReject={handleRejectEdit}
+                  reverting={reverting}
+                  compact
+                />
+              )}
             </>
           )}
 
@@ -1224,6 +1335,9 @@ export default function EditLabPage() {
 function LastEditCard({
   lastEdit,
   onDismiss,
+  onAccept,
+  onReject,
+  reverting,
   compact = false,
 }: {
   lastEdit: {
@@ -1233,33 +1347,45 @@ function LastEditCard({
     afterDocumentSize: DocumentSize
     afterScreenshot: string
     newSectionId: string | null
+    pending: boolean
   }
   onDismiss: () => void
+  onAccept: () => void
+  onReject: () => void
+  reverting: boolean
   compact?: boolean
 }) {
+  const pending = lastEdit.pending
+  const accentBg = pending ? 'rgba(124,140,255,0.05)' : 'rgba(34,197,94,0.04)'
+  const accentBorder = pending ? 'rgba(124,140,255,0.22)' : 'rgba(34,197,94,0.18)'
+  const statusDot = pending ? '#7c8cff' : '#22c55e'
+  const statusLabelColor = pending ? 'rgba(170,180,255,0.9)' : 'rgba(134,239,172,0.9)'
+
   return (
     <div
       className="rounded-xl p-3 flex flex-col gap-3"
       style={{
-        background: 'rgba(34,197,94,0.04)',
-        border: '1px solid rgba(34,197,94,0.18)',
+        background: accentBg,
+        border: `1px solid ${accentBorder}`,
       }}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#22c55e' }} />
-          <div className="text-[10px] mono uppercase tracking-wider" style={{ color: 'rgba(134,239,172,0.9)' }}>
-            Updated {lastEdit.before.label}
+          <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: statusDot }} />
+          <div className="text-[10px] mono uppercase tracking-wider" style={{ color: statusLabelColor }}>
+            {pending ? `Review ${lastEdit.before.label}` : `Accepted ${lastEdit.before.label}`}
           </div>
         </div>
-        <button
-          onClick={onDismiss}
-          className="text-[10px]"
-          style={{ color: 'rgba(255,255,255,0.3)' }}
-          aria-label="Dismiss"
-        >
-          ×
-        </button>
+        {!pending && (
+          <button
+            onClick={onDismiss}
+            className="text-[10px]"
+            style={{ color: 'rgba(255,255,255,0.3)' }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        )}
       </div>
       <div className="text-[12px] font-medium text-white line-clamp-2">{lastEdit.summary}</div>
 
@@ -1277,6 +1403,45 @@ function LastEditCard({
             rect={lastEdit.afterRect}
             documentSize={lastEdit.afterDocumentSize}
           />
+        </div>
+      )}
+
+      {pending && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onAccept}
+            disabled={reverting}
+            className="flex-1 py-2 rounded-lg text-[11px] font-semibold transition-all disabled:opacity-40"
+            style={{
+              background: 'rgba(34,197,94,0.15)',
+              border: '1px solid rgba(34,197,94,0.35)',
+              color: 'rgba(187,247,208,0.95)',
+            }}
+          >
+            ✓ Accept
+          </button>
+          <button
+            onClick={onReject}
+            disabled={reverting}
+            className="flex-1 py-2 rounded-lg text-[11px] font-semibold transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
+            style={{
+              background: 'rgba(239,68,68,0.1)',
+              border: '1px solid rgba(239,68,68,0.3)',
+              color: 'rgba(254,202,202,0.95)',
+            }}
+          >
+            {reverting ? (
+              <>
+                <div
+                  className="w-3 h-3 rounded-full animate-spin"
+                  style={{ border: '1.5px solid rgba(254,202,202,0.25)', borderTopColor: 'rgba(254,202,202,0.95)' }}
+                />
+                Reverting…
+              </>
+            ) : (
+              <>✕ Reject</>
+            )}
+          </button>
         </div>
       )}
     </div>

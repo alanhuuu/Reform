@@ -33,18 +33,49 @@ logger = logging.getLogger(__name__)
 
 SECTION_DETECTION_SCRIPT = r"""
 () => {
-  const selector = 'header, nav, main > *, section, footer, aside, [data-section]';
-  const nodes = Array.from(document.querySelectorAll(selector));
-  const sections = [];
-  nodes.forEach((el, idx) => {
+  // Three-tier detection so dashboards with lots of non-semantic markup
+  // still produce selectable targets for drag-rectangle selection.
+  //
+  //   Tier 1 (semantic): the classic six landmark/structural tags.
+  //   Tier 2 (content):  forms, tables, articles, lists, figures and any
+  //                      div with a class hint suggesting it's a card /
+  //                      panel / widget / group / stats block.
+  //   Tier 3 (interactive): buttons, anchors, and role="button" elements
+  //                      so small action targets still get a hit-box.
+  const primarySelector = 'header, nav, main > *, section, footer, aside, article, form, figure, [data-section]';
+  const contentClassHints = /\b(card|panel|widget|stats?|metric|tile|box|group|grid|shelf|toolbar|banner|hero|feature|cta|footer|header|sidebar)\b/i;
+  const seen = new Set();
+  const candidates = [];
+
+  const pushCandidate = (el, tierMinW, tierMinH) => {
+    if (seen.has(el)) return;
     const rect = el.getBoundingClientRect();
+    if (rect.width < tierMinW || rect.height < tierMinH) return;
+    seen.add(el);
+    candidates.push({ el, rect });
+  };
+
+  document.querySelectorAll(primarySelector).forEach(el => pushCandidate(el, 120, 60));
+
+  document.querySelectorAll('form, table, ul, ol, figure, article').forEach(el => pushCandidate(el, 100, 48));
+
+  document.querySelectorAll('div, section').forEach(el => {
+    const cls = (el.className && el.className.toString ? el.className.toString() : '');
+    if (cls && contentClassHints.test(cls)) pushCandidate(el, 100, 48);
+  });
+
+  document.querySelectorAll('button, a[href], [role="button"], [role="navigation"], input[type="submit"]').forEach(el => pushCandidate(el, 40, 20));
+
+  const sections = [];
+  candidates.forEach((c, idx) => {
+    const el = c.el;
+    const rect = c.rect;
     const abs = {
       x: Math.round(rect.x + window.scrollX),
       y: Math.round(rect.y + window.scrollY),
       width: Math.round(rect.width),
       height: Math.round(rect.height),
     };
-    if (abs.width < 120 || abs.height < 60) return;
 
     const tag = el.tagName.toLowerCase();
     const classAttr = (el.className && el.className.toString ? el.className.toString() : '').toLowerCase();
@@ -53,7 +84,16 @@ SECTION_DETECTION_SCRIPT = r"""
 
     let label = dataSec || ariaLabel;
     if (!label) {
-      if (tag === 'nav' || classAttr.includes('navbar') || classAttr.includes('menubar')) label = 'Navigation';
+      if (tag === 'button' || (el.getAttribute && el.getAttribute('role') === 'button')) {
+        const btnText = (el.textContent || '').trim();
+        label = btnText ? btnText.slice(0, 32) : 'Button';
+      } else if (tag === 'a') {
+        const linkText = (el.textContent || '').trim();
+        label = linkText ? linkText.slice(0, 32) : 'Link';
+      } else if (tag === 'form') label = 'Form';
+      else if (tag === 'table') label = 'Table';
+      else if (tag === 'ul' || tag === 'ol') label = 'List';
+      else if (tag === 'nav' || classAttr.includes('navbar') || classAttr.includes('menubar')) label = 'Navigation';
       else if (tag === 'header' || classAttr.includes('site-header') || classAttr.includes('page-header')) label = 'Header';
       else if (tag === 'footer' || classAttr.includes('footer')) label = 'Footer';
       else if (tag === 'aside' || classAttr.includes('sidebar')) label = 'Sidebar';
@@ -66,6 +106,11 @@ SECTION_DETECTION_SCRIPT = r"""
       else if (classAttr.includes('stats') || classAttr.includes('metric')) label = 'Stats';
       else if (classAttr.includes('gallery')) label = 'Gallery';
       else if (classAttr.includes('contact')) label = 'Contact';
+      else if (classAttr.includes('card')) label = 'Card';
+      else if (classAttr.includes('panel')) label = 'Panel';
+      else if (classAttr.includes('widget')) label = 'Widget';
+      else if (classAttr.includes('grid')) label = 'Grid';
+      else if (classAttr.includes('toolbar')) label = 'Toolbar';
       else {
         const h = el.querySelector('h1, h2, h3');
         const headingText = h && h.textContent ? h.textContent.trim() : '';
@@ -587,6 +632,56 @@ def _locate_target_file(sess: EditLabSession, target_file: str) -> Optional[str]
     return None
 
 
+async def revert_last_edit(session_id: str) -> dict:
+    """Restore the most recent pre-edit file snapshot and re-render the
+    warm dev server. Clears the pending revert on success so subsequent
+    reverts know there's nothing more to undo."""
+    if not session_id:
+        return {"error": "Missing session_id. Please reload the preview.", "session_expired": True}
+
+    registry = get_registry()
+    registry.sweep()
+    sess = registry.get(session_id)
+    if not sess:
+        return {"error": "Edit Lab session expired. Reloading preview…", "session_expired": True}
+
+    pending = sess.pending_revert
+    if not pending:
+        return {"session_id": sess.id, "error": "Nothing to revert — no edit has been applied yet."}
+
+    target_full = pending.get("target_full_path") or os.path.join(sess.frontend_dir, pending.get("target_file", ""))
+    if not target_full or not os.path.isfile(target_full):
+        sess.pending_revert = None
+        return {"session_id": sess.id, "error": "Could not locate the file to revert (it may have been moved or renamed)."}
+
+    try:
+        with open(target_full, "w", encoding="utf-8") as f:
+            f.write(pending["original_code"])
+
+        # Wait for HMR to recompile the reverted file before screenshotting.
+        await asyncio.sleep(2.5)
+
+        screenshot_b64, detection = await _playwright_collect(sess.base_url)
+        sections = detection.get("sections", []) or []
+        document_size = detection.get("document_size", {"width": 1440, "height": 900})
+
+        _assign_source_files(sections, sess.frontend_dir, pending.get("target_file"))
+
+        sess.pending_revert = None
+        sess.touch()
+
+        return {
+            "session_id": sess.id,
+            "screenshot": screenshot_b64,
+            "sections": sections,
+            "document_size": document_size,
+            "target_file": pending.get("target_file"),
+        }
+    except Exception as e:
+        logger.error("Edit Lab revert failed: %s", e, exc_info=True)
+        return {"session_id": sess.id, "error": f"Revert failed: {e}"}
+
+
 async def apply_section_edit(
     session_id: str,
     target_file: str,
@@ -623,6 +718,15 @@ async def apply_section_edit(
 
         with open(target_full, "r", encoding="utf-8") as f:
             current_code = f.read()
+
+        # Snapshot the pre-edit content so the user can reject the edit
+        # afterwards. Overwrites any previous pending revert — V1 supports
+        # one level of undo.
+        sess.pending_revert = {
+            "target_file": target_file,
+            "target_full_path": target_full,
+            "original_code": current_code,
+        }
 
         prompt = _build_scoped_prompt(
             current_code,

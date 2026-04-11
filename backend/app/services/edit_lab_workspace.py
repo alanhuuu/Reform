@@ -51,6 +51,11 @@ class EditLabSession:
     server_proc: subprocess.Popen
     root_file: Optional[str]
     page_file_by_route: dict[str, str] = field(default_factory=dict)
+    # One-level undo: stores the pre-edit file content from the most recent
+    # apply_section_edit call. `revert_last_edit` writes this back to disk
+    # and re-renders. Cleared after every successful revert and overwritten
+    # on every subsequent apply.
+    pending_revert: Optional[dict] = None  # {'target_file': str, 'original_code': str}
     last_used: float = field(default_factory=time.time)
 
     @property

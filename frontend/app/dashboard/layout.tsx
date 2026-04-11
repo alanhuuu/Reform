@@ -15,7 +15,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/discovery', label: 'Project Discovery' },
   { href: '/dashboard/simulation', label: 'UX Analysis' },
   { href: '/dashboard/transform', label: 'UI Transformation' },
-  { href: '/dashboard/edit-lab', label: 'Edit Lab' },
+  { href: '/dashboard/edit-lab', label: 'The Lab' },
 ]
 
 type NavBounds = {

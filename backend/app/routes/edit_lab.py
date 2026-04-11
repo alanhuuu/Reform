@@ -12,6 +12,7 @@ from app.services.edit_lab_service import (
     apply_section_edit,
     load_current_preview,
     navigate_to_page,
+    revert_last_edit,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,36 @@ class NavigateResponse(BaseModel):
     target_page_file: str | None = None
     session_expired: bool = False
     error: str | None = None
+
+
+class RevertRequest(BaseModel):
+    session_id: str
+
+
+class RevertResponse(BaseModel):
+    session_id: str = ""
+    screenshot: str = ""
+    sections: list[SectionPayload] = []
+    document_size: DocumentSize = DocumentSize()
+    target_file: str | None = None
+    session_expired: bool = False
+    error: str | None = None
+
+
+@router.post("/revert", response_model=RevertResponse)
+async def revert_endpoint(req: RevertRequest):
+    try:
+        result = await revert_last_edit(req.session_id)
+        if result.get("error"):
+            return RevertResponse(
+                session_id=result.get("session_id", ""),
+                error=result["error"],
+                session_expired=bool(result.get("session_expired")),
+            )
+        return RevertResponse(**result)
+    except Exception as e:
+        logger.error("edit-lab/revert failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/navigate", response_model=NavigateResponse)

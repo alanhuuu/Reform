@@ -1457,7 +1457,7 @@ function TransformPage() {
           </div>
         )}
 
-        {/* ── Edit Lab CTA — only when complete ── */}
+        {/* ── The Lab CTA — only when complete ── */}
         {pipelineStep === 'complete' && <div className="flex justify-center">
           <button
             onClick={() => router.push('/dashboard/edit-lab')}
@@ -1469,7 +1469,7 @@ function TransformPage() {
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
             </svg>
-            <span>Open Edit Lab</span>
+            <span>Open The Lab</span>
             <span style={{ color: 'rgba(168,85,247,0.5)', fontSize: '12px' }}>→</span>
           </button>
         </div>}
