@@ -4,11 +4,35 @@ import { useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { apiUrl } from '@/lib/api'
 
+const HEARTBEAT_INTERVAL = 30_000
+
 export default function SiteTracker() {
   const sessionStartRef = useRef(Date.now())
   const hasSentRef = useRef(false)
+  const sessionIdRef = useRef(crypto.randomUUID())
   const { data: session } = useSession()
 
+  // Heartbeat — keeps "active users" count live
+  useEffect(() => {
+    const sendHeartbeat = () => {
+      const payload = {
+        session_id: sessionIdRef.current,
+        github_user_id: (session as any)?.githubId ?? null,
+        path: window.location.pathname,
+      }
+      fetch(apiUrl('/analytics/heartbeat'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => {})
+    }
+
+    sendHeartbeat()
+    const interval = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL)
+    return () => clearInterval(interval)
+  }, [session])
+
+  // Visit duration — fires once on tab close/hide
   useEffect(() => {
     const sendVisit = () => {
       if (hasSentRef.current) return
