@@ -755,8 +755,18 @@ function TransformPage() {
   const [selectedTarget, setSelectedTarget] = useState('')
   const [userIntent, setUserIntent] = useState('')
   const [transformResult, setTransformResult] = useState<TransformResult | null>(null)
-  const [repoName, setRepoName] = useState('')
-  const [repoBranch, setRepoBranch] = useState('main')
+  const [repoName, setRepoName] = useState<string>(() => {
+    if (typeof window === 'undefined') return ''
+    const stored = sessionStorage.getItem('refineui_transform')
+    if (!stored) return ''
+    try { return JSON.parse(stored).repoName ?? '' } catch { return '' }
+  })
+  const [repoBranch, setRepoBranch] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'main'
+    const stored = sessionStorage.getItem('refineui_transform')
+    if (!stored) return 'main'
+    try { return JSON.parse(stored).branch || 'main' } catch { return 'main' }
+  })
   const [repos, setRepos] = useState<GithubRepo[]>([])
   const [loadingRepos, setLoadingRepos] = useState(false)
   const [repoSearch, setRepoSearch] = useState('')
