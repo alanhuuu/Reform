@@ -5,52 +5,59 @@
 :root {
   color-scheme: dark;
 
-  /* ── Reform v2 design tokens ──
-   * Premium dark + emerald accent system. Used by components/ui/*
-   * primitives and every page refreshed in the v2 pass. Older tokens
-   * below still back UX Lab and any surface not yet touched.
+  /* ── Reform v2 design tokens — Railway developer-tool palette ──
+   * Dense, structured, infra-focused. Flat (no card shadows), tighter
+   * radii (10-12px), visible-but-subtle borders (#262626), and a
+   * monochrome text scale with emerald used only for accent states.
    */
-  --ui-bg:            #0A0A0A;
-  --ui-bg-radial:     #0C0C0E;
-  --ui-surface:       #111113;
-  --ui-surface-2:     #151518;
-  --ui-surface-3:     #1A1A1D;
-  --ui-hover:         rgba(255, 255, 255, 0.035);
-  --ui-border:        rgba(255, 255, 255, 0.06);
-  --ui-border-strong: rgba(255, 255, 255, 0.12);
-  --ui-text:          #FFFFFF;
-  --ui-text-muted:    #A1A1AA;
+  --ui-bg:            #0D0D0D;
+  --ui-bg-elevated:   #111111;
+  --ui-sidebar:       #0A0A0A;
+  --ui-surface:       #161616;
+  --ui-surface-2:     #1C1C1C;
+  --ui-surface-3:     #222222;
+  --ui-hover:         #1A1A1A;
+  --ui-border:        #262626;
+  --ui-border-strong: #333333;
+  --ui-text:          #E5E7EB;
+  --ui-text-muted:    #9CA3AF;
   --ui-text-dim:      #6B7280;
-  --ui-text-faint:    #3F3F46;
+  --ui-text-faint:    #4B5563;
 
   --ui-accent:        #10B981;
   --ui-accent-hover:  #34D399;
-  --ui-accent-fg:     #022C22;
-  --ui-accent-bg:     rgba(16, 185, 129, 0.08);
-  --ui-accent-border: rgba(16, 185, 129, 0.25);
+  --ui-accent-fg:     #052E1E;
+  --ui-accent-bg:     rgba(16, 185, 129, 0.1);
+  --ui-accent-border: rgba(16, 185, 129, 0.3);
   --ui-accent-glow:   rgba(16, 185, 129, 0.18);
 
+  --ui-blue:          #3B82F6;
+  --ui-blue-bg:       rgba(59, 130, 246, 0.1);
+  --ui-blue-border:   rgba(59, 130, 246, 0.3);
+
+  --ui-warn:          #F59E0B;
+  --ui-warn-bg:       rgba(245, 158, 11, 0.1);
+  --ui-warn-border:   rgba(245, 158, 11, 0.3);
+
   --ui-danger:        #EF4444;
-  --ui-danger-bg:     rgba(239, 68, 68, 0.08);
-  --ui-danger-border: rgba(239, 68, 68, 0.25);
+  --ui-danger-bg:     rgba(239, 68, 68, 0.1);
+  --ui-danger-border: rgba(239, 68, 68, 0.3);
 
-  --ui-radius-sm: 10px;
-  --ui-radius:    14px;
-  --ui-radius-lg: 20px;
+  --ui-radius-sm: 8px;
+  --ui-radius:    10px;
+  --ui-radius-lg: 14px;
 
-  --ui-shadow-card:
-    0 1px 0 rgba(255, 255, 255, 0.04) inset,
-    0 12px 32px rgba(0, 0, 0, 0.45);
-  --ui-shadow-elevated:
-    0 1px 0 rgba(255, 255, 255, 0.05) inset,
-    0 24px 56px rgba(0, 0, 0, 0.55);
-  --ui-focus-ring:    0 0 0 3px rgba(16, 185, 129, 0.18);
+  --ui-shadow-card: none;
+  --ui-shadow-elevated: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
+  --ui-focus-ring:    0 0 0 2px rgba(16, 185, 129, 0.22);
 
-  --ui-ease:      cubic-bezier(0.2, 0.7, 0.1, 1);
-  --ui-ease-out:  cubic-bezier(0.16, 1, 0.3, 1);
-  --ui-dur-fast:  150ms;
-  --ui-dur:       220ms;
-  --ui-dur-slow:  360ms;
+  --ui-ease:      cubic-bezier(0.16, 0.84, 0.44, 1);
+  --ui-ease-out:  cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ui-dur-fast:  120ms;
+  --ui-dur:       180ms;
+  --ui-dur-slow:  260ms;
+
+  --ui-sidebar-w: 240px;
 
   /* ── Reform UX Lab design tokens (legacy, still in use) ── */
 
@@ -95,26 +102,26 @@
   --duration-shelf:   280ms;
   --duration-content: 200ms;
 
-  /* Backgrounds — realigned to v2 palette */
-  --color-bg: #0A0A0A;
-  --color-bg-elevated: #111113;
+  /* Backgrounds — Railway palette */
+  --color-bg: #0D0D0D;
+  --color-bg-elevated: #161616;
 
-  /* Surfaces — realigned to v2 palette */
-  --color-surface: rgba(17, 17, 19, 0.88);
-  --color-surface-raised: rgba(255, 255, 255, 0.03);
-  --color-surface-hover: rgba(255, 255, 255, 0.045);
-  --color-surface-strong: rgba(255, 255, 255, 0.06);
+  /* Surfaces */
+  --color-surface: #161616;
+  --color-surface-raised: #1C1C1C;
+  --color-surface-hover: #1A1A1A;
+  --color-surface-strong: #222222;
 
-  /* Borders — standardized to 3 tiers */
-  --color-border: rgba(255, 255, 255, 0.06);
-  --color-border-hover: rgba(255, 255, 255, 0.1);
-  --color-border-strong: rgba(255, 255, 255, 0.14);
+  /* Borders */
+  --color-border: #262626;
+  --color-border-hover: #333333;
+  --color-border-strong: #3F3F3F;
 
-  /* Text — 4 tiers only */
-  --color-text-primary: #FFFFFF;
-  --color-text-secondary: #A1A1AA;
-  --color-text-tertiary: rgba(255, 255, 255, 0.42);
-  --color-text-muted: rgba(255, 255, 255, 0.22);
+  /* Text — 4 tiers */
+  --color-text-primary: #E5E7EB;
+  --color-text-secondary: #9CA3AF;
+  --color-text-tertiary: #6B7280;
+  --color-text-muted: #4B5563;
 
   /* Accent — emerald */
   --color-accent: #10B981;
@@ -137,22 +144,26 @@ html {
 }
 
 body {
-  background:
-    radial-gradient(1200px 600px at 50% -10%, rgba(16, 185, 129, 0.05), transparent 60%),
-    radial-gradient(900px 500px at 85% 110%, rgba(255, 255, 255, 0.02), transparent 60%),
-    linear-gradient(180deg, #0B0B0C 0%, #09090B 50%, #08080A 100%);
-  background-color: var(--ui-bg);
+  background: var(--ui-bg);
   color: var(--ui-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  font-feature-settings: 'cv11', 'ss01';
   font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
 }
 
 ::selection {
   background: rgba(16, 185, 129, 0.28);
   color: #FFFFFF;
+}
+
+/* Subtle grid texture used by the main content area */
+.rw-grid-texture {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 48px 48px;
 }
 
 a {

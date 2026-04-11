@@ -32,9 +32,9 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3 text-[12px]',
-  md: 'h-10 px-4 text-[13px]',
-  lg: 'h-12 px-6 text-[14px]',
+  sm: 'h-7 px-2.5 text-[12px]',
+  md: 'h-8 px-3 text-[12.5px]',
+  lg: 'h-9 px-4 text-[13px]',
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -42,26 +42,23 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   const base =
-    'inline-flex items-center justify-center gap-2 rounded-[12px] font-medium tracking-[-0.01em] select-none ' +
-    'transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[#10B981]/40 ' +
+    'inline-flex items-center justify-center gap-1.5 rounded-[8px] font-medium tracking-[-0.005em] select-none ' +
+    'transition-colors duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[#10B981]/35 ' +
     'disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none whitespace-nowrap'
 
   const variants: Record<ButtonVariant, string> = {
     primary:
-      'text-[#06221B] bg-[#10B981] border border-[#10B981]/60 ' +
-      'shadow-[0_1px_0_rgba(255,255,255,0.16)_inset,0_8px_24px_rgba(16,185,129,0.22)] ' +
-      'hover:bg-[#34D399] hover:-translate-y-px ' +
-      'hover:shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_12px_32px_rgba(16,185,129,0.28)] ' +
-      'active:translate-y-0',
+      'text-[#052E1E] bg-[#10B981] border border-[#10B981] ' +
+      'hover:bg-[#34D399] hover:border-[#34D399]',
     secondary:
-      'text-white bg-[#15151A] border border-white/10 ' +
-      'hover:bg-[#1C1C21] hover:border-white/18 hover:-translate-y-px',
+      'text-[#E5E7EB] bg-[#1C1C1C] border border-[#262626] ' +
+      'hover:bg-[#222222] hover:border-[#333333]',
     ghost:
-      'text-[#A1A1AA] bg-transparent border border-transparent ' +
-      'hover:text-white hover:bg-white/[0.05]',
+      'text-[#9CA3AF] bg-transparent border border-transparent ' +
+      'hover:text-[#E5E7EB] hover:bg-[#1A1A1A]',
     danger:
-      'text-[#FCA5A5] bg-[#EF4444]/[0.08] border border-[#EF4444]/25 ' +
-      'hover:bg-[#EF4444]/[0.14] hover:text-[#FECACA] hover:-translate-y-px',
+      'text-[#FCA5A5] bg-[#1C1C1C] border border-[#EF4444]/30 ' +
+      'hover:bg-[#EF4444]/[0.12] hover:border-[#EF4444]/45 hover:text-[#FECACA]',
   }
 
   return (
@@ -90,21 +87,18 @@ interface CardProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 export const Card = forwardRef<HTMLDivElement, CardProps>(function Card(
-  { hoverable, elevated, padded = true, className = '', children, ...rest },
+  { hoverable, elevated: _elevated, padded = true, className = '', children, ...rest },
   ref,
 ) {
   const base =
-    'rounded-[16px] border border-white/[0.06] bg-[#111113] ' +
-    'transition-all duration-200 ease-out'
-  const pad = padded ? 'p-5 sm:p-6' : ''
-  const shadow = elevated
-    ? 'shadow-[0_1px_0_rgba(255,255,255,0.05)_inset,0_24px_56px_rgba(0,0,0,0.55)]'
-    : 'shadow-[0_1px_0_rgba(255,255,255,0.04)_inset,0_12px_32px_rgba(0,0,0,0.45)]'
+    'rounded-[12px] border border-[#262626] bg-[#161616] ' +
+    'transition-colors duration-150 ease-out'
+  const pad = padded ? 'p-4' : ''
   const hover = hoverable
-    ? 'hover:-translate-y-0.5 hover:bg-[#141418] hover:border-white/[0.1] cursor-pointer'
+    ? 'hover:bg-[#191919] hover:border-[#333333] cursor-pointer'
     : ''
   return (
-    <div ref={ref} className={`${base} ${pad} ${shadow} ${hover} ${className}`} {...rest}>
+    <div ref={ref} className={`${base} ${pad} ${hover} ${className}`} {...rest}>
       {children}
     </div>
   )
@@ -121,23 +115,23 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   ref,
 ) {
   const base =
-    'w-full h-11 rounded-[12px] bg-[#111113] border border-white/[0.08] ' +
-    'text-white placeholder:text-[#6B7280] text-[14px] tracking-[-0.01em] ' +
-    'transition-all duration-200 ease-out outline-none ' +
-    'hover:border-white/[0.14] ' +
-    'focus:border-[#10B981]/45 focus:bg-[#131316] focus:ring-2 focus:ring-[#10B981]/15 ' +
+    'w-full h-9 rounded-[8px] bg-[#161616] border border-[#262626] ' +
+    'text-[#E5E7EB] placeholder:text-[#6B7280] text-[13px] tracking-[-0.005em] ' +
+    'transition-colors duration-150 ease-out outline-none ' +
+    'hover:border-[#333333] ' +
+    'focus:border-[#10B981]/50 focus:bg-[#1A1A1A] focus:ring-1 focus:ring-[#10B981]/25 ' +
     'disabled:opacity-40 disabled:cursor-not-allowed'
   if (icon) {
     return (
       <div className="relative">
-        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none">
           {icon}
         </span>
-        <input ref={ref} className={`${base} pl-10 pr-4 ${className}`} {...rest} />
+        <input ref={ref} className={`${base} pl-9 pr-3 ${className}`} {...rest} />
       </div>
     )
   }
-  return <input ref={ref} className={`${base} px-4 ${className}`} {...rest} />
+  return <input ref={ref} className={`${base} px-3 ${className}`} {...rest} />
 })
 
 // ── PageHeader ──────────────────────────────────────────────────────
@@ -161,30 +155,29 @@ export function PageHeader({
 }: PageHeaderProps) {
   const alignCls = align === 'center' ? 'text-center items-center' : 'text-left'
   return (
-    <div className={`flex flex-col gap-3 ${alignCls} ${className}`}>
-      {kicker && (
-        <div
-          className="text-[11px] font-medium uppercase tracking-[0.14em]"
-          style={{ color: '#6B7280', fontFamily: 'var(--font-mono), monospace' }}
+    <div className={`flex items-start justify-between gap-6 ${className}`}>
+      <div className={`flex flex-col gap-1 min-w-0 ${alignCls}`}>
+        {kicker && (
+          <div
+            className="text-[10px] font-medium uppercase tracking-[0.12em] mb-1"
+            style={{ color: '#6B7280', fontFamily: 'var(--font-mono), monospace' }}
+          >
+            {kicker}
+          </div>
+        )}
+        <h1
+          className="text-[22px] font-semibold leading-[1.15]"
+          style={{ letterSpacing: '-0.018em', color: '#E5E7EB' }}
         >
-          {kicker}
-        </div>
-      )}
-      <h1
-        className="text-[34px] sm:text-[38px] font-semibold text-white leading-[1.05]"
-        style={{ letterSpacing: '-0.028em' }}
-      >
-        {title}
-      </h1>
-      {description && (
-        <p
-          className={`text-[14px] leading-[1.6] max-w-[640px] ${align === 'center' ? 'mx-auto' : ''}`}
-          style={{ color: '#A1A1AA' }}
-        >
-          {description}
-        </p>
-      )}
-      {actions && <div className={`flex items-center gap-2 mt-2 ${align === 'center' ? 'justify-center' : ''}`}>{actions}</div>}
+          {title}
+        </h1>
+        {description && (
+          <p className="text-[13px] leading-[1.55] max-w-[640px] mt-0.5" style={{ color: '#9CA3AF' }}>
+            {description}
+          </p>
+        )}
+      </div>
+      {actions && <div className="flex items-center gap-1.5 flex-shrink-0">{actions}</div>}
     </div>
   )
 }
