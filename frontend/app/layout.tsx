@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { IBM_Plex_Mono, Manrope } from 'next/font/google'
 import './globals.css'
 import Providers from './providers'
+import SiteTracker from '@/components/layout/SiteTracker'
 
 const manrope = Manrope({
   subsets: ['latin'],
@@ -28,7 +29,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
       </head>
       <body className="bg-zinc-950 text-zinc-100 antialiased font-sans">
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <SiteTracker />
+        </Providers>
       </body>
     </html>
   )
