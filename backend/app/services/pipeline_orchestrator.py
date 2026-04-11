@@ -11,6 +11,7 @@ import os
 
 import anthropic
 
+from app.services.anthropic_errors import is_anthropic_exception, log_and_classify
 from app.services.code_ingestion import ingest_github_repo
 from app.services.page_discovery import discover_pages
 from app.services.ui_evaluator import evaluate_all_pages
@@ -356,6 +357,14 @@ async def run_pipeline_v2(
             )
             return ev.page_path, result
         except Exception as e:
+            if is_anthropic_exception(e):
+                info = log_and_classify(e)
+                return ev.page_path, {
+                    "updated_code": "", "diff_summary": "", "change_annotations": [],
+                    "change_summary": [], "retries_used": 0,
+                    "error": info.user_message,
+                    "error_kind": info.kind,
+                }
             logger.error("Transform failed for %s: %s", ev.page_path, e, exc_info=True)
             return ev.page_path, {
                 "updated_code": "", "diff_summary": "", "change_annotations": [],

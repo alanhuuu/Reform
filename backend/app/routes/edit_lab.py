@@ -146,6 +146,7 @@ class ApplyResponse(BaseModel):
     updated_section_id: str | None = None
     session_expired: bool = False
     error: str | None = None
+    error_kind: str | None = None
 
 
 @router.post("/apply", response_model=ApplyResponse)
@@ -168,6 +169,7 @@ async def apply_endpoint(req: ApplyRequest):
             return ApplyResponse(
                 session_id=result.get("session_id", ""),
                 error=result["error"],
+                error_kind=result.get("error_kind"),
                 session_expired=bool(result.get("session_expired")),
             )
         return ApplyResponse(**result)

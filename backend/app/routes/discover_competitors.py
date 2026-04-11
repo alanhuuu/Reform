@@ -8,6 +8,7 @@ from app.schemas.discovery import (
     OnboardRequest,
     OnboardResponse,
 )
+from app.services.anthropic_errors import is_anthropic_exception, log_and_classify
 from app.services.competitor_analyzer import analyze_competitors
 from app.services.competitor_discovery import discover_competitors
 
@@ -24,6 +25,9 @@ async def discover_competitors_endpoint(request: DiscoverRequest):
     try:
         result = discover_competitors(request.project_description)
     except Exception as e:
+        if is_anthropic_exception(e):
+            info = log_and_classify(e)
+            raise HTTPException(status_code=info.http_status, detail=info.user_message)
         logger.error("Discovery failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Discovery failed: {e}")
 
@@ -40,6 +44,9 @@ async def onboard_and_analyze_endpoint(request: OnboardRequest):
     try:
         discovery = discover_competitors(request.project_description)
     except Exception as e:
+        if is_anthropic_exception(e):
+            info = log_and_classify(e)
+            raise HTTPException(status_code=info.http_status, detail=info.user_message)
         logger.error("Discovery failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Discovery failed: {e}")
 

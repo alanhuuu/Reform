@@ -16,6 +16,11 @@ from typing import Any, Optional
 
 import anthropic
 
+from app.services.anthropic_errors import (
+    classify_anthropic_error,
+    is_anthropic_exception,
+    log_and_classify,
+)
 from app.services.edit_lab_workspace import (
     EditLabSession,
     create_session,
@@ -713,5 +718,12 @@ async def apply_section_edit(
             "updated_section_id": updated_section_id,
         }
     except Exception as e:
+        if is_anthropic_exception(e):
+            info = log_and_classify(e)
+            return {
+                "session_id": sess.id,
+                "error": info.user_message,
+                "error_kind": info.kind,
+            }
         logger.error("Edit Lab apply failed: %s", e, exc_info=True)
         return {"session_id": sess.id, "error": f"Apply failed: {e}"}
