@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import FindingsShelf from '@/components/uxlab/FindingsShelf'
 import { apiUrl } from '@/lib/api'
-import { getSelectedRepo } from '@/lib/selectedRepo'
+import { getSelectedRepo, setSelectedRepo } from '@/lib/selectedRepo'
 import type { Finding, FindingSeverity, FindingType, UXLabSession } from '@/types/uxlab'
 
 interface Annotation {
@@ -466,6 +466,16 @@ export default function SimulationPage() {
   const [selectedScreen, setSelectedScreen] = useState<{ label: string; route: string } | null>(null)
   const [loadingScreens, setLoadingScreens] = useState(true)
   const [screensError, setScreensError] = useState<string | null>(null)
+  // Branch picker state — lives between Project Discovery and the UX
+  // transform run. Defaults to whatever the Discovery page wrote to
+  // sessionStorage (usually the repo default). Changing the branch
+  // invalidates cached analysis and refetches the page list.
+  const [currentBranch, setCurrentBranch] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'main'
+    return getSelectedRepo()?.branch || 'main'
+  })
+  const [repoBranches, setRepoBranches] = useState<{ name: string; protected: boolean }[]>([])
+  const [branchesLoading, setBranchesLoading] = useState(false)
   const [analysis, setAnalysis] = useState<UXLabSession | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
@@ -533,6 +543,43 @@ export default function SimulationPage() {
     }
   }, [loadingAnalysis]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load the repo's full branch list once, so the branch picker has
+  // something to show. Fires once per session once we know the repo and
+  // have a token.
+  useEffect(() => {
+    const selected = getSelectedRepo()
+    if (!selected?.url) return
+    const accessToken = (session as { accessToken?: string } | null)?.accessToken
+    if (!accessToken) return
+    const match = selected.url.match(/github\.com\/([^/]+)\/([^/]+)/)
+    if (!match) return
+    const owner = match[1]
+    const repo = match[2].replace(/\.git$/, '')
+    let cancelled = false
+    setBranchesLoading(true)
+    fetch(apiUrl('/github/list-branches'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ owner, repo, access_token: accessToken }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return
+        const list = Array.isArray(data.branches) ? data.branches : []
+        setRepoBranches(list)
+        // If sessionStorage lied about the branch (e.g., stale value from
+        // a deleted branch), fall back to the repo default.
+        if (list.length && !list.some((b: { name: string }) => b.name === currentBranch)) {
+          const fallback = data.default_branch || list[0].name
+          setCurrentBranch(fallback)
+          if (selected.url) setSelectedRepo(selected.url, fallback)
+        }
+      })
+      .catch(() => { /* non-fatal */ })
+      .finally(() => { if (!cancelled) setBranchesLoading(false) })
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session])
+
   useEffect(() => {
     const storedTransform = sessionStorage.getItem('refineui_transform')
     if (storedTransform) {
@@ -558,7 +605,6 @@ export default function SimulationPage() {
 
     const selected = getSelectedRepo()
     const repoUrl = selected?.url
-    const repoBranch = selected?.branch
 
     if (!repoUrl) {
       setScreensError('No repository connected.')
@@ -568,7 +614,7 @@ export default function SimulationPage() {
       return
     }
 
-    const pagesEndpoint = `${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}${repoBranch ? `&branch=${encodeURIComponent(repoBranch)}` : ''}`
+    const pagesEndpoint = `${apiUrl('/repo-pages')}?repo_url=${encodeURIComponent(repoUrl)}&branch=${encodeURIComponent(currentBranch)}`
 
     setLoadingScreens(true)
     setScreensError(null)
@@ -580,7 +626,7 @@ export default function SimulationPage() {
       })
       .then((data: { pages: { label: string; route: string }[] }) => {
         if (!data.pages.length) {
-          setScreensError('No pages found.')
+          setScreensError('No pages found on this branch.')
           setScreens([])
           setSelectedScreen(null)
         } else {
@@ -596,7 +642,8 @@ export default function SimulationPage() {
       .finally(() => {
         setLoadingScreens(false)
       })
-  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentBranch])
 
   useEffect(() => {
     if (!selectedScreen) return
@@ -767,6 +814,27 @@ export default function SimulationPage() {
     })
   }, [selectedScreen])
 
+  const handleBranchChange = useCallback((newBranch: string) => {
+    if (!newBranch || newBranch === currentBranch) return
+    const selected = getSelectedRepo()
+    if (!selected?.url) return
+    // Persist so downstream pages (transform run, UX Lab, page fetches)
+    // pick up the new branch via getSelectedRepo().
+    setSelectedRepo(selected.url, newBranch)
+    // Drop every cached artifact tied to the old branch — findings, the
+    // analysis cache keyed by route, and any in-flight transform result.
+    analysisCache.current = {}
+    try { sessionStorage.removeItem('refineui_analysis_cache') } catch { /* ignore */ }
+    try { sessionStorage.removeItem('refineui_transform') } catch { /* ignore */ }
+    setAnalysis(null)
+    setAnalysisError(null)
+    setFindings([])
+    setSelectedFindingIds(new Set())
+    setSelectedScreen(null)
+    setScreens([])
+    setCurrentBranch(newBranch)
+  }, [currentBranch])
+
   const handleApplyTransformation = useCallback(() => {
     const selected = getSelectedRepo()
     const repoUrl = selected?.url ?? ''
@@ -898,6 +966,45 @@ export default function SimulationPage() {
           style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
         >
           <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.4)' }}>
+                Branch
+              </span>
+              <select
+                value={currentBranch}
+                onChange={(event) => handleBranchChange(event.target.value)}
+                disabled={branchesLoading || repoBranches.length === 0}
+                title="Which branch Reform should analyze and transform"
+                className="rounded-xl py-1.5 text-xs font-medium outline-none"
+                style={{
+                  background: '#1c1a25',
+                  border: '1px solid rgba(74,68,85,0.3)',
+                  color: branchesLoading || repoBranches.length === 0
+                    ? 'rgba(230,224,240,0.35)'
+                    : 'rgba(230,224,240,0.85)',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  paddingLeft: '0.75rem',
+                  paddingRight: '2rem',
+                  maxWidth: 220,
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(204%2C195%2C216%2C0.45)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 10px center',
+                }}
+              >
+                {branchesLoading && repoBranches.length === 0 ? (
+                  <option value={currentBranch}>Loading branches…</option>
+                ) : repoBranches.length === 0 ? (
+                  <option value={currentBranch}>{currentBranch}</option>
+                ) : (
+                  repoBranches.map((b) => (
+                    <option key={b.name} value={b.name}>
+                      {b.name}{b.protected ? ' 🔒' : ''}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'rgba(204,195,216,0.4)' }}>
                 Screen

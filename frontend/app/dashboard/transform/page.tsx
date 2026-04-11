@@ -1675,8 +1675,16 @@ function TransformPage() {
                         </option>
                       )}
                       {repoBranches.map(b => (
-                        <option key={b.name} value={b.name} style={{ background: '#0d0c16', color: 'rgba(255,255,255,0.9)' }}>
-                          {b.name}{b.protected ? ' 🔒' : ''}
+                        <option
+                          key={b.name}
+                          value={b.name}
+                          disabled={b.protected}
+                          style={{
+                            background: '#0d0c16',
+                            color: b.protected ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.9)',
+                          }}
+                        >
+                          {b.name}{b.protected ? ' 🔒 (protected — direct commits blocked)' : ''}
                         </option>
                       ))}
                       {branchesLoading && (
