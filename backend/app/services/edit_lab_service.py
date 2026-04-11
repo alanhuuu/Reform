@@ -514,12 +514,11 @@ def _discover_available_pages(sess: EditLabSession) -> list[dict]:
         available.append({"name": p.name, "route": p.route, "path": p.path})
         sess.page_file_by_route[p.route] = p.path
 
-    # Always guarantee Home at "/"
-    if not any(p["route"] == "/" for p in available):
-        home = {"name": "Home", "route": "/", "path": sess.root_file or ""}
-        available.insert(0, home)
-        if sess.root_file:
-            sess.page_file_by_route["/"] = sess.root_file
+    # No forced Home injection. If the repo has a real page at "/" the
+    # discovery step already surfaced it (page_discovery names it "Home");
+    # if it doesn't, don't invent a duplicate tab. `sess.root_file` is
+    # still set independently and used as the fallback edit target when a
+    # section's source_file can't be resolved.
 
     available.sort(key=lambda p: (p["route"] != "/", p["route"]))
     return available
