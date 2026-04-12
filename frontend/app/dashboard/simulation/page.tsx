@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react'
 import FindingsShelf from '@/components/uxlab/FindingsShelf'
 import { apiUrl } from '@/lib/api'
 import { getSelectedRepo, setSelectedRepo } from '@/lib/selectedRepo'
+import { safeSetTransformCache } from '@/lib/transformCache'
 import type { Finding, FindingSeverity, FindingType, UXLabSession } from '@/types/uxlab'
 
 interface Annotation {
@@ -895,11 +896,11 @@ export default function SimulationPage() {
     })
       .then((r) => { if (!r.ok) throw new Error(`Transform failed: ${r.status}`); return r.json() })
       .then((result) => {
-        sessionStorage.setItem('refineui_transform', JSON.stringify({
+        safeSetTransformCache({
           multiPageResult: result,
           repoName: fullName,
           branch,
-        }))
+        })
         return result
       })
       .catch(() => null)

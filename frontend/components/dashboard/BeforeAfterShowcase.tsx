@@ -173,7 +173,14 @@ export default function BeforeAfterShowcase({
             ) : screenshot ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={`data:image/png;base64,${screenshot}`}
+                // The pipeline now uploads screenshots to S3 and returns
+                // presigned URLs, but old cached state may still hold raw
+                // base64. Detect by prefix so both forms render correctly.
+                src={
+                  screenshot.startsWith('http://') || screenshot.startsWith('https://')
+                    ? screenshot
+                    : `data:image/png;base64,${screenshot}`
+                }
                 alt={`${label} — ${pageName}`}
                 className="block"
                 style={fitWidth ? { width: '100%', height: 'auto' } : { maxWidth: 'none', height: 'auto' }}

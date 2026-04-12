@@ -90,6 +90,54 @@ def download_screenshot(key: str) -> str:
         return ""
 
 
+# Default presign TTL: 7 days. Long enough that any reasonable browser
+# session can keep displaying screenshots without re-fetching, short enough
+# that the bucket policy doesn't have to be public. AWS caps this at 7d
+# (604800s) for SigV4, so we sit just under the ceiling.
+_PRESIGN_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
+def presign_screenshot_url(key: str, expires_seconds: int = _PRESIGN_TTL_SECONDS) -> str:
+    """Generate a presigned GET URL for a screenshot key.
+
+    Returns "" on failure or if key is empty so callers can treat the absence
+    of a URL as "no preview" without a try/except at every site.
+    """
+    if not key:
+        return ""
+    try:
+        return _get_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": _bucket(), "Key": key},
+            ExpiresIn=expires_seconds,
+        )
+    except Exception as e:
+        logger.warning("Failed to presign screenshot %s: %s", key, e)
+        return ""
+
+
+def upload_screenshot_and_presign(
+    run_id: str,
+    page_path: str,
+    label: str,
+    b64_data: str,
+) -> tuple[str, str]:
+    """Upload a base64 screenshot and return (key, presigned_url).
+
+    Used by the live pipeline so screenshots never round-trip through
+    the frontend as base64 — they go S3 → presigned URL → <img src>.
+    Empty input → ("", ""), and a failed upload → ("", "") so callers
+    can treat both as "no preview".
+    """
+    if not b64_data:
+        return "", ""
+    key = upload_screenshot(run_id, page_path, label, b64_data)
+    if not key:
+        return "", ""
+    url = presign_screenshot_url(key)
+    return key, url
+
+
 # ─── Repo Snapshots ──────────────────────────────────────────────────
 
 def upload_snapshot(project_id: str, snapshot_id: str, files: list[dict]) -> str:

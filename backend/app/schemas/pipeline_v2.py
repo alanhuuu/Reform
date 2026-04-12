@@ -69,8 +69,14 @@ class PageTransformResult(BaseModel):
     diff_summary: str = ""
     change_annotations: list[dict] = []
     change_summary: list[str] = []
+    # Presigned S3 URL — pipeline uploads screenshots before returning so
+    # the response stays small and frontend renders via <img src> directly.
     before_screenshot: str = ""
     after_screenshot: str = ""
+    # S3 object keys forwarded to /projects/save-run for direct DB persistence
+    # without re-uploading.
+    before_screenshot_key: str = ""
+    after_screenshot_key: str = ""
     error: str = ""
     retries_used: int = 0
 

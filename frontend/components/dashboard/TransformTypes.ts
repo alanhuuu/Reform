@@ -36,8 +36,15 @@ export interface TransformedPageData {
   diff_summary?: string
   change_annotations?: ChangeAnnotation[]
   change_summary?: string[]
+  // Presigned S3 URL — pipeline uploads screenshots before returning so
+  // the response stays small. Older cached state may still contain raw
+  // base64; renderers detect by prefix.
   before_screenshot?: string
   after_screenshot?: string
+  // S3 object keys for the screenshots above. Forwarded to /projects/save-run
+  // so the backend can persist them without re-uploading.
+  before_screenshot_key?: string
+  after_screenshot_key?: string
   error?: string
   retries_used?: number
 }

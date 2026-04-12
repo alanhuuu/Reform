@@ -16,7 +16,12 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_db
 from app.models import Project, RepoSnapshot, TransformRun, PageResult
-from app.services.s3_client import download_screenshot, upload_snapshot, upload_screenshot
+from app.services.s3_client import (
+    download_screenshot,  # legacy callers — kept until removed
+    presign_screenshot_url,
+    upload_screenshot,
+    upload_snapshot,
+)
 from app.services.subscription import (
     check_subscription_active,
     get_or_create_subscription,
@@ -25,6 +30,17 @@ from app.services.subscription import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _looks_like_url(value: str) -> bool:
+    """Cheap discriminator between a presigned-S3 URL and a base64 PNG blob.
+
+    Used by /save-run to skip the legacy re-upload path when the caller has
+    already uploaded the screenshot itself (the modern flow). Base64 PNGs
+    always start with `iVBOR` (the standard PNG header in base64), so any
+    `http://` / `https://` prefix is unambiguous.
+    """
+    return value.startswith("http://") or value.startswith("https://")
 
 
 # ─── Request/Response Schemas ────────────────────────────────────────
@@ -64,8 +80,10 @@ class PageResultResponse(BaseModel):
     diff_summary: str
     change_annotations: list
     change_summary: list
-    before_screenshot: str  # base64 — fetched from S3
-    after_screenshot: str   # base64 — fetched from S3
+    # Presigned S3 URL — frontend renders directly via <img src>.
+    # Empty string when the screenshot was never captured.
+    before_screenshot: str
+    after_screenshot: str
     error: str
     retries_used: int
 
@@ -251,12 +269,9 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
         if snap:
             framework = snap.framework
 
-    # Build page responses — fetch screenshots from S3
+    # Build page responses — emit presigned S3 URLs (not base64).
     pages = []
     for pr in run.page_results:
-        before_b64 = download_screenshot(pr.before_screenshot_key) if pr.before_screenshot_key else ""
-        after_b64 = download_screenshot(pr.after_screenshot_key) if pr.after_screenshot_key else ""
-
         pages.append(PageResultResponse(
             page_path=pr.page_path,
             page_name=pr.page_name,
@@ -268,8 +283,8 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
             diff_summary=pr.diff_summary,
             change_annotations=pr.change_annotations or [],
             change_summary=pr.change_summary or [],
-            before_screenshot=before_b64,
-            after_screenshot=after_b64,
+            before_screenshot=presign_screenshot_url(pr.before_screenshot_key),
+            after_screenshot=presign_screenshot_url(pr.after_screenshot_key),
             error=pr.error,
             retries_used=pr.retries_used,
         ))
@@ -339,8 +354,6 @@ async def get_latest_run_by_commit(
 
     pages = []
     for pr in run.page_results:
-        before_b64 = download_screenshot(pr.before_screenshot_key) if pr.before_screenshot_key else ""
-        after_b64 = download_screenshot(pr.after_screenshot_key) if pr.after_screenshot_key else ""
         pages.append(PageResultResponse(
             page_path=pr.page_path,
             page_name=pr.page_name,
@@ -352,8 +365,8 @@ async def get_latest_run_by_commit(
             diff_summary=pr.diff_summary,
             change_annotations=pr.change_annotations or [],
             change_summary=pr.change_summary or [],
-            before_screenshot=before_b64,
-            after_screenshot=after_b64,
+            before_screenshot=presign_screenshot_url(pr.before_screenshot_key),
+            after_screenshot=presign_screenshot_url(pr.after_screenshot_key),
             error=pr.error,
             retries_used=pr.retries_used,
         ))
@@ -440,14 +453,23 @@ async def save_run(req: SaveRunRequest, db: AsyncSession = Depends(get_db)):
     db.add(run)
     await db.flush()
 
-    # 4. Create page results and upload screenshots to S3
+    # 4. Create page results, persisting S3 keys for screenshots.
+    #
+    # Modern callers (pipeline_orchestrator + /re-render) already uploaded
+    # the screenshots to S3 and pass the keys through as
+    # `before_screenshot_key` / `after_screenshot_key`. In that case we just
+    # write the keys straight to the DB — no re-upload, no base64 round trip.
+    #
+    # The legacy fallback (base64 in `before_screenshot` / `after_screenshot`)
+    # stays in place for any client we haven't shipped yet, so this stays
+    # backwards-compatible during the deploy window.
     for page in req.pages:
-        before_key = ""
-        after_key = ""
+        before_key = page.get("before_screenshot_key") or ""
+        after_key = page.get("after_screenshot_key") or ""
 
-        if page.get("before_screenshot"):
+        if not before_key and page.get("before_screenshot") and not _looks_like_url(page["before_screenshot"]):
             before_key = upload_screenshot(str(run.id), page["page_path"], "before", page["before_screenshot"])
-        if page.get("after_screenshot"):
+        if not after_key and page.get("after_screenshot") and not _looks_like_url(page["after_screenshot"]):
             after_key = upload_screenshot(str(run.id), page["page_path"], "after", page["after_screenshot"])
 
         pr = PageResult(

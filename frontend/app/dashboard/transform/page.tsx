@@ -14,6 +14,7 @@ import TransformCarousel from '@/components/dashboard/TransformCarousel'
 import RepoWideImprovementsPanel from '@/components/dashboard/RepoWideImprovementsPanel'
 import { adaptLegacyResult } from '@/components/dashboard/TransformTypes'
 import type { MultiPageTransformResult } from '@/components/dashboard/TransformTypes'
+import { safeSetTransformCache } from '@/lib/transformCache'
 
 interface CommitEntry {
   hash: string
@@ -1159,11 +1160,11 @@ function TransformPage() {
           }
           setMultiPageResult(adapted)
           setPipelineStep('complete')
-          sessionStorage.setItem('refineui_transform', JSON.stringify({
+          safeSetTransformCache({
             multiPageResult: adapted,
             repoName: repo.full_name,
             branch,
-          }))
+          })
           console.info('Loaded cached transform for', repo.full_name, 'at', headSha.slice(0, 7))
           return
         }
@@ -1277,12 +1278,15 @@ function TransformPage() {
       setMultiPageResult(result)
       setPipelineStep('complete')
 
-      // Save for session persistence (legacy)
-      sessionStorage.setItem('refineui_transform', JSON.stringify({
+      // Save for session persistence (legacy). Uses safeSetTransformCache
+      // because the full payload (base64 screenshots + per-page code) can
+      // exceed the ~5 MB sessionStorage quota — the helper degrades by
+      // stripping screenshots/code rather than throwing.
+      safeSetTransformCache({
         multiPageResult: result,
         repoName: repo.full_name,
         branch: repo.default_branch || 'main',
-      }))
+      })
 
       // Save to database + S3 for permanent persistence
       if (session?.githubId) {
@@ -1495,7 +1499,13 @@ function TransformPage() {
             if (renderData.after_screenshot && multiPageResult) {
               const updatedPages = multiPageResult.pages.map(p =>
                 p.page_path === selectedTarget
-                  ? { ...p, after_screenshot: renderData.after_screenshot, before_screenshot: renderData.before_screenshot || p.before_screenshot }
+                  ? {
+                      ...p,
+                      after_screenshot: renderData.after_screenshot,
+                      before_screenshot: renderData.before_screenshot || p.before_screenshot,
+                      after_screenshot_key: renderData.after_screenshot_key || p.after_screenshot_key,
+                      before_screenshot_key: renderData.before_screenshot_key || p.before_screenshot_key,
+                    }
                   : p
               )
               setMultiPageResult({ ...multiPageResult, pages: updatedPages })

@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 
 import anthropic
 
@@ -20,6 +21,7 @@ from app.services.transform_validator import validate_transformation
 from app.services.syntax_validator import validate_transformed_code
 from app.services.js_parser_validator import validate_jsx_parseable
 from app.services.multi_page_renderer import render_multi_page_previews
+from app.services.s3_client import upload_screenshot_and_presign
 from app.prompts.structural_transform_prompt import (
     build_structural_transform_prompt,
     build_transform_system_prompt,
@@ -333,6 +335,13 @@ async def run_pipeline_v2(
     pipeline_errors: list[str] = []
     di = design_intelligence or {}
 
+    # Stable per-run prefix used as the S3 key root for this run's
+    # screenshots. Generated up front so the orchestrator can upload
+    # screenshots to S3 the moment they're captured and return URLs
+    # (not base64) — keeps the response payload small enough to fit
+    # in browser sessionStorage and database rows.
+    pipeline_run_id = str(uuid.uuid4())
+
     # ── Step 1: Ingest ──────────────────────────────────────────────
     logger.info("Pipeline v2: Ingesting %s (branch: %s)", github_url, branch)
     repo_data = await ingest_github_repo(github_url, branch, access_token)
@@ -468,6 +477,31 @@ async def run_pipeline_v2(
         perr = sdata.get("preview_error", "")
         logger.info("Screenshots for %s: before=%s after=%s error=%s", path, has_before, has_after, perr or "none")
 
+    # ── Step 6.5: Upload screenshots to S3 ─────────────────────────
+    # Replace the inline base64 blobs with presigned URLs so the
+    # response payload stays small (a 5-page run with screenshots
+    # was ~6-12 MB of base64; this drops it to a few KB of URLs).
+    # We mutate screenshot_results in place so the existing
+    # aggregation loop below picks up the URLs and keys without
+    # any further changes.
+    for path, sdata in screenshot_results.items():
+        before_b64 = sdata.get("before_screenshot", "")
+        after_b64 = sdata.get("after_screenshot", "")
+        before_key, before_url = await asyncio.to_thread(
+            upload_screenshot_and_presign, pipeline_run_id, path, "before", before_b64,
+        )
+        after_key, after_url = await asyncio.to_thread(
+            upload_screenshot_and_presign, pipeline_run_id, path, "after", after_b64,
+        )
+        # Overwrite the base64 fields with the presigned URL. The frontend
+        # auto-detects URL vs base64, so existing rendering paths keep
+        # working. The *_key fields are passed through to /projects/save-run
+        # so the database persists the S3 key directly without re-uploading.
+        sdata["before_screenshot"] = before_url
+        sdata["after_screenshot"] = after_url
+        sdata["before_screenshot_key"] = before_key
+        sdata["after_screenshot_key"] = after_key
+
     # ── Step 7: Aggregate results ───────────────────────────────────
     page_results = []
 
@@ -506,6 +540,8 @@ async def run_pipeline_v2(
             "change_summary": result.get("change_summary", []),
             "before_screenshot": screenshots.get("before_screenshot", ""),
             "after_screenshot": screenshots.get("after_screenshot", ""),
+            "before_screenshot_key": screenshots.get("before_screenshot_key", ""),
+            "after_screenshot_key": screenshots.get("after_screenshot_key", ""),
             "error": result.get("error", "") or screenshots.get("preview_error", ""),
             "retries_used": result.get("retries_used", 0),
         })
