@@ -164,21 +164,6 @@ export default function TransformCarousel({
           {/* Clean header — no badges */}
         </div>
 
-        {/* Weak transformation banner */}
-        {current.status === 'weak' && (
-          <div className="mx-8 mt-2 mb-4 rounded-xl px-5 py-3.5 flex items-start gap-3" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}>
-            <svg className="flex-shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            <div>
-              <p className="text-[12px] font-semibold" style={{ color: '#fbbf24' }}>Weak transformation</p>
-              <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                The transformation engine could not produce a dramatically different result for this page. The change may be subtle. Try using &quot;Refine Further&quot; to push it further.
-              </p>
-            </div>
-          </div>
-        )}
-
         {/* HERO: Before/After — full-width, oversized */}
         {isPagePreviewAvailable(current) && (
           <div className="px-8 pt-2 pb-8">
@@ -188,7 +173,6 @@ export default function TransformCarousel({
               pageName={current.page_name}
               previewAvailable={true}
               afterPulse={afterPulse}
-              afterError={current.status === 'transformed' || current.status === 'weak' ? current.error : ''}
             />
           </div>
         )}
