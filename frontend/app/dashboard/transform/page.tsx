@@ -1112,6 +1112,9 @@ function TransformPage() {
     setPipelineError(''); setGateError(null); setRepoName(repo.full_name); setRepoBranch(repo.default_branch || 'main')
     const branch = repo.default_branch || 'main'
 
+    // Show loading immediately so the user gets instant visual feedback.
+    setPipelineStep('ingesting')
+
     // Persist the selection so the user isn't re-prompted in future tabs.
     const repoUrl = repo.html_url || `https://github.com/${repo.full_name}`
     setSelectedRepo(repoUrl, branch)
@@ -1177,7 +1180,6 @@ function TransformPage() {
     setPipelineStartedAt(pipelineStartTs)
     try { localStorage.setItem('refineui_pipeline_started_at', String(pipelineStartTs)) } catch { /* */ }
 
-    setPipelineStep('ingesting')
     try {
       let uxLabFindings: unknown[] | null = null
       try {
