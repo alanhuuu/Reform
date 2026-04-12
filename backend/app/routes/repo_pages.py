@@ -103,20 +103,16 @@ def _app_router_label(path: str) -> tuple:
 
 def _pages_router_label(path: str) -> tuple:
     """Convert a Pages Router page path to a (label, route) tuple."""
-    # Strip any leading prefix up to and including pages/, then strip extension
     inner = re.sub(r'^(?:[^/]+/)*pages/', '', path)
     inner = re.sub(r'\.[jt]sx?$', '', inner)
-    # index at root → Home
     if inner == 'index':
         return ('Home', '/')
-    # Split by /
     segments = inner.split('/')
     labels = []
     route_parts = []
     for seg in segments:
         if seg == 'index':
             continue
-        # Skip dynamic segments like [param] — can't iframe without real ID
         if re.match(r'^\[.*\]$', seg):
             return None
         labels.append(_segment_label(seg))
@@ -125,6 +121,45 @@ def _pages_router_label(path: str) -> tuple:
         return ('Home', '/')
     label = ' / '.join(labels)
     route = '/' + '/'.join(route_parts)
+    return (label, route)
+
+
+def _is_spa_page(path: str) -> bool:
+    """Match SPA page patterns: files in pages/views/screens/routes dirs,
+    or PascalCase files ending in Page/Screen/View/Route."""
+    if not re.search(r'\.[jt]sx?$', path):
+        return False
+    basename = path.split('/')[-1]
+    if basename.startswith('_') or basename in ('index.js', 'index.jsx', 'index.ts', 'index.tsx'):
+        return False
+    if 'test' in basename.lower() or 'spec' in basename.lower():
+        return False
+    if basename in ('App.js', 'App.jsx', 'App.tsx', 'App.ts',
+                    'main.tsx', 'main.jsx', 'main.ts', 'main.js',
+                    'setupTests.js', 'reportWebVitals.js', 'firebase.js', 'vite-env.d.ts'):
+        return False
+    # Next.js src/pages/ is handled by _is_pages_router_page — skip here
+    if '/src/pages/' not in path and not path.startswith('src/pages/'):
+        page_dirs = re.compile(r'(?:^|/)(?:pages|views|screens|routes)/')
+        if page_dirs.search(path):
+            return True
+    name_no_ext = re.sub(r'\.[jt]sx?$', '', basename)
+    if re.match(r'^[A-Z][A-Za-z0-9]*(Page|Screen|View|Route)$', name_no_ext):
+        return True
+    return False
+
+
+def _spa_page_label(path: str) -> tuple | None:
+    """Convert a SPA page path to a (label, route) tuple."""
+    basename = path.split('/')[-1]
+    name = re.sub(r'\.[jt]sx?$', '', basename)
+    if name.startswith('[') or name.startswith('_'):
+        return None
+    spaced = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', name)
+    label = _segment_label(spaced)
+    route = f"/{name}"
+    if name.lower() in ('home', 'homepage', 'landing', 'main'):
+        route = "/"
     return (label, route)
 
 
@@ -153,6 +188,8 @@ def get_repo_pages(
             result = _app_router_label(path)
         elif _is_pages_router_page(path):
             result = _pages_router_label(path)
+        elif _is_spa_page(path):
+            result = _spa_page_label(path)
         else:
             continue
 
@@ -165,6 +202,6 @@ def get_repo_pages(
             pages.append({"label": label, "route": route})
 
     if not pages:
-        raise HTTPException(status_code=404, detail="No Next.js pages found in this repository")
+        raise HTTPException(status_code=404, detail="No pages found in this repository")
 
     return {"pages": pages}
