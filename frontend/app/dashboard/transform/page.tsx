@@ -907,70 +907,17 @@ function TransformPage() {
   }, [pipelineStep])
 
   useEffect(() => {
-    if (repos.length > 0 || pipelineStep !== 'idle') return
-    if (!session?.githubId && !session?.accessToken) return
-
-    let cancelled = false
-    setLoadingRepos(true)
-
-    // Try the GitHub App-installed repos first (per-repo scoped). If the
-    // user has no installations OR the App isn't configured, fall back to
-    // the OAuth-listing path so existing users keep working unchanged.
-    const loadRepos = async () => {
-      let appRepos: GithubRepo[] = []
-      if (session?.githubId) {
-        try {
-          const res = await fetch(apiUrl(`/github-app/repos?github_user_id=${encodeURIComponent(session.githubId)}`))
-          if (res.ok) {
-            const data = await res.json()
-            if (Array.isArray(data?.repos) && data.repos.length > 0) {
-              appRepos = data.repos as GithubRepo[]
-            }
-          }
-        } catch { /* fall through to OAuth listing */ }
-      }
-      if (cancelled) return
-      if (appRepos.length > 0) {
-        setRepos(appRepos)
-        setLoadingRepos(false)
-        return
-      }
-      // OAuth fallback (legacy users with the `repo` scope)
-      if (!session?.accessToken) {
-        setLoadingRepos(false)
-        return
-      }
-      try {
-        const res = await fetch('https://api.github.com/user/repos?sort=updated&per_page=50&affiliation=owner,collaborator', {
-          headers: { Authorization: `Bearer ${session.accessToken}` },
-        })
-        const data = await res.json()
-        if (!cancelled) setRepos(Array.isArray(data) ? data : [])
-      } catch { /* swallow — picker will show empty state */ }
-      finally {
-        if (!cancelled) setLoadingRepos(false)
-      }
+    if (session?.accessToken && repos.length === 0 && pipelineStep === 'idle') {
+      setLoadingRepos(true)
+      fetch('https://api.github.com/user/repos?sort=updated&per_page=50&affiliation=owner,collaborator', {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+        .then(r => r.json())
+        .then(data => { setRepos(Array.isArray(data) ? data : []); setLoadingRepos(false) })
+        .catch(() => setLoadingRepos(false))
     }
-
-    loadRepos()
-    return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.accessToken, session?.githubId, pipelineStep])
-
-  // Open the GitHub App install flow in a new tab. After the user picks
-  // repos, GitHub redirects them to /github-app/callback which links the
-  // installation to their account, then bounces back to the dashboard.
-  const openGithubAppInstall = useCallback(async () => {
-    if (!session?.githubId) return
-    try {
-      const res = await fetch(apiUrl(`/github-app/install-url?github_user_id=${encodeURIComponent(session.githubId)}`))
-      if (!res.ok) return
-      const data = await res.json()
-      if (data?.install_url) {
-        window.open(data.install_url, '_blank', 'noopener,noreferrer')
-      }
-    } catch { /* swallow — button is best-effort */ }
-  }, [session?.githubId])
+  }, [session?.accessToken, pipelineStep])
 
   // Fetch the repo's branch list once the pipeline lands on a completed
   // state. Powers the "push target" dropdown on the Publish toolbar — the
@@ -979,10 +926,7 @@ function TransformPage() {
   // stale branches.
   useEffect(() => {
     if (pipelineStep !== 'complete') return
-    if (!repoName) return
-    // Either an OAuth token (legacy users) OR a github_user_id (App users)
-    // is enough — the backend resolver picks whichever is usable.
-    if (!session?.accessToken && !session?.githubId) return
+    if (!session?.accessToken || !repoName) return
     const [owner, repo] = repoName.split('/')
     if (!owner || !repo) return
     let cancelled = false
@@ -991,12 +935,7 @@ function TransformPage() {
     setPublishTarget('__new__')
     fetch(apiUrl('/github/list-branches'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        owner,
-        repo,
-        access_token: session?.accessToken || '',
-        github_user_id: session?.githubId || '',
-      }),
+      body: JSON.stringify({ owner, repo, access_token: session.accessToken }),
     })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -1006,7 +945,7 @@ function TransformPage() {
       .catch(() => { /* non-fatal — the dropdown just shows the default option */ })
       .finally(() => { if (!cancelled) setBranchesLoading(false) })
     return () => { cancelled = true }
-  }, [pipelineStep, session?.accessToken, session?.githubId, repoName])
+  }, [pipelineStep, session?.accessToken, repoName])
 
   const autoStartedRef = useRef(false)
 
@@ -1445,7 +1384,7 @@ function TransformPage() {
               pages_transformed: pages.map(p => p.page_path),
               summary_text: multiPageResult?.global_summary?.[0] || null,
             },
-            access_token: session.accessToken || '',
+            access_token: session.accessToken,
             github_user_id: session.githubId,
           }),
         })
@@ -1666,25 +1605,6 @@ function TransformPage() {
                 {session && !loadingRepos && filteredRepos.length === 0 && <div className="px-5 py-8 text-center"><p className="text-[13px]" style={{ color: 'rgba(255,255,255,0.25)' }}>No repositories found</p></div>}
                 {!session && <div className="px-5 py-8 text-center"><p className="text-[13px]" style={{ color: 'rgba(255,255,255,0.35)' }}>Sign in with GitHub to see your repositories</p></div>}
               </div>
-              {session && (
-                <div className="px-5 py-3 flex items-center justify-between gap-3" style={{ borderTop: '1px solid rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.01)' }}>
-                  <p className="text-[11px] leading-snug" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                    Don&apos;t see a repo? Reform can be installed on individual repositories without granting access to your whole account.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={openGithubAppInstall}
-                    className="flex-shrink-0 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-colors"
-                    style={{
-                      background: 'rgba(168,85,247,0.12)',
-                      border: '1px solid rgba(168,85,247,0.3)',
-                      color: '#c4b5fd',
-                    }}
-                  >
-                    Connect repos
-                  </button>
-                </div>
-              )}
             </div>
             {(gateError || pipelineError) && (
               <div className="mt-3">

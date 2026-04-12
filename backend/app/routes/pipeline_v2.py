@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_optional_db
 from app.schemas.pipeline_v2 import TransformRepoV2Request
-from app.services.github_app_auth import resolve_github_token
 from app.services.pipeline_orchestrator import run_pipeline_v2
 from app.services.subscription import get_or_create_subscription, increment_scan_usage
 
@@ -45,18 +44,6 @@ async def transform_repo_v2(
         sub = await get_or_create_subscription(db, req.github_user_id)
         await increment_scan_usage(db, sub)
 
-    # Resolve the best GitHub token for this repo: prefer a GitHub App
-    # installation token (per-repo scope), fall back to the OAuth token
-    # the frontend forwarded. Done outside the stream so any failure
-    # surfaces as a normal HTTP error before the NDJSON loop starts.
-    repo_full_name = req.github_url.replace("https://github.com/", "").replace(".git", "").strip("/")
-    effective_token = await resolve_github_token(
-        db=db,
-        repo_full_name=repo_full_name,
-        github_user_id=req.github_user_id or None,
-        fallback_oauth_token=req.access_token,
-    )
-
     async def event_stream():
         # Kick off the real work as a background task so we can yield
         # heartbeats on a timer while it runs. asyncio.shield prevents
@@ -64,7 +51,7 @@ async def transform_repo_v2(
         task = asyncio.create_task(run_pipeline_v2(
             github_url=req.github_url,
             branch=req.branch,
-            access_token=effective_token or req.access_token,
+            access_token=req.access_token,
             design_intelligence=req.design_intelligence,
             user_intent=req.user_intent,
             quality_threshold=req.quality_threshold,

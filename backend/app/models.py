@@ -139,26 +139,6 @@ class UXLabSession(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
-class GithubAppInstallation(Base):
-    """Tracks a GitHub App installation granted by a user.
-
-    A user can have multiple installations — typically one for their personal
-    account and one per organization they're a member of. The `account_login`
-    is the GitHub login (user or org) that owns the installation, used at
-    runtime to map a `repo_full_name` ("owner/repo") to the installation that
-    can mint tokens for it.
-    """
-    __tablename__ = "github_app_installations"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    github_user_id = Column(String, nullable=False, index=True)
-    installation_id = Column(String, nullable=False, index=True)
-    account_login = Column(String, nullable=False, index=True)  # owner GitHub login
-    account_type = Column(String, nullable=False, default="User")  # "User" | "Organization"
-    created_at = Column(DateTime(timezone=True), default=_utcnow)
-    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
-
-
 class SiteVisit(Base):
     """Tracks individual page visit durations for analytics."""
     __tablename__ = "site_visits"
