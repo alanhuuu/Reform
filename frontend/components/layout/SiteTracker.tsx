@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { apiUrl } from '@/lib/api'
 
-const HEARTBEAT_INTERVAL = 30_000
+const HEARTBEAT_INTERVAL = 60_000
 
 export default function SiteTracker() {
   const sessionStartRef = useRef(Date.now())

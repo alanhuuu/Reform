@@ -32,6 +32,19 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+# Suppress noisy uvicorn access-log lines that provide no diagnostic value
+# but eat Railway's 500 logs/sec budget (heartbeats, CORS preflight).
+class _QuietAccessFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "/analytics/heartbeat" in msg:
+            return False
+        if "OPTIONS " in msg:
+            return False
+        return True
+
+logging.getLogger("uvicorn.access").addFilter(_QuietAccessFilter())
+
 _logger = logging.getLogger(__name__)
 
 # ── Startup env validation ─────────────────────────────────────────────
