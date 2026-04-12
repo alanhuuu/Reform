@@ -187,8 +187,6 @@ def _has_client_router(files: list[dict]) -> bool:
         content = f.get("content") or ""
         if not content:
             continue
-        # Cheap substring checks — false positives here are acceptable, since
-        # erring toward "has router" just keeps current behavior.
         for pat in _ROUTER_IMPORT_PATTERNS:
             if pat in content:
                 return True
@@ -196,6 +194,88 @@ def _has_client_router(files: list[dict]) -> bool:
             if pat in content:
                 return True
     return False
+
+
+def _extract_router_route_map(files: list[dict]) -> dict[str, str]:
+    """Parse router files to map page file paths to their actual URL routes.
+
+    Scans files that import a client router for <Route path="..." element/component>
+    definitions, resolves component imports back to file paths, and returns
+    {file_path: route_path}.
+
+    This is what fixes "/SeedSelectionPage" → "/cards" for SPA repos.
+    """
+    file_lookup: dict[str, dict] = {}
+    for f in files:
+        file_lookup[f["path"]] = f
+        for prefix in ("src/", "frontend/", "client/", "app/", "web/"):
+            if f["path"].startswith(prefix):
+                file_lookup[f["path"][len(prefix):]] = f
+
+    file_path_to_route: dict[str, str] = {}
+
+    for f in files:
+        content = f.get("content") or ""
+        if not content:
+            continue
+        has_router = any(pat in content for pat in _ROUTER_IMPORT_PATTERNS)
+        has_routes_jsx = any(pat in content for pat in ("<Route", "createBrowserRouter", "path:"))
+        if not (has_router and has_routes_jsx):
+            continue
+
+        router_dir = "/".join(f["path"].split("/")[:-1])
+
+        # Step 1: resolve imports → component name → file path
+        component_to_file: dict[str, str] = {}
+        for m in re.finditer(r'''import\s+(\w+)\s+from\s+['"]([^'"]+)['"]''', content):
+            comp_name, import_path = m.group(1), m.group(2)
+            if import_path.startswith("./") or import_path.startswith("../"):
+                parts = (router_dir + "/" + import_path).split("/")
+                normalized: list[str] = []
+                for p in parts:
+                    if p == "..":
+                        if normalized:
+                            normalized.pop()
+                    elif p != ".":
+                        normalized.append(p)
+                resolved = "/".join(normalized)
+            elif import_path.startswith("@/"):
+                resolved = import_path[2:]
+            else:
+                continue
+            for ext in ("", ".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts"):
+                full = resolved + ext
+                if full in file_lookup:
+                    component_to_file[comp_name] = file_lookup[full]["path"]
+                    break
+
+        # Step 2: extract <Route path="..." element={<Comp />} />
+        # Search a short window after each <Route to avoid cross-matching.
+        for m in re.finditer(r"<Route\s", content):
+            chunk = content[m.start() : m.start() + 500]
+            path_m = re.search(r'''path\s*=\s*['"]([^'"]+)['"]''', chunk)
+            elem_m = re.search(r"element\s*=\s*\{?\s*<(\w+)", chunk)
+            comp_m = re.search(r"component\s*=\s*\{(\w+)\}", chunk)
+            if not path_m:
+                continue
+            route_path = path_m.group(1)
+            comp_name = (elem_m.group(1) if elem_m else comp_m.group(1)) if (elem_m or comp_m) else None
+            if not comp_name or route_path == "*":
+                continue
+            if comp_name in component_to_file:
+                file_path_to_route[component_to_file[comp_name]] = route_path
+
+        # Step 3: handle createBrowserRouter object syntax
+        # { path: "/cards", element: <SeedSelectionPage /> }
+        for m in re.finditer(
+            r'''path\s*:\s*['"]([^'"]+)['"]\s*,[\s\S]*?element\s*:\s*<(\w+)''',
+            content,
+        ):
+            route_path, comp_name = m.group(1), m.group(2)
+            if route_path != "*" and comp_name in component_to_file:
+                file_path_to_route[component_to_file[comp_name]] = route_path
+
+    return file_path_to_route
 
 
 def _looks_like_react_entry(content: str) -> bool:
@@ -367,6 +447,34 @@ def discover_pages(
             route=route,
             framework=page_framework,
         ))
+
+    # For SPA pages with a client router, resolve actual routes from
+    # <Route path="..." /> definitions instead of using filename-based routes.
+    # Without this, a page at src/pages/SeedSelectionPage.tsx gets route
+    # "/SeedSelectionPage" instead of the real "/cards" — and the screenshot
+    # renderer navigates to a non-existent route (showing homepage for everything).
+    if framework == "spa" and _has_client_router(files):
+        route_map = _extract_router_route_map(files)
+        if route_map:
+            seen_routes_updated: set[str] = set()
+            updated_pages: list[DiscoveredPage] = []
+            for page in pages:
+                if page.path in route_map:
+                    actual_route = route_map[page.path]
+                    logger.info(
+                        "Router override: %s route %s → %s",
+                        page.path, page.route, actual_route,
+                    )
+                    page = DiscoveredPage(
+                        name=page.name,
+                        path=page.path,
+                        route=actual_route,
+                        framework=page.framework,
+                    )
+                if page.route not in seen_routes_updated:
+                    seen_routes_updated.add(page.route)
+                    updated_pages.append(page)
+            pages = updated_pages
 
     # Single-page SPA collapse: if we matched SPA "pages" but the repo has no
     # client router, those matches are almost always sections stacked inside
