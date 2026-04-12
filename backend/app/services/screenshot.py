@@ -70,10 +70,15 @@ _ERROR_SIGNALS = (
     "Module not found",
     "Cannot find module",
     "Unhandled Runtime Error",
+    "Runtime Error",
     "Application error",
     "Internal Server Error",
     "TypeError:",
     "ReferenceError:",
+    "Error:",
+    "is required",
+    "access token",
+    "API key",
 )
 
 
