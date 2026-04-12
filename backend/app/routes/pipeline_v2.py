@@ -64,6 +64,10 @@ async def transform_repo_v2(
                 await asyncio.wait_for(asyncio.shield(task), timeout=_HEARTBEAT_INTERVAL_SECONDS)
             except asyncio.TimeoutError:
                 yield json.dumps({"type": "heartbeat"}) + "\n"
+            except Exception:
+                # Task finished with an exception during wait_for —
+                # fall through so task.result() below handles it.
+                break
 
         try:
             result = task.result()
