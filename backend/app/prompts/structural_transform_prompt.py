@@ -1,10 +1,48 @@
 """
 Transformation prompt — REBUILD mode.
-The model must treat every page as a layout rebuild from scratch,
-not an edit of the existing structure.
+
+Philosophy: structural rebuild, visual inheritance. The model rebuilds the
+JSX tree from scratch (new wrappers, new grouping, new hierarchy), but
+inherits the original's visual identity (colors, type feel, radii, shadows,
+spacing primitives). Same product, a better-structured version of itself —
+not a redesign, not a re-brand.
 """
 
 import json
+
+
+# ── Score-driven rebuild playbook ─────────────────────────────────────
+# Each weak dimension maps to concrete structural moves the model can
+# actually execute. Replaces the generic "rebuild this dimension aggressively"
+# directive that was producing templated, non-targeted output.
+_DIMENSION_MOVES = {
+    "layout_structure": (
+        "Introduce semantic wrappers (header / main / section / aside) the original is missing. "
+        "Regroup content into clearly-bounded card panels. Break single-column stacks into grids "
+        "where content is parallel."
+    ),
+    "visual_hierarchy": (
+        "Promote exactly one primary heading per section. Demote secondary actions to text or "
+        "ghost buttons. Establish real size contrast — titles 2-3× the body text, not 1.1×."
+    ),
+    "spacing_consistency": (
+        "Pick ONE section gap, ONE card padding, ONE grid gap — and use them everywhere. "
+        "Kill arbitrary margins. Rhythm over density."
+    ),
+    "cta_clarity": (
+        "Exactly one dominant CTA per view — prominent placement, solid color, larger size. "
+        "Every other action demoted. No CTA competition."
+    ),
+    "component_quality": (
+        "Upgrade primitive containers: stats become card grids with big numbers and small "
+        "uppercase labels; lists become bordered cards with divide-y rows; forms become "
+        "grouped sections with clear field spacing."
+    ),
+    "information_density": (
+        "Decompress. Every element gets room to breathe. Break dense regions into distinct "
+        "sections. If a region feels cramped at first glance, it is — add space."
+    ),
+}
 
 
 def _compute_weakest_dimensions(breakdown: dict) -> list[tuple[str, int]]:
@@ -17,32 +55,54 @@ def _compute_weakest_dimensions(breakdown: dict) -> list[tuple[str, int]]:
 
 
 def build_transform_system_prompt() -> str:
-    """System prompt that sets REBUILD mode. Short, absolute, non-negotiable."""
-    return """You are a UI rebuild engine. You do NOT edit UIs — you REBUILD them from scratch.
+    """
+    System prompt: rebuild structure, inherit visual identity.
 
-CORE RULE: Ignore the original JSX layout structure entirely. Extract the data (props, state, variables, content) and the actions (handlers, callbacks, navigation), then build a completely new layout using modern best practices.
+    The model should rebuild the JSX tree from scratch while keeping the
+    original's colors, typography, radii, shadows, and spacing primitives.
+    The result is the same product, better organized — not a redesign.
+    """
+    return """You are a UI rebuild engine. You rebuild the STRUCTURE of a page from scratch while inheriting its VISUAL IDENTITY.
 
-The original layout is WRONG. Do not preserve it. Do not slightly modify it. Build a new one.
+CORE PRINCIPLE — two layers, one rebuilt, one preserved:
+
+1. STRUCTURE — REBUILD from scratch.
+   The JSX tree, element hierarchy, how content is grouped, where things sit on the page, section boundaries, wrapper elements, nesting. Discard the original layout and build a new one.
+
+2. VISUAL IDENTITY — INHERIT from the original.
+   The color palette, typography scale, border radii, shadow style, spacing primitives, iconography, dark/light mode. Whatever Tailwind classes the original uses for colors, fonts, and surface treatments — REUSE them. Do not swap the palette. Do not change the type feel. Do not redesign the brand.
+
+The result is the same product, shipped by a more experienced team. A user should recognize their app immediately — but the layout should be dramatically better organized. Not a redesign. Not a re-brand. A structural rebuild wearing the original's skin.
 
 REBUILD PROCESS:
-1. Read the original code and identify: data, state, props, handlers, imports, exports
-2. DISCARD the original JSX layout — pretend it doesn't exist
-3. Build a new JSX layout from scratch using the same data and handlers
-4. The new layout must use: semantic sections (header/main/section/aside), card containers, proper grid systems, generous spacing, clear visual hierarchy
+1. Read the original and extract three things:
+   (a) logic — imports, exports, hooks, state, props, types, handlers
+   (b) content — headings, labels, copy, dynamic data expressions
+   (c) visual tokens actually used — color classes (`bg-slate-900`, `text-indigo-600`), radii (`rounded-2xl`), shadows (`shadow-lg`), type weights, theme (dark/light)
+2. Discard the original JSX layout entirely.
+3. Rebuild a new JSX tree from scratch — new wrappers, new grouping, new hierarchy, new section boundaries.
+4. When styling the new layout, REUSE the visual tokens from step 1(c). Inherit the brand. Do not invent a new palette.
 
-WHAT "REBUILD" MEANS:
-- The JSX tree structure must be fundamentally different
-- New wrapper elements that did not exist before (header, main, section, aside, cards)
-- Different element nesting and grouping
-- Different component placement and flow
-- The before and after must look like different products
+WHAT A REBUILD LOOKS LIKE:
+- The JSX tag sequence is fundamentally different — new wrappers, new nesting depth, new children arrangement.
+- New semantic elements that did not exist before (header / main / section / aside wrappers, card containers).
+- Content regrouped into bounded panels with clear boundaries.
+- Different flow — single-column stacks become grids, loose lists become bordered cards with divide-y rows.
+- Same data, same handlers, same colors — rearranged structure.
 
-HARD CONSTRAINTS:
-- Keep ALL imports, exports, hooks, state, handlers, props, types — do not change logic
-- Same component name and file export
-- No new npm dependencies
-- Use Tailwind CSS classes
-- Return the COMPLETE file — not a snippet
+HARD CONSTRAINTS (never violate):
+- Preserve every import, export, hook call, state declaration, handler, prop, and type. Logic is untouched.
+- Same component name. Same default export.
+- No new npm dependencies. Use only imports that already exist in the file.
+- Use Tailwind CSS classes. Prefer the ones the original already uses for color, type, radius, and shadow.
+- Return the COMPLETE rebuilt file, not a snippet or a diff.
+
+SYNTAX SAFETY — the output must parse as TypeScript/JSX on the first try:
+- Every opening tag has a matching closing tag. Self-closing tags end with `/>`.
+- Every `{` inside JSX has a matching `}`. Count them before returning.
+- No Python syntax leaking in: no `True` / `False` / `None`, no f-strings, no `def`, no tuples as JSX children.
+- Do not break destructuring, spread, or template literals you did not intend to change.
+- If you cannot confidently rebuild a fragment without breaking its JSX, leave that fragment structurally intact and rebuild around it.
 
 OUTPUT: Return ONLY valid JSON, no markdown fences."""
 
@@ -59,13 +119,14 @@ def build_structural_transform_prompt(
     ux_lab_findings: list[dict] | None = None,
     previous_syntax_error: str = "",
 ) -> str:
-    """User-message prompt with the code, evaluation, and rebuild directives."""
+    """User-message prompt with score-driven rebuild instructions."""
     score = evaluation.get("score", 50)
     issues = evaluation.get("issues", [])
     reasoning = evaluation.get("reasoning", "")
     breakdown = evaluation.get("breakdown", {})
 
-    # Score-driven: identify weakest dimensions
+    # Score-driven: each weak dimension gets a concrete rebuild move
+    # instead of a generic "rebuild aggressively" directive.
     weakest = _compute_weakest_dimensions(breakdown)
     weak_dims = [(n, s) for n, s in weakest if s < 95]
 
@@ -73,9 +134,10 @@ def build_structural_transform_prompt(
     if weak_dims:
         lines = []
         for name, sc in weak_dims[:4]:
-            n = name.replace("_", " ").title()
-            lines.append(f"- {n}: {sc}/100 — REBUILD this dimension aggressively")
-        weak_section = "WEAKEST DIMENSIONS (target these hardest):\n" + "\n".join(lines)
+            label = name.replace("_", " ").title()
+            move = _DIMENSION_MOVES.get(name, "Rebuild this dimension.")
+            lines.append(f"- {label} ({sc}/100)\n  {move}")
+        weak_section = "PRIORITY MOVES (target the weakest dimensions first):\n" + "\n".join(lines)
 
     issues_text = ""
     if issues:
@@ -85,16 +147,23 @@ def build_structural_transform_prompt(
         ]
         issues_text = "ISSUES TO FIX:\n" + "\n".join(issue_lines)
 
-    # Design intelligence — keep brief
+    # Design intelligence — framed as "use these tokens", not "here's a dump".
     di = design_intelligence or {}
     di_text = ""
     if di.get("design_tokens") or di.get("recommendations"):
         di_parts = []
         if di.get("design_tokens"):
-            di_parts.append(f"Design tokens: {json.dumps(di['design_tokens'], indent=2)[:1500]}")
+            di_parts.append(
+                "Design tokens — USE THESE for colors, typography, radii, and shadows. "
+                "Do not invent a new palette:\n"
+                + json.dumps(di["design_tokens"], indent=2)[:1500]
+            )
         if di.get("recommendations"):
-            di_parts.append(f"Recommendations: {json.dumps(di['recommendations'])[:500]}")
-        di_text = "\n".join(di_parts)
+            di_parts.append(
+                "Structural recommendations to apply:\n"
+                + json.dumps(di["recommendations"])[:500]
+            )
+        di_text = "\n\n".join(di_parts)
 
     intent_line = f"\nUSER INTENT: {user_intent}" if user_intent else ""
 
@@ -108,40 +177,38 @@ def build_structural_transform_prompt(
             recommendation = f.get("recommendation", "")
             lines.append(f"- [{severity}] {component} — \"{title}\"\n  Fix: {recommendation}")
         ux_findings_text = (
-            "## UX LAB FINDINGS — MUST FIX (TOP PRIORITY)\n"
-            "These issues were identified by UX analysis and MUST be visibly addressed in the rebuild. Do not skip any.\n\n"
+            "## UX LAB FINDINGS — MUST FIX\n"
+            "These issues were identified by UX analysis. Each one must be visibly addressed "
+            "in the rebuild.\n\n"
             + "\n\n".join(lines)
         )
 
+    # Retry block — factual and specific. No "REJECTED" theatrics. The goal
+    # is a more careful next attempt, not a more frantic one.
     retry_block = ""
     if is_retry:
         if previous_syntax_error:
             retry_block = f"""
-⚠️ ATTEMPT {attempt_number} — PREVIOUS ATTEMPT REJECTED (SYNTAX ERROR)
-
-Your previous output was REJECTED because it contained invalid JavaScript:
+ATTEMPT {attempt_number}. The previous attempt failed to parse as TypeScript/JSX:
 
     {previous_syntax_error}
 
-This code would have crashed the Next.js dev server. The file is TypeScript/JSX,
-not Python — no tuples, no f-strings, no `True`/`False`/`None`, no `print`, no
-`def`, balanced braces. Fix the specific problem above AND produce the same
-level of structural rebuild.
+This is a .tsx file. Common causes: unclosed tag, unbalanced `{{` / `}}`, a stray `:` or `,` where
+JSX expects a child, mismatched quotes, or Python literals leaking in (`True`/`False`/`None`).
+Fix the specific error above, keep the rebuild quality high, and re-balance braces and tags
+before returning.
 """
         else:
             retry_block = f"""
-⚠️ ATTEMPT {attempt_number} — PREVIOUS ATTEMPT REJECTED
-
-Your previous output was REJECTED because the before/after looked too similar.
-The layout structure was too close to the original.
-
-This time: DO NOT reference the original layout AT ALL.
-Start from a blank page. Place elements in a completely new arrangement.
-The result must pass this test: "Does this look like a different product?"
-If no → you will be rejected again.
+ATTEMPT {attempt_number}. The previous attempt was structurally too close to the original —
+the JSX tag sequence barely changed. This time, rebuild MORE of the tree:
+- Add new wrapper elements (header / main / section / aside) that did not exist before.
+- Regroup content into new card containers with clear boundaries.
+- Change how top-level children are nested and ordered.
+Visual identity stays the same (same colors, same fonts, same radii). Only the STRUCTURE changes.
 """
 
-    return f"""{retry_block}REBUILD this page. Score: {score}/100.
+    return f"""{retry_block}Rebuild this page. Current score: {score}/100.
 
 {weak_section}
 
@@ -149,11 +216,10 @@ If no → you will be rejected again.
 
 {ux_findings_text}
 
-Assessment: {reasoning}
-
+Evaluation reasoning: {reasoning}
 {intent_line}
 
-## ORIGINAL CODE — extract data and handlers, then DISCARD the layout
+## ORIGINAL CODE — extract logic, content, and visual tokens, then rebuild the structure
 File: {target_path}
 ```tsx
 {target_code}
@@ -164,105 +230,56 @@ File: {target_path}
 
 {f"## DESIGN INTELLIGENCE{chr(10)}{di_text}" if di_text else ""}
 
-## REBUILD REQUIREMENTS
+## REBUILD CHECKLIST
 
-1. LAYOUT: Create a new page structure with semantic wrappers (header, main, section).
-   Use a max-width container (max-w-7xl mx-auto). Group content into card panels.
-   If the original is single-column, make it multi-column or grid-based.
+Layout
+- New top-level wrapper structure. Prefer semantic elements (header, main, section, aside).
+- Add a max-width container if the original lacks one.
+- Group related content into bounded card panels with consistent borders and padding.
+- If the original is single-column, move parallel content into a grid where it makes sense.
 
-2. SPACING: Generous spacing throughout. Section gaps: space-y-10 or larger.
-   Card padding: p-6 minimum (p-8 preferred). Grid gaps: gap-6 minimum.
-   NO cramped layouts. Double whatever the original had.
+Hierarchy
+- Exactly one primary heading per section. Demote the rest.
+- Exactly one dominant CTA per view. Other actions become text or ghost buttons.
+- Real typographic contrast — titles visibly larger and heavier than body text.
 
-3. HIERARCHY: ONE primary heading per section (text-2xl+ font-bold).
-   Clear typographic scale: title > section heading > body > caption.
-   ONE dominant CTA per page — large, colored, prominent position.
-   All other actions demoted to text or outlined buttons.
+Spacing rhythm
+- Pick one section gap (e.g., `space-y-8`, `space-y-10`, `space-y-12`) and use it throughout.
+- Pick one card padding (e.g., `p-6`, `p-8`) and use it throughout.
+- Pick one grid / list gap (e.g., `gap-4`, `gap-6`) and use it throughout.
+- No arbitrary margins. Rhythm over density.
 
-4. COMPONENTS: Stats → card grid with large bold numbers + tiny uppercase labels.
-   Lists → card-wrapped sections with divide-y rows + metadata.
-   Forms → grouped sections with proper labels and spacing.
-   Buttons → properly sized (px-6 py-3) with hover states.
+Components
+- Stats / KPIs → card grid with large numbers and small uppercase labels.
+- Lists → card-bounded with divide-y rows and proper padding.
+- Forms → grouped into labeled sections with space between fields.
+- Buttons → consistent sizing, obvious hover states.
 
-5. CLUTTER: Remove visual noise. Simplify dense areas. Every element earns its space.
+Visual identity — INHERIT, do not change
+- Keep the color palette the original uses. Dark theme stays dark. Indigo stays indigo.
+- Keep the border-radius style (if the original uses `rounded-2xl`, stay `rounded-2xl`).
+- Keep the shadow style and density.
+- Keep the font feel and weight vocabulary.
+- Do not swap Tailwind color families. Do not introduce a new accent.
 
-## EXAMPLE — this is the level of change required
-
-BEFORE (flat, cramped, multi-CTA):
-```tsx
-<div className="p-4">
-  <h1>Dashboard</h1>
-  <div>Users: {{users}}</div>
-  <div>Revenue: ${{revenue}}</div>
-  <button onClick={{refresh}}>Refresh</button>
-  <button onClick={{exportData}}>Export</button>
-  <button onClick={{addUser}}>Add User</button>
-  <ul>{{items.map(i => <li key={{i.id}}>{{i.name}} - {{i.status}}</li>)}}</ul>
-</div>
-```
-
-AFTER (structured, spacious, single primary CTA):
-```tsx
-<div className="min-h-screen bg-slate-50">
-  <header className="border-b bg-white px-8 py-6">
-    <div className="max-w-7xl mx-auto flex items-center justify-between">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-sm text-slate-500 mt-1">Overview</p>
-      </div>
-      <button onClick={{addUser}} className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700">
-        + Add User
-      </button>
-    </div>
-  </header>
-  <main className="max-w-7xl mx-auto px-8 py-10 space-y-10">
-    <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div className="bg-white rounded-2xl border p-8">
-        <p className="text-xs font-medium uppercase tracking-wider text-slate-400">Users</p>
-        <p className="text-4xl font-bold text-slate-900 mt-2">{{users}}</p>
-      </div>
-      <div className="bg-white rounded-2xl border p-8">
-        <p className="text-xs font-medium uppercase tracking-wider text-slate-400">Revenue</p>
-        <p className="text-4xl font-bold text-slate-900 mt-2">${{revenue}}</p>
-      </div>
-    </section>
-    <section className="bg-white rounded-2xl border overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-5 border-b">
-        <h2 className="text-lg font-semibold">Activity</h2>
-        <div className="flex gap-2">
-          <button onClick={{refresh}} className="text-sm text-slate-500 hover:text-slate-900">Refresh</button>
-          <button onClick={{exportData}} className="text-sm text-slate-500 hover:text-slate-900">Export</button>
-        </div>
-      </div>
-      <ul className="divide-y">
-        {{items.map(i => (
-          <li key={{i.id}} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50">
-            <span className="font-medium text-slate-900">{{i.name}}</span>
-            <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-600">{{i.status}}</span>
-          </li>
-        ))}}
-      </ul>
-    </section>
-  </main>
-</div>
-```
-
-Note: COMPLETELY different JSX tree. New header/main/section wrappers. Stats in card grid. List in card with header. One primary CTA. Same data + handlers.
-
-YOUR OUTPUT must show this level of structural difference.
+Logic — PRESERVE exactly
+- Every import stays. Every export stays. Every hook call stays.
+- Every handler stays bound to the same action it handled in the original.
+- Every JSX expression that references dynamic data — `{{variable}}`, `{{fn()}}`, `{{list.map(...)}}` — appears somewhere in the rebuilt tree.
+- Component name and default export are unchanged.
 
 ## OUTPUT FORMAT
 
-Return ONLY this JSON:
+Return ONLY this JSON, no markdown fences:
 {{
   "updated_code": "the COMPLETE rebuilt file",
-  "diff_summary": "1 sentence: what the user sees differently (no code terms)",
+  "diff_summary": "1 sentence in plain English — what the user sees differently",
   "change_annotations": [
     {{
       "region": "section name",
       "change_type": "layout|hierarchy|spacing|cta|component|clutter",
-      "description": "visible change (no code terms)",
-      "ux_impact": "why it's better"
+      "description": "visible change in plain English",
+      "ux_impact": "why it's better for the user"
     }}
   ],
   "change_summary": ["visible improvement in plain English"]
