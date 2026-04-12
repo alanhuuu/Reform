@@ -802,6 +802,24 @@ async def accept_last_edit(session_id: str) -> dict:
     }
 
 
+def get_session_repo_full_name(session_id: str) -> str:
+    """Return `owner/repo` for an Edit Lab session, or "" if not found.
+
+    Used by the route layer to feed the GitHub App token resolver before
+    calling publish_session_edits — the route doesn't otherwise know which
+    repo a session is bound to.
+    """
+    if not session_id:
+        return ""
+    sess = get_registry().get(session_id)
+    if not sess:
+        return ""
+    match = re.search(r"github\.com/([^/]+)/([^/.]+)(?:\.git)?/?$", sess.github_url)
+    if not match:
+        return ""
+    return f"{match.group(1)}/{match.group(2)}"
+
+
 async def publish_session_edits(
     session_id: str,
     access_token: str,

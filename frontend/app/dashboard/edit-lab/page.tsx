@@ -352,6 +352,7 @@ export default function EditLabPage() {
             github_url: repoState.url,
             branch: repoState.branch,
             access_token: accessToken,
+            github_user_id: githubUserId,
           }),
         })
         if (!res.ok) throw new Error(`Load failed (${res.status})`)

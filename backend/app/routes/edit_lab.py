@@ -5,9 +5,11 @@ session_id so repeated edits skip the clone/install/boot cycle.
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import get_optional_db
 from app.services.edit_lab_service import (
     accept_last_edit,
     apply_section_edit,
@@ -16,6 +18,11 @@ from app.services.edit_lab_service import (
     publish_session_edits,
     revert_last_edit,
 )
+from app.services.github_app_auth import resolve_github_token
+
+
+def _repo_full_name(github_url: str) -> str:
+    return github_url.replace("https://github.com/", "").replace(".git", "").strip("/")
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/edit-lab")
@@ -25,6 +32,7 @@ class LoadRequest(BaseModel):
     github_url: str
     branch: str = "main"
     access_token: str = ""
+    github_user_id: str = ""
 
 
 class SectionRect(BaseModel):
@@ -74,12 +82,21 @@ class LoadResponse(BaseModel):
 
 
 @router.post("/load", response_model=LoadResponse)
-async def load_endpoint(req: LoadRequest):
+async def load_endpoint(
+    req: LoadRequest,
+    db: AsyncSession | None = Depends(get_optional_db),
+):
     try:
+        effective_token = await resolve_github_token(
+            db=db,
+            repo_full_name=_repo_full_name(req.github_url),
+            github_user_id=req.github_user_id or None,
+            fallback_oauth_token=req.access_token,
+        )
         result = await load_current_preview(
             github_url=req.github_url,
             branch=req.branch,
-            access_token=req.access_token,
+            access_token=effective_token or req.access_token,
         )
         if result.get("error"):
             return LoadResponse(
@@ -151,11 +168,28 @@ class PublishResponse(BaseModel):
 
 
 @router.post("/publish", response_model=PublishResponse)
-async def publish_endpoint(req: PublishRequest):
+async def publish_endpoint(
+    req: PublishRequest,
+    db: AsyncSession | None = Depends(get_optional_db),
+):
     try:
+        # The edit-lab session itself owns the repo URL, so derive the
+        # repo_full_name from the active session for the resolver.
+        from app.services.edit_lab_service import get_session_repo_full_name
+        repo_full_name = ""
+        try:
+            repo_full_name = get_session_repo_full_name(req.session_id) or ""
+        except Exception:
+            pass
+        effective_token = await resolve_github_token(
+            db=db,
+            repo_full_name=repo_full_name,
+            github_user_id=req.github_user_id or None,
+            fallback_oauth_token=req.access_token,
+        )
         result = await publish_session_edits(
             session_id=req.session_id,
-            access_token=req.access_token,
+            access_token=effective_token or req.access_token,
             github_user_id=req.github_user_id,
         )
         if result.get("error"):

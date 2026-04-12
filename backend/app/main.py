@@ -26,6 +26,7 @@ from app.routes.billing import router as billing_router
 from app.routes.webhook import router as webhook_router
 from app.routes.edit_lab import router as edit_lab_router
 from app.routes.analytics import router as analytics_router
+from app.routes.github_app import router as github_app_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -117,6 +118,7 @@ app.include_router(billing_router)
 app.include_router(webhook_router)
 app.include_router(edit_lab_router)
 app.include_router(analytics_router)
+app.include_router(github_app_router)
 
 
 @app.get("/health")

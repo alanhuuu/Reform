@@ -550,8 +550,11 @@ export default function SimulationPage() {
   useEffect(() => {
     const selected = getSelectedRepo()
     if (!selected?.url) return
-    const accessToken = (session as { accessToken?: string } | null)?.accessToken
-    if (!accessToken) return
+    const accessToken = (session as { accessToken?: string } | null)?.accessToken || ''
+    const githubUserId = (session as { githubId?: string } | null)?.githubId || ''
+    // Either an OAuth token (legacy) or a github_user_id (App users) lets
+    // the backend resolve a usable token. Bail only if we have neither.
+    if (!accessToken && !githubUserId) return
     const match = selected.url.match(/github\.com\/([^/]+)\/([^/]+)/)
     if (!match) return
     const owner = match[1]
@@ -560,7 +563,7 @@ export default function SimulationPage() {
     setBranchesLoading(true)
     fetch(apiUrl('/github/list-branches'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ owner, repo, access_token: accessToken }),
+      body: JSON.stringify({ owner, repo, access_token: accessToken, github_user_id: githubUserId }),
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {

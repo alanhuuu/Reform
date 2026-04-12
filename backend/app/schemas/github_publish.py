@@ -37,7 +37,11 @@ class PublishBranchResponse(BaseModel):
 class ListBranchesRequest(BaseModel):
     owner: str
     repo: str
-    access_token: str
+    # OAuth fallback token. Optional now that the GitHub App can mint a
+    # per-repo installation token; absent when the user has installed the
+    # App and the frontend doesn't have an OAuth token to send.
+    access_token: str = ""
+    github_user_id: str = ""
 
 
 class BranchInfo(BaseModel):
